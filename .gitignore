@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Prisma generated client
+src/generated/prisma/
+
+# Frontend build
+frontend/dist/
+
+# TypeScript build metadata
+*.tsbuildinfo
+
+# Runtime/build output
+coverage/
+.netlify/
+dist/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

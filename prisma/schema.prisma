@@ -1,0 +1,355 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  runtime  = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ProjectStatus {
+  DRAFT
+  GENERATING
+  READY
+  BUILDING
+  TESTING
+  REVIEWING
+  FIXING
+  SYNCING
+  FAILED
+}
+
+enum ArtifactType {
+  REQUIREMENTS
+  ARCHITECTURE
+  DATABASE
+  API
+  PLAN
+  CODE
+  REVIEW
+  BUILD
+  TEST
+}
+
+enum AgentStatus {
+  DISCONNECTED
+  CONNECTED
+  BUSY
+  ERROR
+}
+
+enum RunStatus {
+  QUEUED
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+enum RunOperation {
+  GENERATE
+  BUILD
+  TEST
+  REVIEW
+  FIX
+  FILE_READ
+  FILE_WRITE
+  FILE_DELETE
+  TERMINAL
+  GIT_STATUS
+  GIT_DIFF
+  GIT_COMMIT
+  GIT_PUSH
+  GIT_PULL
+  GIT_CLONE
+  SYNC
+}
+
+enum AgentJobStatus {
+  QUEUED
+  RUNNING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
+enum AgentJobType {
+  FILE_READ
+  FILE_WRITE
+  FILE_DELETE
+  FILE_RENAME
+  TERMINAL
+  BUILD
+  TEST
+  GIT_STATUS
+  GIT_DIFF
+  GIT_COMMIT
+  GIT_PUSH
+  GIT_PULL
+  GIT_CLONE
+  WATCH
+}
+
+enum AIProviderType {
+  OPENROUTER
+  OPENAI
+  GEMINI
+  ANTHROPIC
+  CUSTOM
+}
+
+enum ProjectVisibility {
+  PRIVATE
+  PUBLIC
+}
+
+enum GitProvider {
+  GITHUB
+}
+
+enum GitSyncStatus {
+  NOT_CONNECTED
+  CONNECTED
+  AHEAD
+  BEHIND
+  DIVERGED
+  CLEAN
+  DIRTY
+  ERROR
+}
+
+enum ProjectRole {
+  OWNER
+  ADMIN
+  DEVELOPER
+  REVIEWER
+  VIEWER
+}
+
+model User {
+  id                   String          @id @default(cuid())
+  githubId             String          @unique
+  githubUsername       String?
+  githubName           String?
+  email                String?
+  avatarUrl            String?
+  githubAccessTokenEnc String?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  projects             Project[]
+  memberships          ProjectMember[]
+  sessions             Session[]
+  agents               LocalAgent[]
+  aiProviders          AIProvider[]
+  auditLogs            AuditLog[]
+  airequests           AIRequest[]
+
+  @@index([githubUsername])
+  @@index([email])
+}
+
+model Session {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Project {
+  id               String            @id @default(cuid())
+  userId           String
+  name             String
+  description      String?
+  stack            String?
+  status           ProjectStatus     @default(DRAFT)
+  visibility       ProjectVisibility @default(PRIVATE)
+  gitProvider      GitProvider?
+  githubOwner      String?
+  githubRepository String?
+  githubBranch     String            @default("main")
+  githubRepoId     String?
+  localProjectId   String?
+  localPath        String?
+  localAgentId     String?
+  gitSyncStatus    GitSyncStatus     @default(NOT_CONNECTED)
+  lastSyncedAt     DateTime?
+  settings         Json?
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  localAgent       LocalAgent?       @relation(fields: [localAgentId], references: [id], onDelete: SetNull)
+  artifacts        Artifact[]
+  runs             ProjectRun[]
+  agentJobs        AgentJob[]
+  gitRepositories  GitRepository[]
+  members          ProjectMember[]
+  aiRequests       AIRequest[]
+
+  @@index([userId])
+  @@index([userId, status])
+  @@index([localAgentId])
+  @@index([githubOwner, githubRepository])
+}
+
+model ProjectMember {
+  id        String      @id @default(cuid())
+  projectId String
+  userId    String
+  role      ProjectRole @default(VIEWER)
+  createdAt DateTime    @default(now())
+  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+model Artifact {
+  id        String       @id @default(cuid())
+  projectId String
+  type      ArtifactType
+  name      String
+  content   Json
+  version   Int          @default(1)
+  createdAt DateTime     @default(now())
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([projectId, type, createdAt])
+}
+
+model ProjectRun {
+  id         String       @id @default(cuid())
+  projectId  String
+  operation  RunOperation
+  status     RunStatus    @default(QUEUED)
+  input      Json?
+  output     Json?
+  error      String?
+  startedAt  DateTime?
+  createdAt  DateTime     @default(now())
+  finishedAt DateTime?
+  project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@index([status])
+}
+
+model AIProvider {
+  id        String         @id @default(cuid())
+  userId    String
+  provider  AIProviderType
+  label     String
+  enabled   Boolean        @default(true)
+  model     String?
+  apiKeyEnc String?
+  baseUrl   String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([userId, enabled])
+}
+
+model AIRequest {
+  id            String         @id @default(cuid())
+  userId        String
+  projectId     String?
+  provider      AIProviderType
+  model         String?
+  task          String
+  inputTokens   Int            @default(0)
+  outputTokens  Int            @default(0)
+  totalTokens   Int            @default(0)
+  latencyMs     Int?
+  estimatedCost Decimal?       @db.Decimal(18, 8)
+  status        String
+  error         String?
+  createdAt     DateTime       @default(now())
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project       Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([projectId, createdAt])
+}
+
+model LocalAgent {
+  id            String      @id @default(cuid())
+  userId        String
+  agentName     String
+  machineName   String?
+  platform      String?
+  architecture  String?
+  version       String?
+  status        AgentStatus @default(DISCONNECTED)
+  tokenHash     String?
+  pairedAt      DateTime?
+  connectedAt   DateTime?
+  lastSeenAt    DateTime?
+  capabilities  Json?
+  workspaceRoot String?
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projects      Project[]
+  jobs          AgentJob[]
+
+  @@index([userId])
+  @@index([userId, status])
+}
+
+model AgentJob {
+  id         String         @id @default(cuid())
+  projectId  String
+  agentId    String
+  type       AgentJobType
+  status     AgentJobStatus @default(QUEUED)
+  input      Json?
+  output     Json?
+  error      String?
+  createdAt  DateTime       @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+  project    Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  agent      LocalAgent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@index([agentId, status])
+}
+
+model GitRepository {
+  id            String      @id @default(cuid())
+  projectId     String
+  provider      GitProvider @default(GITHUB)
+  owner         String
+  repository    String
+  githubRepoId  String?
+  defaultBranch String      @default("main")
+  connected     Boolean     @default(true)
+  lastSyncAt    DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  project       Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, owner, repository])
+  @@index([projectId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String?
+  entityId   String?
+  metadata   Json?
+  ipHash     String?
+  createdAt  DateTime @default(now())
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([entityType, entityId, createdAt])
+}

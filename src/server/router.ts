@@ -18,16 +18,16 @@ export async function handleApi(req: Request) {
       path = u.pathname.replace(/^\/api\/?/, "");
     if (path === "auth/github" && req.method === "GET") {
       const state = randomToken();
-      const cookie = `devforge_oauth=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600; ${process.env.NODE_ENV === "production" ? "Secure;" : ""}`;
+      const oauthCookie = `devforge_oauth=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600; ${process.env.NODE_ENV === "production" ? "Secure;" : ""}`;
       const r = redirect(githubLoginUrl(state), 302);
-      r.headers.set("set-cookie", cookie);
+      r.headers.set("set-cookie", oauthCookie);
       return r;
     }
     if (path === "auth/github/callback" && req.method === "GET") {
       const code = u.searchParams.get("code"),
         state = u.searchParams.get("state");
-      const cookie = req.headers.get("cookie") || "";
-      const expected = cookie
+      const requestCookie = req.headers.get("cookie") || "";
+      const expected = requestCookie
         .split(";")
         .map((x) => x.trim())
         .find((x) => x.startsWith("devforge_oauth="))
@@ -37,7 +37,7 @@ export async function handleApi(req: Request) {
       const token = await exchange(code);
       const profile = await githubUser(token);
       const user = await upsertGithubUser(token, profile);
-      const cookie = await createSession({
+      const sessionCookie = await createSession({
         id: user.id,
         githubUsername: user.githubUsername,
         githubName: user.githubName,
@@ -46,7 +46,7 @@ export async function handleApi(req: Request) {
       });
       return new Response(null, {
         status: 302,
-        headers: { Location: process.env.APP_URL || "/", "Set-Cookie": cookie },
+        headers: { Location: process.env.APP_URL || "/", "Set-Cookie": sessionCookie },
       });
     }
     if (path === "auth/logout" && req.method === "POST") {
@@ -141,7 +141,7 @@ export async function handleApi(req: Request) {
     if (path === "ai/providers" && req.method === "GET")
       return json({
         success: true,
-        providers: await prisma.aiProvider.findMany({
+        providers: await prisma.aIProvider.findMany({
           where: { userId: user.id },
           select: {
             id: true,

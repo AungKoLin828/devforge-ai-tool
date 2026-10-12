@@ -10,8 +10,13 @@ export async function owner(id: string, userId: string) {
     where: { id },
   });
 
-  if (!project) throw new Error("Project not found");
-  if (project.userId !== userId) throw new Error("Forbidden");
+  if (!project) {
+    throw new Error("Project not found");
+  }
+
+  if (project.userId !== userId) {
+    throw new Error("Forbidden");
+  }
 
   return project;
 }
@@ -19,7 +24,6 @@ export async function owner(id: string, userId: string) {
 export const list = (userId: string) =>
   prisma.project.findMany({
     where: { userId },
-    orderBy: { updatedAt: "desc" },
   });
 
 export async function create(
@@ -32,37 +36,39 @@ export async function create(
 ) {
   const name = input.name?.trim();
 
-  if (!name) throw new Error("Project name is required");
+  if (!name) {
+    throw new Error("Project name is required");
+  }
 
-  const project = await prisma.project.create({
-    data: {
-      userId,
-      name: name.slice(0, 120),
-      description: input.description?.trim() || undefined,
-      stack: input.stack?.trim() || undefined,
-    },
-  });
-
-  try {
-    await prisma.projectMember.create({
+  const project = await prisma.$transaction(async (tx) => {
+    const createdProject = await tx.project.create({
       data: {
-        projectId: project.id,
+        userId,
+        name: name.slice(0, 120),
+        description: input.description?.trim() || undefined,
+        stack: input.stack?.trim() || undefined,
+      },
+    });
+
+    await tx.projectMember.create({
+      data: {
+        projectId: createdProject.id,
         userId,
         role: "OWNER",
       },
     });
-  } catch (error) {
-    // Roll back the project if owner membership creation fails.
-    await prisma.project.delete({ where: { id: project.id } });
-    throw error;
-  }
+
+    return createdProject;
+  });
 
   return project;
 }
 
 /**
- * Starts generation without waiting for OpenRouter to finish.
- * A Netlify Background Function performs the actual AI request.
+ * Start generation without waiting for the AI provider.
+ *
+ * Creates a ProjectRun and invokes the Netlify Background Function.
+ * The API can return immediately instead of waiting for OpenRouter.
  */
 export async function startGenerateProject(
   id: string,
@@ -70,16 +76,14 @@ export async function startGenerateProject(
   prompt: string,
   provider: Provider = "OPENROUTER",
 ) {
-  const project = await owner(id, userId);
   const cleanPrompt = prompt.trim();
 
-  if (!cleanPrompt) throw new Error("Prompt is required");
-  if (cleanPrompt.length > 30000) {
-    throw new Error("Prompt must be 30,000 characters or fewer");
+  if (!cleanPrompt) {
+    throw new Error("Prompt is required");
   }
 
-  if (project.status === "GENERATING") {
-    throw new Error("Project generation is already running");
+  if (cleanPrompt.length > 30000) {
+    throw new Error("Prompt must be 30,000 characters or fewer");
   }
 
   const secret = process.env.DEVFORGE_BACKGROUND_SECRET;
@@ -96,17 +100,20 @@ export async function startGenerateProject(
     throw new Error("Netlify site URL is not configured");
   }
 
-  // Create the run and mark the project as generating atomically.
   const run = await prisma.$transaction(async (tx) => {
-    const currentProject = await tx.project.findUnique({
+    const project = await tx.project.findUnique({
       where: { id },
     });
 
-    if (!currentProject || currentProject.userId !== userId) {
-      throw new Error("Project not found or access denied");
+    if (!project) {
+      throw new Error("Project not found");
     }
 
-    if (currentProject.status === "GENERATING") {
+    if (project.userId !== userId) {
+      throw new Error("Forbidden");
+    }
+
+    if (project.status === "GENERATING") {
       throw new Error("Project generation is already running");
     }
 
@@ -149,10 +156,9 @@ export async function startGenerateProject(
       },
     );
 
-    // A Netlify Background Function should acknowledge accepted work
-    // promptly with HTTP 202.
     if (response.status !== 202 && !response.ok) {
       const detail = await response.text().catch(() => "");
+
       throw new Error(
         `Background function rejected the job (${response.status})${
           detail ? `: ${detail.slice(0, 500)}` : ""
@@ -162,8 +168,7 @@ export async function startGenerateProject(
 
     return {
       project: {
-        id: project.id,
-        name: project.name,
+        id,
         status: "GENERATING",
       },
       run: {
@@ -199,8 +204,8 @@ export async function startGenerateProject(
 }
 
 /**
- * Called only by the background worker.
- * The worker owns all AI generation and artifact persistence.
+ * Executes project generation inside the Background Function.
+ * Persists generated artifacts and updates the run/project statuses.
  */
 export async function processGenerateProject(
   runId: string,
@@ -223,6 +228,10 @@ export async function processGenerateProject(
     return { alreadyCompleted: true };
   }
 
+  if (run.status !== "RUNNING") {
+    throw new Error("Generation run is not active");
+  }
+
   const input = run.input as {
     prompt?: string;
     provider?: Provider;
@@ -231,14 +240,20 @@ export async function processGenerateProject(
   const prompt = input?.prompt?.trim();
   const provider = input?.provider || "OPENROUTER";
 
-  if (!prompt) throw new Error("The generation run has no prompt");
+  if (!prompt) {
+    throw new Error("The generation run has no prompt");
+  }
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
   });
 
-  if (!project || project.userId !== userId) {
-    throw new Error("Project not found or access denied");
+  if (!project) {
+    throw new Error("Project not found");
+  }
+
+  if (project.userId !== userId) {
+    throw new Error("Forbidden");
   }
 
   const started = Date.now();
@@ -250,8 +265,9 @@ export async function processGenerateProject(
           role: "system",
           content:
             SYSTEM +
-            "\nReturn valid JSON with these keys: requirements, architecture, database, api, plan, files. " +
-            "The files key must be an array. Each file should include its relative path and generated content.",
+            "\nReturn valid JSON with the keys requirements, architecture, database, api, plan, and files. " +
+            "The files property must be an array of generated files. " +
+            "Each generated file should include its relative path and content.",
         },
         {
           role: "user",
@@ -268,7 +284,7 @@ export async function processGenerateProject(
       provider,
     );
 
-    const text = result.text
+    const cleanedText = result.text
       .replace(/^```(?:json)?\s*/i, "")
       .replace(/\s*```$/, "")
       .trim();
@@ -283,7 +299,7 @@ export async function processGenerateProject(
     };
 
     try {
-      plan = JSON.parse(text);
+      plan = JSON.parse(cleanedText);
     } catch {
       throw new Error(
         "The AI provider returned invalid JSON. Please retry generation.",
@@ -291,56 +307,72 @@ export async function processGenerateProject(
     }
 
     if (!plan || typeof plan !== "object" || Array.isArray(plan)) {
-      throw new Error("The AI provider returned an invalid project structure");
+      throw new Error(
+        "The AI provider returned an invalid project structure",
+      );
     }
 
     const files = Array.isArray(plan.files) ? plan.files : [];
 
+    const artifacts = [
+      {
+        type: "REQUIREMENTS" as const,
+        name: "requirements.json",
+        content: plan.requirements ?? {},
+      },
+      {
+        type: "ARCHITECTURE" as const,
+        name: "architecture.json",
+        content: plan.architecture ?? {},
+      },
+      {
+        type: "DATABASE" as const,
+        name: "database.json",
+        content: plan.database ?? {},
+      },
+      {
+        type: "API" as const,
+        name: "api.json",
+        content: plan.api ?? {},
+      },
+      {
+        type: "PLAN" as const,
+        name: "plan.json",
+        content: plan.plan ?? [],
+      },
+      {
+        type: "CODE" as const,
+        name: "generated-files.json",
+        content: files,
+      },
+    ];
+
     await prisma.$transaction(async (tx) => {
-      // Keep previous artifacts if the new generation fails before this
-      // transaction. Replace the previous generated set on success.
+      // Replace only the artifacts generated by this workflow.
+      // Keep review, build, and test artifacts intact.
       await tx.artifact.deleteMany({
-        where: { projectId },
+        where: {
+          projectId,
+          type: {
+            in: [
+              "REQUIREMENTS",
+              "ARCHITECTURE",
+              "DATABASE",
+              "API",
+              "PLAN",
+              "CODE",
+            ],
+          },
+        },
       });
 
-      const artifactData = [
-        {
-          type: "REQUIREMENTS" as const,
-          name: "requirements.json",
-          content: plan.requirements ?? {},
-        },
-        {
-          type: "ARCHITECTURE" as const,
-          name: "architecture.json",
-          content: plan.architecture ?? {},
-        },
-        {
-          type: "DATABASE" as const,
-          name: "database.json",
-          content: plan.database ?? {},
-        },
-        {
-          type: "API" as const,
-          name: "api.json",
-          content: plan.api ?? {},
-        },
-        {
-          type: "PLAN" as const,
-          name: "plan.json",
-          content: plan.plan ?? [],
-        },
-        {
-          type: "CODE" as const,
-          name: "generated-files.json",
-          content: files,
-        },
-      ];
-
-      for (const artifact of artifactData) {
+      for (const artifact of artifacts) {
         await tx.artifact.create({
           data: {
             projectId,
-            ...artifact,
+            type: artifact.type,
+            name: artifact.name,
+            content: artifact.content as any,
           },
         });
       }
@@ -372,7 +404,9 @@ export async function processGenerateProject(
     };
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Generation failed";
+      error instanceof Error
+        ? error.message
+        : "Generation failed";
 
     await prisma.$transaction([
       prisma.projectRun.update({

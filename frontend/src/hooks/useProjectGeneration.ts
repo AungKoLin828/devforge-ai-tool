@@ -1,4 +1,3 @@
-
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export type GenerationStatus =
@@ -29,21 +28,55 @@ interface ApiResponse {
 interface Options {
   pollIntervalMs?: number;
   maxPollDurationMs?: number;
+  requestTimeoutMs?: number;
+  maxConsecutivePollErrors?: number;
   onSuccess?: (run: GenerationRun) => void;
   onFailure?: (message: string) => void;
 }
 
 const DEFAULT_POLL_INTERVAL = 2000;
 const DEFAULT_MAX_POLL_DURATION = 15 * 60 * 1000;
+const DEFAULT_REQUEST_TIMEOUT = 12 * 1000;
+const DEFAULT_MAX_CONSECUTIVE_POLL_ERRORS = 5;
+
+class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+class RequestTimeoutError extends Error {
+  constructor() {
+    super("The status request timed out.");
+    this.name = "RequestTimeoutError";
+  }
+}
+
+class PollingTimeoutError extends Error {
+  constructor() {
+    super(
+      "Status checking timed out. Generation may still be running on the server. Check the existing run before retrying.",
+    );
+    this.name = "PollingTimeoutError";
+  }
+}
 
 async function parseResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
-
   let body: Record<string, unknown> = {};
 
   if (text) {
     try {
-      body = JSON.parse(text) as Record<string, unknown>;
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        body = parsed as Record<string, unknown>;
+      } else {
+        body = { message: text };
+      }
     } catch {
       body = { message: text };
     }
@@ -58,19 +91,69 @@ async function parseResponse<T>(response: Response): Promise<T> {
           : `Request failed with HTTP ${response.status}.`;
 
     if (response.status === 409) {
-      throw new Error(
-        `${message} Check the existing generation run before retrying.`,
+      throw new ApiError(
+        `${message} An existing generation may still be running; check its status before retrying.`,
+        response.status,
       );
     }
 
     if (response.status === 401) {
-      throw new Error("Your session may have expired. Please sign in again.");
+      throw new ApiError(
+        "Your session may have expired. Please sign in again.",
+        response.status,
+      );
     }
 
-    throw new Error(message);
+    throw new ApiError(message, response.status);
   }
 
   return body as T;
+}
+
+/**
+ * A timeout for one HTTP request. Timing out this request does not abort the
+ * parent generation operation, so polling can retry temporary slow responses.
+ */
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  parentSignal: AbortSignal,
+  timeoutMs: number,
+): Promise<Response> {
+  if (parentSignal.aborted) {
+    throw new DOMException("Request aborted", "AbortError");
+  }
+
+  const requestController = new AbortController();
+  let timedOut = false;
+
+  const abortFromParent = () => requestController.abort();
+  parentSignal.addEventListener("abort", abortFromParent, { once: true });
+
+  const timeout = window.setTimeout(() => {
+    timedOut = true;
+    requestController.abort();
+  }, timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: requestController.signal,
+    });
+  } catch (cause: unknown) {
+    if (parentSignal.aborted) {
+      throw new DOMException("Request aborted", "AbortError");
+    }
+
+    if (timedOut) {
+      throw new RequestTimeoutError();
+    }
+
+    throw cause;
+  } finally {
+    window.clearTimeout(timeout);
+    parentSignal.removeEventListener("abort", abortFromParent);
+  }
 }
 
 function waitForNextPoll(
@@ -98,10 +181,27 @@ function waitForNextPoll(
   });
 }
 
+function isRetryablePollError(cause: unknown): boolean {
+  if (cause instanceof RequestTimeoutError) return true;
+  if (cause instanceof TypeError) return true; // Usually a temporary network failure.
+  if (cause instanceof ApiError) {
+    return cause.status === 408 || cause.status === 425 || cause.status === 429 || cause.status >= 500;
+  }
+  return false;
+}
+
+function errorMessage(cause: unknown): string {
+  return cause instanceof Error
+    ? cause.message
+    : "An unexpected generation error occurred.";
+}
+
 export function useProjectGeneration(options: Options = {}) {
   const {
     pollIntervalMs = DEFAULT_POLL_INTERVAL,
     maxPollDurationMs = DEFAULT_MAX_POLL_DURATION,
+    requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT,
+    maxConsecutivePollErrors = DEFAULT_MAX_CONSECUTIVE_POLL_ERRORS,
     onSuccess,
     onFailure,
   } = options;
@@ -121,19 +221,20 @@ export function useProjectGeneration(options: Options = {}) {
       mountedRef.current = false;
       controllerRef.current?.abort();
       controllerRef.current = null;
+      activeRef.current = false;
     };
   }, []);
 
   const updateStatus = useCallback((value: GenerationStatus) => {
-    if (mountedRef.current) {
-      setStatus(value);
-    }
+    if (mountedRef.current) setStatus(value);
   }, []);
 
   const updateError = useCallback((value: string | null) => {
-    if (mountedRef.current) {
-      setError(value);
-    }
+    if (mountedRef.current) setError(value);
+  }, []);
+
+  const updateRunId = useCallback((value: string | null) => {
+    if (mountedRef.current) setRunId(value);
   }, []);
 
   const pollRun = useCallback(
@@ -143,53 +244,68 @@ export function useProjectGeneration(options: Options = {}) {
       signal: AbortSignal,
     ): Promise<GenerationRun> => {
       const startedAt = Date.now();
+      let consecutiveErrors = 0;
 
       while (!signal.aborted) {
         if (Date.now() - startedAt >= maxPollDurationMs) {
-          throw new Error(
-            "Polling timed out. Generation may still be running on the server. Check the run status before retrying.",
-          );
+          throw new PollingTimeoutError();
         }
 
-        const response = await fetch(
-          `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(id)}`,
-          {
-            method: "GET",
-            credentials: "include",
-            cache: "no-store",
-            headers: { Accept: "application/json" },
+        try {
+          const response = await fetchWithTimeout(
+            `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(id)}`,
+            {
+              method: "GET",
+              credentials: "include",
+              cache: "no-store",
+              headers: { Accept: "application/json" },
+            },
             signal,
-          },
-        );
+            requestTimeoutMs,
+          );
 
-        const data = await parseResponse<ApiResponse>(response);
-        const run = data.run;
+          const data = await parseResponse<ApiResponse>(response);
+          const run = data.run;
 
-        if (!run || typeof run.status !== "string") {
-          throw new Error("The server returned an invalid run-status response.");
+          if (!run || typeof run.status !== "string") {
+            throw new Error("The server returned an invalid run-status response.");
+          }
+
+          consecutiveErrors = 0;
+          const current = run.status.toUpperCase();
+
+          if (["SUCCESS", "COMPLETED", "SUCCEEDED"].includes(current)) {
+            return run;
+          }
+
+          if (["FAILED", "ERROR", "CANCELLED"].includes(current)) {
+            throw new Error(run.error || data.message || "Generation failed.");
+          }
+
+          updateStatus("RUNNING");
+          await waitForNextPoll(pollIntervalMs, signal);
+        } catch (cause: unknown) {
+          if (signal.aborted || (cause instanceof DOMException && cause.name === "AbortError")) {
+            throw new DOMException("Request aborted", "AbortError");
+          }
+
+          if (!isRetryablePollError(cause)) throw cause;
+
+          consecutiveErrors += 1;
+          if (consecutiveErrors > maxConsecutivePollErrors) {
+            throw new Error(
+              `Unable to check generation status after ${maxConsecutivePollErrors} retries. ${errorMessage(cause)} The generation may still be running; check run ${id} before retrying.`,
+            );
+          }
+
+          const backoff = Math.min(pollIntervalMs * 2 ** (consecutiveErrors - 1), 10_000);
+          await waitForNextPoll(backoff, signal);
         }
-
-        const current = run.status.toUpperCase();
-
-        if (current === "SUCCESS" || current === "COMPLETED") {
-          return run;
-        }
-
-        if (
-          current === "FAILED" ||
-          current === "ERROR" ||
-          current === "CANCELLED"
-        ) {
-          throw new Error(run.error || data.message || "Generation failed.");
-        }
-
-        updateStatus("RUNNING");
-        await waitForNextPoll(pollIntervalMs, signal);
       }
 
       throw new DOMException("Request aborted", "AbortError");
     },
-    [maxPollDurationMs, pollIntervalMs, updateStatus],
+    [maxConsecutivePollErrors, maxPollDurationMs, pollIntervalMs, requestTimeoutMs, updateStatus],
   );
 
   const generate = useCallback(
@@ -214,19 +330,14 @@ export function useProjectGeneration(options: Options = {}) {
       }
 
       const controller = new AbortController();
-
       activeRef.current = true;
       controllerRef.current = controller;
-
       updateError(null);
       updateStatus("STARTING");
-
-      if (mountedRef.current) {
-        setRunId(null);
-      }
+      updateRunId(null);
 
       try {
-        const response = await fetch(
+        const response = await fetchWithTimeout(
           `/api/projects/${encodeURIComponent(projectId)}/generate`,
           {
             method: "POST",
@@ -236,87 +347,64 @@ export function useProjectGeneration(options: Options = {}) {
               "Content-Type": "application/json",
               Accept: "application/json",
             },
-            body: JSON.stringify({
-              prompt: prompt.trim(),
-              provider,
-            }),
-            signal: controller.signal,
+            body: JSON.stringify({ prompt: prompt.trim(), provider }),
           },
+          controller.signal,
+          Math.max(requestTimeoutMs * 2, 20_000),
         );
 
         const data = await parseResponse<ApiResponse>(response);
 
         if (response.status !== 202) {
           throw new Error(
-            "The server did not return HTTP 202 for the queued generation job.",
+            "The server did not return HTTP 202 for the queued generation job. Verify that the backend returns 202 and a run ID.",
           );
         }
 
         if (!data.run?.id) {
           throw new Error(
-            "The server accepted the request but did not return a run ID. Check the project status before retrying.",
+            "The server accepted the request but did not return a run ID. Check project/run status before retrying.",
           );
         }
 
         const id = data.run.id;
-
-        if (mountedRef.current) {
-          setRunId(id);
-        }
-
+        updateRunId(id);
         updateStatus("RUNNING");
 
-        const completedRun = await pollRun(
-          projectId,
-          id,
-          controller.signal,
-        );
-
+        const completedRun = await pollRun(projectId, id, controller.signal);
         updateStatus("SUCCESS");
         onSuccess?.(completedRun);
-
         return completedRun;
       } catch (cause: unknown) {
-        if (
-          cause instanceof DOMException &&
-          cause.name === "AbortError"
-        ) {
+        if (cause instanceof DOMException && cause.name === "AbortError") {
           return null;
         }
 
         const message =
-          cause instanceof Error
-            ? cause.message
-            : "An unexpected generation error occurred.";
+          cause instanceof RequestTimeoutError
+            ? "The generation request timed out before the server confirmed the run. The server may still have accepted it; check the project/run status before retrying."
+            : errorMessage(cause);
 
         updateError(message);
         updateStatus("FAILED");
         onFailure?.(message);
-
         return null;
       } finally {
         activeRef.current = false;
-
-        if (controllerRef.current === controller) {
-          controllerRef.current = null;
-        }
+        if (controllerRef.current === controller) controllerRef.current = null;
       }
     },
-    [onFailure, onSuccess, pollRun, updateError, updateStatus],
+    [onFailure, onSuccess, pollRun, requestTimeoutMs, updateError, updateRunId, updateStatus],
   );
 
   const reset = useCallback(() => {
     controllerRef.current?.abort();
     controllerRef.current = null;
     activeRef.current = false;
-
     updateError(null);
     updateStatus("IDLE");
-
-    if (mountedRef.current) {
-      setRunId(null);
-    }
-  }, [updateError, updateStatus]);
+    updateRunId(null);
+  }, [updateError, updateRunId, updateStatus]);
 
   return {
     status,

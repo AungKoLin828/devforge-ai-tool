@@ -309,9 +309,12 @@ export async function handleApi(req: Request) {
     if (message === "Forbidden") return error(message, 403);
     if (message === "Project not found") return error(message, 404);
 
+    if (message.includes("already running")) {
+      return error(message, 409);
+    }
+
     if (
       message.includes("required") ||
-      message.includes("already running") ||
       message.includes("30,000 characters") ||
       message.includes("Unsupported AI provider")
     ) {

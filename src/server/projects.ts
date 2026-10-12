@@ -113,8 +113,34 @@ export async function startGenerateProject(
       throw new Error("Forbidden");
     }
 
-    if (project.status === "GENERATING") {
-      throw new Error("Project generation is already running");
+    // Recover runs abandoned by a timed-out or interrupted Netlify worker.
+    // Netlify background functions have bounded execution time, so a run
+    // older than 20 minutes is treated as stale and can be retried.
+    const activeRun = await tx.projectRun.findFirst({
+      where: {
+        projectId: id,
+        operation: "GENERATE",
+        status: "RUNNING",
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (activeRun) {
+      const lastActivity = activeRun.startedAt ?? activeRun.createdAt;
+      const ageMs = Date.now() - lastActivity.getTime();
+
+      if (ageMs < 20 * 60 * 1000) {
+        throw new Error("Project generation is already running");
+      }
+
+      await tx.projectRun.update({
+        where: { id: activeRun.id },
+        data: {
+          status: "FAILED",
+          error: "Generation timed out or was interrupted. Please retry.",
+          finishedAt: new Date(),
+        },
+      });
     }
 
     const newRun = await tx.projectRun.create({

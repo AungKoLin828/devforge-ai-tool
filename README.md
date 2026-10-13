@@ -30,17 +30,36 @@ DevForge AI is an AI-assisted project workspace built around GitHub sign-in, Pos
 
 ## Create and start the Local Agent on Windows
 
-The Local Agent is already included in this repository; you do not need to create a separate project or download an installer.
+You do **not** need to clone or download the DevForge application repository, and you do **not** need to upload your local project source to DevForge to connect the agent. The installer downloads only the three Local Agent runtime files into `%LOCALAPPDATA%\DevForgeAgent`; it does not install or copy the web app.
 
-1. Install Node.js 22 LTS.
-2. Clone or download this DevForge repository onto the PC that should run projects.
-3. Open PowerShell in the repository folder (the folder containing `package.json`).
-4. Install dependencies once with `npm install`.
-5. Start the agent with `npm run agent:dev`.
-6. Keep this terminal open. On startup, the agent prints a **Pairing token**. In the DevForge web app, enter that token under **Local agent pairing token**, then click **Connect local agent**.
-7. After connecting, select **Sync files to PC** to put generated files in the agent workspace. The default workspace is `%USERPROFILE%\DevForge`; change it before starting the agent by setting `$env:DEVFORGE_WORKSPACE = "$HOME\DevForge"` in PowerShell.
+1. Install Node.js 22 LTS or newer.
+2. Open PowerShell and download the small installer script:
 
-If the app cannot connect, check that the Local Agent terminal is still running, the entered token matches the terminal output, and the default port `45821` is not blocked or already in use. The agent listens on `127.0.0.1` only and should be started on the same PC and browser that you use to connect.
+   ```powershell
+   $installer = Join-Path $env:TEMP "install-devforge-agent.ps1"
+   Invoke-WebRequest `
+     -Uri "https://raw.githubusercontent.com/AungKoLin828/devforge-ai-tool/main/agent/install.ps1" `
+     -OutFile $installer
+   ```
+
+3. Inspect the downloaded script, then run it:
+
+   ```powershell
+   Get-Content $installer
+   & $installer
+   ```
+
+   To choose a different local workspace, pass a folder path:
+
+   ```powershell
+   & $installer -WorkspacePath "D:\DevForge"
+   ```
+
+4. Start the agent using the command printed by the installer. Keep its PowerShell window open. The agent prints a random **Pairing token** when it starts.
+5. In the signed-in DevForge web app, paste the token into **Local agent pairing token** and select **Connect local agent**.
+6. Select **Sync files to PC** to copy generated artifacts into `<workspace>\projects\<project-id>`. This direction transfers generated files from DevForge to your PC. Your other local project files are not uploaded unless you explicitly use **Import local project**.
+
+The agent listens on `127.0.0.1` only and should be started on the same PC and browser you use to connect. If the app cannot connect, check that the agent terminal is still running, the token matches, and port `45821` is available. The source of the standalone installer is [agent/install.ps1](./agent/install.ps1); it fetches only the agent runtime files from this repository.
 
 ## Prisma setup
 

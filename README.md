@@ -14,11 +14,11 @@ DevForge AI is an AI-assisted project workspace built around GitHub sign-in, Pos
 ## Local setup
 
 1. Install Node.js 22 LTS, Git and PostgreSQL.
-2. Copy `.env.example` to `.env` and fill values.
+2. Copy `.env.example` to `.env` and fill values, including `DATABASE_URL` with the PostgreSQL URL for the database you intend the local app to use. The server loads `.env` directly; `DATABASE_URL` takes precedence over `NETLIFY_DB_URL`.
 3. Create a **separate GitHub OAuth App for local development**. Set its Homepage URL to `http://localhost:8888` and its Authorization callback URL to `http://localhost:8888/api/auth/github/callback`. Put its client ID and secret in `GITHUB_LOCAL_CLIENT_ID` and `GITHUB_LOCAL_CLIENT_SECRET` in your local `.env`. Keep production `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `GITHUB_CALLBACK_URL` configured in Netlify; the app selects OAuth credentials based on whether the sign-in request comes from localhost or the deployed host.
 4. Run `npm install`.
 5. Run `npm run prisma:generate`.
-6. Apply the checked-in PostgreSQL schema migration with `npm run prisma:deploy`. This creates the application's tables in the database selected by `DATABASE_URL` (or `NETLIFY_DB_URL` if `DATABASE_URL` is unset).
+6. If the database is new, apply the checked-in PostgreSQL schema migration with `npm run prisma:deploy`. If you already created the schema manually, make sure the `DATABASE_URL` in `.env` points to that exact database and verify `"User"` exists there before signing in. Do not apply the initial migration to a database where you already manually created its enums and tables; it will try to create those objects again.
 7. Run `npm run build`.
 8. Start the local app at `http://localhost:8888` with `npm run dev:netlify`. Always start GitHub sign-in from this same origin. Do not start sign-in on Netlify and then open the localhost callback, or start locally and return to the Netlify callback: the OAuth state cookie is intentionally restricted to the site where login began.
 9. On your PC, open a second terminal in the DevForge repository folder and run `npm run agent:dev`. Keep the terminal open. If `DEVFORGE_AGENT_TOKEN` is unset, the agent prints a random pairing token in its terminal.

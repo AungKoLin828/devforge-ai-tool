@@ -46,14 +46,16 @@ You do **not** need to clone or download the DevForge application repository, an
 
    ```powershell
    Get-Content $installer
-   & $installer
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer
    ```
 
    To choose a different local workspace, pass a folder path:
 
    ```powershell
-   & $installer -WorkspacePath "D:\DevForge"
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -WorkspacePath "D:\DevForge"
    ```
+
+   `-ExecutionPolicy Bypass` applies only to this installer process; it does not change the machine's PowerShell execution policy. If your organization enforces an execution policy through Group Policy and blocks this command, ask your administrator to approve the installer rather than changing system policy.
 
 4. Start the agent using the command printed by the installer. Keep its PowerShell window open. The agent prints a random **Pairing token** when it starts.
 5. In the signed-in DevForge web app, paste the token into **Local agent pairing token** and select **Connect local agent**.

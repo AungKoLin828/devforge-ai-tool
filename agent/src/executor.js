@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { validateCommand, safePath } from "./security.js";
@@ -40,6 +41,204 @@ const IMPORT_MAX_BYTES = 2 * 1024 * 1024;
 const IMPORT_MAX_DIRECTORIES = 5000;
 const IMPORT_MAX_DEPTH = 32;
 const WORKSPACE_MAX_PROJECTS = 500;
+const WORKSPACE_MAX_ENTRIES = 500;
+const WORKSPACE_MAX_FILE_BYTES = 1024 * 1024;
+const WORKSPACE_EDITABLE_DOTFILES = new Set([
+    ".babelrc",
+    ".dockerignore",
+    ".editorconfig",
+    ".eslintrc",
+    ".gitignore",
+    ".nvmrc",
+    ".prettierignore",
+]);
+function validateWorkspacePath(relative, allowRoot) {
+    if (relative === "" && allowRoot)
+        return [];
+    const segments = relative.split("/");
+    if (!relative ||
+        relative.startsWith("/") ||
+        relative.includes("\\") ||
+        /^[a-z]:/i.test(relative) ||
+        segments.length > 32 ||
+        segments.some((segment) => !segment ||
+            segment === "." ||
+            segment === ".." ||
+            /[<>:"|?*\u0000-\u001f]/.test(segment) ||
+            /[. ]$/.test(segment) ||
+            /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(segment))) {
+        throw new Error("Workspace path is invalid or outside the workspace");
+    }
+    for (const [index, segment] of segments.entries()) {
+        if (IMPORT_EXCLUDED_DIRECTORIES.has(segment.toLowerCase())) {
+            throw new Error("This workspace folder is not available in the browser");
+        }
+        if (segment.startsWith(".") &&
+            (index !== segments.length - 1 ||
+                !WORKSPACE_EDITABLE_DOTFILES.has(segment.toLowerCase()))) {
+            throw new Error("Hidden and sensitive workspace paths are not available");
+        }
+        if (index === segments.length - 1 &&
+            (/^\.env(?:\.|$)/i.test(segment) ||
+                /\.(?:key|pem|p12|pfx|keystore)$/i.test(segment) ||
+                /^(?:id_rsa|id_ed25519|credentials(?:\..*)?|service-account(?:\..*)?)$/i.test(segment))) {
+            throw new Error("Sensitive workspace files are not available in the browser");
+        }
+    }
+    return segments;
+}
+async function resolveWorkspaceDirectory(root, relative) {
+    const rootPath = await fs.realpath(root);
+    const segments = validateWorkspacePath(relative, true);
+    let currentPath = rootPath;
+    for (const segment of segments) {
+        currentPath = path.join(currentPath, segment);
+        const stat = await fs.lstat(currentPath);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) {
+            throw new Error("Workspace folders cannot use symbolic links");
+        }
+    }
+    return { rootPath, target: currentPath };
+}
+async function resolveWorkspaceFile(root, relative) {
+    const rootPath = await fs.realpath(root);
+    const segments = validateWorkspacePath(relative, false);
+    let currentPath = rootPath;
+    for (const segment of segments.slice(0, -1)) {
+        currentPath = path.join(currentPath, segment);
+        const stat = await fs.lstat(currentPath);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) {
+            throw new Error("Workspace paths cannot use symbolic links");
+        }
+    }
+    const target = path.join(currentPath, segments[segments.length - 1]);
+    const stat = await fs.lstat(target);
+    if (stat.isSymbolicLink() || !stat.isFile()) {
+        throw new Error("Select a regular file inside the agent workspace");
+    }
+    return { rootPath, target, stat };
+}
+export async function listWorkspaceEntries(root, relativeDirectory = "") {
+    const { rootPath, target } = await resolveWorkspaceDirectory(root, relativeDirectory);
+    const entries = await fs.readdir(target, { withFileTypes: true });
+    const visible = [];
+    for (const entry of entries) {
+        if (entry.isSymbolicLink())
+            continue;
+        if (entry.isDirectory() &&
+            IMPORT_EXCLUDED_DIRECTORIES.has(entry.name.toLowerCase())) {
+            continue;
+        }
+        if (entry.name.startsWith(".") && !WORKSPACE_EDITABLE_DOTFILES.has(entry.name.toLowerCase())) {
+            continue;
+        }
+        if (entry.name.startsWith(".") &&
+            /^\.env(?:\.|$)/i.test(entry.name) &&
+            ![".env.example", ".env.sample"].includes(entry.name.toLowerCase())) {
+            continue;
+        }
+        if (/\.(?:key|pem|p12|pfx|keystore)$/i.test(entry.name) ||
+            /^(?:id_rsa|id_ed25519|credentials(?:\..*)?|service-account(?:\..*)?)$/i.test(entry.name)) {
+            continue;
+        }
+        const entryPath = relativeDirectory
+            ? `${relativeDirectory}/${entry.name}`
+            : entry.name;
+        const segments = validateWorkspacePath(entryPath, false);
+        if (segments.length > 32)
+            continue;
+        if (entry.isDirectory()) {
+            const entryStat = await fs.lstat(path.join(target, entry.name));
+            if (!entryStat.isSymbolicLink() && entryStat.isDirectory()) {
+                visible.push({ name: entry.name, path: entryPath, type: "directory" });
+            }
+        }
+        else if (entry.isFile()) {
+            const entryStat = await fs.lstat(path.join(target, entry.name));
+            if (!entryStat.isSymbolicLink() && entryStat.isFile()) {
+                visible.push({
+                    name: entry.name,
+                    path: entryPath,
+                    type: "file",
+                    size: entryStat.size,
+                    editable: entryStat.size <= WORKSPACE_MAX_FILE_BYTES,
+                });
+            }
+        }
+    }
+    if (visible.length > WORKSPACE_MAX_ENTRIES) {
+        throw new Error(`This folder contains more than ${WORKSPACE_MAX_ENTRIES} visible entries`);
+    }
+    visible.sort((left, right) => left.type !== right.type
+        ? left.type === "directory"
+            ? -1
+            : 1
+        : left.name.localeCompare(right.name));
+    return {
+        path: relativeDirectory,
+        parent: relativeDirectory && relativeDirectory.includes("/")
+            ? relativeDirectory.slice(0, relativeDirectory.lastIndexOf("/"))
+            : relativeDirectory
+                ? ""
+                : null,
+        entries: visible,
+        workspaceRoot: rootPath,
+    };
+}
+export async function readWorkspaceFile(root, relativeFilePath) {
+    const { target, stat } = await resolveWorkspaceFile(root, relativeFilePath);
+    if (stat.size > WORKSPACE_MAX_FILE_BYTES) {
+        throw new Error("Files larger than 1 MB cannot be opened in the browser editor");
+    }
+    const buffer = await fs.readFile(target);
+    if (buffer.includes(0)) {
+        throw new Error("Binary files cannot be opened in the browser editor");
+    }
+    let content;
+    try {
+        content = new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+    }
+    catch {
+        throw new Error("This file is not valid UTF-8 text");
+    }
+    return { path: relativeFilePath, content, modifiedAt: stat.mtimeMs };
+}
+export async function writeWorkspaceFile(root, relativeFilePath, content, expectedModifiedAt) {
+    if (typeof content !== "string") {
+        throw new Error("File content must be text");
+    }
+    if (content.includes("\0")) {
+        throw new Error("Binary file content cannot be saved from the browser editor");
+    }
+    if (Buffer.byteLength(content, "utf8") > WORKSPACE_MAX_FILE_BYTES) {
+        throw new Error("Files larger than 1 MB cannot be saved from the browser editor");
+    }
+    if (!Number.isFinite(expectedModifiedAt)) {
+        throw new Error("Reload the file before saving your changes");
+    }
+    const { target, stat } = await resolveWorkspaceFile(root, relativeFilePath);
+    if (stat.size > WORKSPACE_MAX_FILE_BYTES) {
+        throw new Error("Files larger than 1 MB cannot be edited in the browser");
+    }
+    if (stat.mtimeMs !== expectedModifiedAt) {
+        throw new Error("This file changed on your PC. Reload it before saving.");
+    }
+    const noFollow = fsConstants.O_NOFOLLOW || 0;
+    const handle = await fs.open(target, fsConstants.O_RDWR | noFollow);
+    try {
+        const openedStat = await handle.stat();
+        if (!openedStat.isFile() || openedStat.mtimeMs !== expectedModifiedAt) {
+            throw new Error("This file changed on your PC. Reload it before saving.");
+        }
+        await handle.truncate(0);
+        await handle.writeFile(content, "utf8");
+        const savedStat = await handle.stat();
+        return { path: relativeFilePath, modifiedAt: savedStat.mtimeMs };
+    }
+    finally {
+        await handle.close();
+    }
+}
 async function resolveCommand(command, args) {
     if (process.platform !== "win32" || !["npm", "npx", "pnpm", "yarn"].includes(command)) {
         return { command, args };

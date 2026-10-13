@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { api, type LocalProjectResult, type User } from "./api";
+import {
+  api,
+  type LocalProjectResult,
+  type LocalWorkspaceEntry,
+  type LocalWorkspaceFile,
+  type LocalWorkspaceListing,
+  type User,
+} from "./api";
 import { useProjectGeneration } from "./hooks/useProjectGeneration";
 
 function Login() {
@@ -167,6 +174,14 @@ function App({ user }: { user: User }) {
   >([]);
   const [localImportPath, setLocalImportPath] = useState("");
   const [importingProject, setImportingProject] = useState(false);
+  const [workspaceListing, setWorkspaceListing] =
+    useState<LocalWorkspaceListing | null>(null);
+  const [workspaceEntriesLoading, setWorkspaceEntriesLoading] = useState(false);
+  const [workspaceBrowserError, setWorkspaceBrowserError] = useState<string | null>(null);
+  const [workspaceEditorFile, setWorkspaceEditorFile] =
+    useState<LocalWorkspaceFile | null>(null);
+  const [workspaceEditorDraft, setWorkspaceEditorDraft] = useState("");
+  const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [localAction, setLocalAction] = useState<"build" | "test" | null>(null);
   const [localResult, setLocalResult] = useState<LocalProjectResult | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
@@ -287,6 +302,90 @@ function App({ user }: { user: User }) {
     }
   }
 
+  async function loadWorkspaceDirectory(
+    directory: string,
+    token = localAgentToken,
+  ) {
+    setWorkspaceEntriesLoading(true);
+    setWorkspaceBrowserError(null);
+    try {
+      const listing = await api.localAgent.workspaceFiles(token, directory);
+      setWorkspaceListing(listing);
+    } catch (cause) {
+      setWorkspaceBrowserError(
+        cause instanceof Error ? cause.message : "Could not load this workspace folder.",
+      );
+    } finally {
+      setWorkspaceEntriesLoading(false);
+    }
+  }
+
+  async function browseWorkspaceDirectory(directory: string) {
+    if (
+      workspaceEditorFile &&
+      workspaceEditorDraft !== workspaceEditorFile.content &&
+      !window.confirm("Discard unsaved edits and open this folder?")
+    ) {
+      return;
+    }
+    setWorkspaceEditorFile(null);
+    setWorkspaceEditorDraft("");
+    await loadWorkspaceDirectory(directory);
+  }
+
+  async function openWorkspaceFile(entry: LocalWorkspaceEntry) {
+    if (entry.type !== "file" || entry.editable === false) return;
+    if (
+      workspaceEditorFile &&
+      workspaceEditorDraft !== workspaceEditorFile.content &&
+      !window.confirm("Discard unsaved edits and open another file?")
+    ) {
+      return;
+    }
+
+    setWorkspaceBrowserError(null);
+    try {
+      const response = await api.localAgent.readWorkspaceFile(
+        localAgentToken,
+        entry.path,
+      );
+      setWorkspaceEditorFile(response.file);
+      setWorkspaceEditorDraft(response.file.content);
+    } catch (cause) {
+      setWorkspaceBrowserError(
+        cause instanceof Error ? cause.message : "Could not open this file.",
+      );
+    }
+  }
+
+  async function saveWorkspaceFile() {
+    if (!workspaceEditorFile || workspaceSaving) return;
+    setWorkspaceSaving(true);
+    setWorkspaceBrowserError(null);
+    try {
+      const response = await api.localAgent.writeWorkspaceFile(
+        localAgentToken,
+        workspaceEditorFile,
+        workspaceEditorDraft,
+      );
+      setWorkspaceEditorFile({
+        ...workspaceEditorFile,
+        content: workspaceEditorDraft,
+        modifiedAt: response.file.modifiedAt,
+      });
+      setLogs((current) => [
+        ...current,
+        `Saved ${workspaceEditorFile.path} to your local workspace.`,
+      ]);
+    } catch (cause) {
+      setWorkspaceBrowserError(
+        cause instanceof Error ? cause.message : "Could not save this file.",
+      );
+    } finally {
+      setWorkspaceSaving(false);
+    }
+  }
+
   async function connectLocalAgent() {
     const token = localAgentToken.trim();
     if (!token) {
@@ -300,6 +399,7 @@ function App({ user }: { user: User }) {
       window.localStorage.setItem("devforge-local-agent-token", token);
       setLocalAgentToken(token);
       setLocalAgentInfo(result);
+      await loadWorkspaceDirectory("", token);
       try {
         const response = await api.localAgent.workspaceProjects(token);
         setWorkspaceProjects(response.projects);
@@ -319,6 +419,9 @@ function App({ user }: { user: User }) {
     } catch (cause) {
       setLocalAgentInfo(null);
       setWorkspaceProjects([]);
+      setWorkspaceListing(null);
+      setWorkspaceEditorFile(null);
+      setWorkspaceEditorDraft("");
       setLocalAgentError(
         cause instanceof Error ? cause.message : "Could not connect to the local agent.",
       );
@@ -517,6 +620,136 @@ function App({ user }: { user: User }) {
                 </div>
               </div>
 
+              <section className="mt-5 glass overflow-hidden rounded-2xl" aria-label="Local workspace browser">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
+                  <div>
+                    <h3 className="font-semibold">Local workspace files</h3>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {workspaceListing
+                        ? `${localAgentInfo?.workspaceRoot}${workspaceListing.path ? `\\${workspaceListing.path.replaceAll("/", "\\")}` : ""}`
+                        : "Connect the Local Agent to browse files on your PC."}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    {workspaceListing?.parent !== null &&
+                      workspaceListing?.parent !== undefined && (
+                        <button
+                          type="button"
+                          onClick={() => void browseWorkspaceDirectory(workspaceListing.parent!)}
+                          disabled={workspaceEntriesLoading}
+                          className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-indigo-400 disabled:opacity-50"
+                        >
+                          Up
+                        </button>
+                      )}
+                    <button
+                      type="button"
+                      onClick={() => void loadWorkspaceDirectory(workspaceListing?.path || "")}
+                      disabled={!localAgentInfo || workspaceEntriesLoading}
+                      className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-indigo-400 disabled:opacity-50"
+                    >
+                      {workspaceEntriesLoading ? "Loading..." : "Refresh"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void saveWorkspaceFile()}
+                      disabled={
+                        !workspaceEditorFile ||
+                        workspaceEditorDraft === workspaceEditorFile.content ||
+                        workspaceSaving
+                      }
+                      className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {workspaceSaving ? "Saving..." : "Save to PC"}
+                    </button>
+                  </div>
+                </div>
+                <div className="grid min-h-[360px] lg:grid-cols-[minmax(220px,0.7fr)_minmax(0,1.3fr)]">
+                  <div className="max-h-[480px] overflow-auto border-b border-slate-800 p-3 lg:border-b-0 lg:border-r">
+                    {!localAgentInfo ? (
+                      <p className="p-2 text-sm text-slate-500">Connect the Local Agent to view your workspace.</p>
+                    ) : workspaceEntriesLoading && !workspaceListing ? (
+                      <p className="p-2 text-sm text-slate-500">Loading workspace files...</p>
+                    ) : !workspaceListing?.entries.length ? (
+                      <p className="p-2 text-sm text-slate-500">This folder is empty.</p>
+                    ) : (
+                      <div className="space-y-1 font-mono text-xs">
+                        {workspaceListing.entries.map((entry) => (
+                          <button
+                            type="button"
+                            key={entry.path}
+                            onClick={() =>
+                              entry.type === "directory"
+                                ? void browseWorkspaceDirectory(entry.path)
+                                : void openWorkspaceFile(entry)
+                            }
+                            disabled={
+                              workspaceEntriesLoading ||
+                              (entry.type === "file" && entry.editable === false)
+                            }
+                            title={
+                              entry.type === "file" && entry.editable === false
+                                ? "Files larger than 1 MB are not editable in the browser."
+                                : entry.path
+                            }
+                            className={`block w-full truncate rounded-md px-2 py-2 text-left ${
+                              workspaceEditorFile?.path === entry.path
+                                ? "bg-indigo-500/15 text-indigo-200"
+                                : entry.editable === false
+                                  ? "cursor-not-allowed text-slate-600"
+                                  : "text-slate-300 hover:bg-slate-800"
+                            }`}
+                          >
+                            <span className="mr-2 text-slate-500" aria-hidden="true">
+                              {entry.type === "directory" ? "▸" : "·"}
+                            </span>
+                            {entry.name}
+                            {entry.type === "file" && (
+                              <span className="float-right text-slate-600">
+                                {entry.size !== undefined
+                                  ? `${Math.ceil(entry.size / 1024)} KB`
+                                  : ""}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex min-h-[360px] flex-col">
+                    {workspaceEditorFile ? (
+                      <>
+                        <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-3 py-2 text-xs">
+                          <span className="truncate font-mono text-slate-300">{workspaceEditorFile.path}</span>
+                          {workspaceEditorDraft !== workspaceEditorFile.content && (
+                            <span className="shrink-0 text-amber-300">Unsaved changes</span>
+                          )}
+                        </div>
+                        <textarea
+                          aria-label={`Edit ${workspaceEditorFile.path}`}
+                          spellCheck={false}
+                          value={workspaceEditorDraft}
+                          onChange={(event) => setWorkspaceEditorDraft(event.target.value)}
+                          className="min-h-[320px] flex-1 resize-y bg-slate-950/70 p-4 font-mono text-xs leading-5 text-slate-200 outline-none focus:ring-1 focus:ring-inset focus:ring-indigo-500"
+                        />
+                      </>
+                    ) : (
+                      <div className="grid flex-1 place-items-center p-6 text-center text-sm text-slate-500">
+                        Choose a text file to view or edit it on your PC.
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="border-t border-slate-800 px-4 py-3">
+                  {workspaceBrowserError && (
+                    <p role="alert" className="mb-2 text-xs text-red-300">{workspaceBrowserError}</p>
+                  )}
+                  <p className="text-xs leading-5 text-slate-500">
+                    Saving writes directly to the selected local file. Hidden/secret files, dependency folders, symlinks, binary files, and files over 1 MB are not editable here. Review your changes before saving.
+                  </p>
+                </div>
+              </section>
+
               {planArtifacts.length > 0 && (
                 <div className="mt-5 glass rounded-2xl p-4">
                   <div className="mb-3 flex items-center justify-between">
@@ -593,6 +826,9 @@ function App({ user }: { user: User }) {
                           setLocalAgentInfo(null);
                           setLocalAgentError(null);
                           setWorkspaceProjects([]);
+                          setWorkspaceListing(null);
+                          setWorkspaceEditorFile(null);
+                          setWorkspaceEditorDraft("");
                         }}
                         placeholder="Paste the token shown in the agent terminal"
                         className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"

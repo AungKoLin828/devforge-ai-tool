@@ -5,9 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import {
   listWorkspaceProjects,
+  listWorkspaceEntries,
   readLocalProject,
+  readWorkspaceFile,
   runCommand,
   runProjectAction,
+  writeWorkspaceFile,
   writeProjectFiles,
 } from "./executor.js";
 
@@ -115,6 +118,55 @@ const server = http.createServer(async (req, res) => {
       );
     }
 
+    const requestUrl = new URL(req.url || "/", "http://localhost");
+    if (requestUrl.pathname === "/workspace/files" && req.method === "GET") {
+      return respond(
+        res,
+        {
+          success: true,
+          ...(await listWorkspaceEntries(
+            root,
+            requestUrl.searchParams.get("path") || "",
+          )),
+        },
+        200,
+        origin,
+      );
+    }
+
+    if (requestUrl.pathname === "/workspace/file" && req.method === "GET") {
+      return respond(
+        res,
+        {
+          success: true,
+          file: await readWorkspaceFile(
+            root,
+            requestUrl.searchParams.get("path") || "",
+          ),
+        },
+        200,
+        origin,
+      );
+    }
+
+    if (req.url === "/workspace/file" && req.method === "POST") {
+      const body = await readBody(req);
+      return respond(
+        res,
+        {
+          success: true,
+          file: await writeWorkspaceFile(
+            root,
+            String(body.path || ""),
+            body.content,
+            Number(body.expectedModifiedAt),
+          ),
+        },
+        200,
+        origin,
+      );
+    }
+
     if (req.url === "/workspace/import" && req.method === "POST") {
       const body = await readBody(req);
       return respond(
@@ -163,25 +215,6 @@ const server = http.createServer(async (req, res) => {
       const action = req.url === "/project/build" ? "build" : "test";
       const result = await runProjectAction(root, String(body.path || ""), action);
       return respond(res, { success: true, result }, 200, origin);
-    }
-
-    if (req.url?.startsWith("/file") && req.method === "GET") {
-      const url = new URL(req.url, "http://localhost");
-      const relative = url.searchParams.get("path") || "";
-      const target = path.resolve(root, relative);
-      if (target !== root && !target.startsWith(root + path.sep)) {
-        throw new Error("Path blocked");
-      }
-      return respond(
-        res,
-        {
-          success: true,
-          path: relative,
-          content: await fs.readFile(target, "utf8"),
-        },
-        200,
-        origin,
-      );
     }
 
     return respond(res, { error: "Not found" }, 404, origin);

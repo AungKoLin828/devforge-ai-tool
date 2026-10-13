@@ -25,6 +25,7 @@ DevForge AI is an AI-assisted project workspace built around GitHub sign-in, Pos
 10. In the signed-in project workspace, paste that token into **Local agent pairing token** and select **Connect local agent**. The token is saved in this browser's local storage. Generated files are written under `<DEVFORGE_WORKSPACE>/projects/<project-id>`.
 11. Select **Build locally** or **Test locally** to run the generated project's corresponding `package.json` script. The app asks for confirmation first because project install/build/test scripts can execute code on your PC.
 12. To bring in an existing local project, connect the Local Agent and choose a folder under its workspace in **Import a folder from this workspace**. Folders directly under the workspace and project folders under its `projects/` directory are listed. Review the confirmation before uploading: import skips dependency/build output directories, environment secret files, and common private-key files; it accepts up to 300 text files and 2 MB. Imported files are stored as a `CODE` artifact in PostgreSQL and can be AI-reviewed or copied to an isolated DevForge workspace folder for local build/test.
+13. Use **Local workspace files** to browse and edit text files under the agent workspace. **Save to PC** writes to the selected existing file. Hidden/secret files, dependency folders, symlinks, binary files and files larger than 1 MB are not available in the browser editor; edits are local and are not automatically uploaded into a DevForge project artifact.
 
 ## Prisma setup
 
@@ -52,7 +53,7 @@ Use a managed Postgres database (including Netlify Database if available for the
 
 Deleting a project permanently removes its database record and related artifacts, runs, and jobs. A confirmation prompt is shown in the workspace; copies already synced to a Local Agent workspace are not deleted.
 
-Importing a local project requires an authenticated web session and the paired Local Agent. The agent reads only folders inside `DEVFORGE_WORKSPACE`; symlinks are skipped, and imports are limited to 300 text files/2 MB. Environment files other than `.env.example` and `.env.sample`, common private-key files, and dependency/build output directories are excluded. Review files for credentials before confirming an upload. The imported snapshot is saved as a `CODE` artifact; edits made to a local build/test copy are not automatically synchronized back to PostgreSQL.
+Importing a local project requires an authenticated web session and the paired Local Agent. The agent reads only folders inside `DEVFORGE_WORKSPACE`; symlinks are skipped, and imports are limited to 300 text files/2 MB. Environment files other than `.env.example` and `.env.sample`, common private-key files, and dependency/build output directories are excluded. Review files for credentials before confirming an upload. The imported snapshot is saved as a `CODE` artifact; edits made to a local build/test copy are not automatically synchronized back to PostgreSQL. The browser workspace editor reads and writes existing UTF-8 text files only within the configured workspace, omits common secret and generated paths, and refuses to overwrite a file changed on disk since it was opened.
 
 ## Project generation lifecycle
 

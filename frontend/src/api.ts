@@ -38,6 +38,26 @@ export type LocalProjectImport = {
   files: LocalProjectFile[];
 };
 
+export type LocalWorkspaceEntry = {
+  name: string;
+  path: string;
+  type: "directory" | "file";
+  size?: number;
+  editable?: boolean;
+};
+
+export type LocalWorkspaceListing = {
+  path: string;
+  parent: string | null;
+  entries: LocalWorkspaceEntry[];
+};
+
+export type LocalWorkspaceFile = {
+  path: string;
+  content: string;
+  modifiedAt: number;
+};
+
 const LOCAL_AGENT_URL = "http://127.0.0.1:45821";
 
 async function localAgentRequest<T>(
@@ -135,6 +155,36 @@ export const api = {
         success: true;
         projects: Array<{ name: string; path: string }>;
       }>(token, "/workspace/projects", {}, 15000),
+    workspaceFiles: (token: string, path: string) =>
+      localAgentRequest<{ success: true } & LocalWorkspaceListing>(
+        token,
+        `/workspace/files?path=${encodeURIComponent(path)}`,
+        {},
+        15000,
+      ),
+    readWorkspaceFile: (token: string, path: string) =>
+      localAgentRequest<{ success: true; file: LocalWorkspaceFile }>(
+        token,
+        `/workspace/file?path=${encodeURIComponent(path)}`,
+        {},
+        15000,
+      ),
+    writeWorkspaceFile: (
+      token: string,
+      file: LocalWorkspaceFile,
+      content: string,
+    ) =>
+      localAgentRequest<{
+        success: true;
+        file: Pick<LocalWorkspaceFile, "path" | "modifiedAt">;
+      }>(token, "/workspace/file", {
+        method: "POST",
+        body: JSON.stringify({
+          path: file.path,
+          content,
+          expectedModifiedAt: file.modifiedAt,
+        }),
+      }),
     importProject: (token: string, path: string) =>
       localAgentRequest<{ success: true; project: LocalProjectImport }>(
         token,

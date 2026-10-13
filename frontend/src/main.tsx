@@ -182,6 +182,7 @@ function App({ user }: { user: User }) {
     useState<LocalWorkspaceFile | null>(null);
   const [workspaceEditorDraft, setWorkspaceEditorDraft] = useState("");
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
+  const [syncingGeneratedFiles, setSyncingGeneratedFiles] = useState(false);
   const [localAction, setLocalAction] = useState<"build" | "test" | null>(null);
   const [localResult, setLocalResult] = useState<LocalProjectResult | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
@@ -536,6 +537,51 @@ function App({ user }: { user: User }) {
     }
   }
 
+  async function syncGeneratedFiles() {
+    if (
+      !selected ||
+      !localAgentInfo ||
+      !generatedFiles.length ||
+      syncingGeneratedFiles ||
+      localAction
+    ) {
+      return;
+    }
+
+    const localPath = `projects/${selected.id}`;
+    if (
+      !window.confirm(
+        `Copy ${generatedFiles.length} generated files to ${localAgentInfo.workspaceRoot}\\${localPath.replaceAll("/", "\\")}? Matching files in this DevForge project folder will be overwritten.`,
+      )
+    ) {
+      return;
+    }
+
+    setSyncingGeneratedFiles(true);
+    setLocalAgentError(null);
+    try {
+      const synced = await api.localAgent.syncProject(
+        localAgentToken,
+        localPath,
+        generatedFiles,
+      );
+      setWorkspaceEditorFile(null);
+      setWorkspaceEditorDraft("");
+      await loadWorkspaceDirectory(synced.path);
+      setLogs((current) => [
+        ...current,
+        `Copied ${synced.files} generated files to ${synced.path} on ${localAgentInfo.machine}. The folder is open in Local workspace files.`,
+      ]);
+    } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : "Could not copy generated files to your PC.";
+      setLocalAgentError(message);
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+    } finally {
+      setSyncingGeneratedFiles(false);
+    }
+  }
+
   async function selectProject(projectId: string) {
     try {
       const response = await api.project(projectId);
@@ -808,6 +854,15 @@ function App({ user }: { user: User }) {
                 <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={isBusy} className="w-full h-36 rounded-xl bg-slate-950 border border-slate-800 p-3 outline-none focus:border-indigo-500 disabled:opacity-60" placeholder="Describe the software you want to build..." />
                 <div className="flex gap-2 mt-3">
                   <button disabled={isBusy} onClick={() => void generate()} className="bg-indigo-600 disabled:opacity-50 rounded-lg px-4 py-2">{activeOperation === "generate" && generationStatus === "STARTING" ? "Starting..." : activeOperation === "generate" && generationStatus === "RUNNING" ? "Generating..." : "Generate"}</button>
+                  <button
+                    type="button"
+                    disabled={!localAgentInfo || !generatedFiles.length || syncingGeneratedFiles || Boolean(localAction)}
+                    onClick={() => void syncGeneratedFiles()}
+                    className="rounded-lg border border-indigo-500/50 px-4 py-2 text-indigo-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    title={!localAgentInfo ? "Start and connect the Local Agent first." : "Copy the saved generated files into the Local Agent workspace."}
+                  >
+                    {syncingGeneratedFiles ? "Syncing to PC..." : "Sync files to PC"}
+                  </button>
                   <button disabled={Boolean(localAction) || !localAgentInfo || !generatedFiles.length} onClick={() => void runLocalAction("build")} className="rounded-lg bg-slate-800 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50">{localAction === "build" ? "Building..." : "Build locally"}</button>
                   <button disabled={Boolean(localAction) || !localAgentInfo || !generatedFiles.length} onClick={() => void runLocalAction("test")} className="rounded-lg bg-slate-800 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50">{localAction === "test" ? "Testing..." : "Test locally"}</button>
                   <button disabled={isBusy || !generatedFiles.length} onClick={() => void review()} className="rounded-lg bg-slate-800 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50">{activeOperation === "review" && isBusy ? "Reviewing..." : "AI Review"}</button>
@@ -872,8 +927,13 @@ function App({ user }: { user: User }) {
                   {localAgentError && (
                     <p role="alert" className="mt-3 text-xs text-red-300">{localAgentError}</p>
                   )}
+                  {!localAgentInfo && (
+                    <p className="mt-3 text-xs leading-5 text-amber-300">
+                      To start the Local Agent, open a terminal in the DevForge project folder on your PC and run <code>npm run agent:dev</code>. Keep that terminal open, copy the pairing token printed there, paste it above, then select <strong>Connect local agent</strong>.
+                    </p>
+                  )}
                   <p className="mt-3 text-xs leading-5 text-slate-500">
-                    Import uploads up to 300 text files and 2 MB from a folder in the agent workspace; dependency/build folders and secret environment files are skipped. Imported source is stored in your account for AI review. Build and test scripts run on your PC; only connect to projects you trust.
+                    Generated files are saved in your DevForge account first. Use <strong>Sync files to PC</strong> to copy them into <code>projects/{selected.id}</code>, or choose Build/Test to sync and execute them. Import uploads up to 300 text files and 2 MB; dependency/build folders and secret environment files are skipped. Build and test scripts run on your PC; only run projects you trust.
                   </p>
                 </div>
                 {localResult && (

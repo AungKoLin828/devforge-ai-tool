@@ -21,11 +21,12 @@ DevForge AI is an AI-assisted project workspace built around GitHub sign-in, Pos
 6. `npx prisma migrate dev --name init`
 7. `npm run build`
 8. `npm run dev:netlify`
-9. Run the local agent separately with `npm run agent:dev`. If `DEVFORGE_AGENT_TOKEN` is unset, the agent prints a random pairing token in its terminal.
+9. On your PC, open a second terminal in the DevForge repository folder and run `npm run agent:dev`. Keep the terminal open. If `DEVFORGE_AGENT_TOKEN` is unset, the agent prints a random pairing token in its terminal.
 10. In the signed-in project workspace, paste that token into **Local agent pairing token** and select **Connect local agent**. The token is saved in this browser's local storage. Generated files are written under `<DEVFORGE_WORKSPACE>/projects/<project-id>`.
 11. Select **Build locally** or **Test locally** to run the generated project's corresponding `package.json` script. The app asks for confirmation first because project install/build/test scripts can execute code on your PC.
 12. To bring in an existing local project, connect the Local Agent and choose a folder under its workspace in **Import a folder from this workspace**. Folders directly under the workspace and project folders under its `projects/` directory are listed. Review the confirmation before uploading: import skips dependency/build output directories, environment secret files, and common private-key files; it accepts up to 300 text files and 2 MB. Imported files are stored as a `CODE` artifact in PostgreSQL and can be AI-reviewed or copied to an isolated DevForge workspace folder for local build/test.
 13. Use **Local workspace files** to browse and edit text files under the agent workspace. **Save to PC** writes to the selected existing file. Hidden/secret files, dependency folders, symlinks, binary files and files larger than 1 MB are not available in the browser editor; edits are local and are not automatically uploaded into a DevForge project artifact.
+14. Generated artifacts stay in your DevForge account until copied to your computer. Select **Sync files to PC** to copy them under `<DEVFORGE_WORKSPACE>/projects/<project-id>` and open that folder in **Local workspace files**. **Build locally** and **Test locally** also sync the files before running project scripts.
 
 ## Prisma setup
 

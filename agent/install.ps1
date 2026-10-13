@@ -25,7 +25,18 @@ $expectedHashes = @{
 }
 
 New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
-New-Item -ItemType Directory -Path $workspace -Force | Out-Null
+try {
+  New-Item -ItemType Directory -Path $workspace -Force | Out-Null
+  $workspaceProbe = Join-Path $workspace (".devforge-write-check-" + [guid]::NewGuid().ToString("N"))
+  [System.IO.File]::WriteAllText($workspaceProbe, "")
+  Remove-Item -LiteralPath $workspaceProbe -Force
+}
+catch {
+  if ($workspaceProbe -and (Test-Path -LiteralPath $workspaceProbe)) {
+    Remove-Item -LiteralPath $workspaceProbe -Force -ErrorAction SilentlyContinue
+  }
+  throw "Cannot create or write to workspace '$workspace'. Choose a folder you own, such as '$HOME\DevForge', or create/allow access to the selected folder, then rerun the installer. Original error: $($_.Exception.Message)"
+}
 
 foreach ($file in @("index.js", "executor.js", "security.js")) {
   $destination = Join-Path $sourceRoot $file
@@ -64,4 +75,4 @@ Write-Host "Agent files: $installRoot"
 Write-Host "Workspace:   $workspace"
 Write-Host ""
 Write-Host "Start the agent with:"
-Write-Host "& '$launcherPath'"
+Write-Host "powershell.exe -NoProfile -ExecutionPolicy Bypass -File '$launcherPath'"

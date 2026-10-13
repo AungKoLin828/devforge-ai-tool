@@ -52,12 +52,13 @@ You do **not** need to clone or download the DevForge application repository, an
    To choose a different local workspace, pass a folder path:
 
    ```powershell
-   powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -WorkspacePath "D:\DevForge"
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -WorkspacePath "$HOME\DevForge"
    ```
 
    `-ExecutionPolicy Bypass` applies only to this installer process; it does not change the machine's PowerShell execution policy. If your organization enforces an execution policy through Group Policy and blocks this command, ask your administrator to approve the installer rather than changing system policy.
+   Choose a folder your Windows account can create and write to. A path directly under another drive, such as `D:\DevForge`, may be blocked by that drive's permissions; use `$HOME\DevForge` or an existing writable folder on that drive instead. The installer checks workspace write access and prints a specific error if permission is denied.
 
-4. Start the agent using the command printed by the installer. Keep its PowerShell window open. The agent prints a random **Pairing token** when it starts.
+4. Start the agent using the `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ...` command printed by the installer. This process-only bypass also lets the generated launcher run without changing the machine's execution policy. Keep its PowerShell window open. The agent prints a random **Pairing token** when it starts.
 5. In the signed-in DevForge web app, paste the token into **Local agent pairing token** and select **Connect local agent**.
 6. Select **Sync files to PC** to copy generated artifacts into `<workspace>\projects\<project-id>`. This direction transfers generated files from DevForge to your PC. Your other local project files are not uploaded unless you explicitly use **Import local project**.
 

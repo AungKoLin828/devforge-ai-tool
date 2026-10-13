@@ -1,6 +1,6 @@
 import { json, error, body } from "./http.js";
 import { requireAuth, AuthError, createSession, clearSession, } from "./auth.js";
-import { githubLoginUrl, exchange, githubUser, upsertGithubUser, } from "./github.js";
+import { githubOAuthConfig, githubLoginUrl, exchange, githubUser, upsertGithubUser, } from "./github.js";
 import { randomToken } from "./crypto.js";
 import { prisma } from "./db.js";
 import { create, chatWithProject, detail, importProject, list, owner, remove, startGenerateProject, startReviewProject, } from "./projects.js";
@@ -14,10 +14,19 @@ export async function handleApi(req) {
         const url = new URL(req.url);
         const path = url.pathname.replace(/^\/api\/?/, "");
         if (path === "auth/github" && req.method === "GET") {
+            let oauthConfig;
+            try {
+                oauthConfig = githubOAuthConfig(url);
+            }
+            catch (cause) {
+                return error(cause instanceof Error
+                    ? cause.message
+                    : "GitHub OAuth is not configured for this site", 500);
+            }
             const state = randomToken();
-            const secure = process.env.NODE_ENV === "production" ? " Secure;" : "";
+            const secure = url.protocol === "https:" ? " Secure;" : "";
             const oauthCookie = `devforge_oauth=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600;${secure}`;
-            const response = redirect(githubLoginUrl(state));
+            const response = redirect(githubLoginUrl(state, oauthConfig));
             response.headers.set("set-cookie", oauthCookie);
             return response;
         }
@@ -30,10 +39,28 @@ export async function handleApi(req) {
                 .map((item) => item.trim())
                 .find((item) => item.startsWith("devforge_oauth="))
                 ?.slice("devforge_oauth=".length);
-            if (!code || !state || !expected || state !== expected) {
-                return error("Invalid OAuth state", 400);
+            if (!code) {
+                return error("GitHub did not return an authorization code. Start sign-in again.", 400);
             }
-            const token = await exchange(code);
+            if (!state) {
+                return error("GitHub did not return OAuth state. Start sign-in again from the same site.", 400);
+            }
+            if (!expected) {
+                return error("The OAuth state cookie is missing. Start sign-in from this same site (localhost or the deployed site) and allow cookies; do not open the callback URL directly.", 400);
+            }
+            if (state !== expected) {
+                return error("OAuth state did not match. Sign-in started on a different site or an older login attempt was reused. Start again from the same site.", 400);
+            }
+            let oauthConfig;
+            try {
+                oauthConfig = githubOAuthConfig(url);
+            }
+            catch (cause) {
+                return error(cause instanceof Error
+                    ? cause.message
+                    : "GitHub OAuth is not configured for this site", 500);
+            }
+            const token = await exchange(code, oauthConfig);
             const profile = await githubUser(token);
             const user = await upsertGithubUser(token, profile);
             const sessionCookie = await createSession({
@@ -43,10 +70,14 @@ export async function handleApi(req) {
                 email: user.email,
                 avatarUrl: user.avatarUrl,
             });
+            const localHost = url.hostname === "localhost" ||
+                url.hostname === "127.0.0.1" ||
+                url.hostname === "[::1]" ||
+                url.hostname === "::1";
             return new Response(null, {
                 status: 302,
                 headers: {
-                    Location: process.env.APP_URL || "/",
+                    Location: localHost ? `${url.origin}/` : process.env.APP_URL || "/",
                     "Set-Cookie": sessionCookie,
                 },
             });

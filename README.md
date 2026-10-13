@@ -15,15 +15,15 @@ DevForge AI is an AI-assisted project workspace built around GitHub sign-in, Pos
 
 1. Install Node.js 22 LTS, Git and PostgreSQL.
 2. Copy `.env.example` to `.env` and fill values.
-3. Create a GitHub OAuth App. Local callback: `http://localhost:8888/api/auth/github/callback`.
-4. `npm install`
-5. `npm run prisma:generate`
-6. `npx prisma migrate dev --name init`
-7. `npm run build`
-8. `npm run dev:netlify`
+3. Create a **separate GitHub OAuth App for local development**. Set its Homepage URL to `http://localhost:8888` and its Authorization callback URL to `http://localhost:8888/api/auth/github/callback`. Put its client ID and secret in `GITHUB_LOCAL_CLIENT_ID` and `GITHUB_LOCAL_CLIENT_SECRET` in your local `.env`. Keep production `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `GITHUB_CALLBACK_URL` configured in Netlify; the app selects OAuth credentials based on whether the sign-in request comes from localhost or the deployed host.
+4. Run `npm install`.
+5. Run `npm run prisma:generate`.
+6. Apply the checked-in PostgreSQL schema migration with `npm run prisma:deploy`. This creates the application's tables in the database selected by `DATABASE_URL` (or `NETLIFY_DB_URL` if `DATABASE_URL` is unset).
+7. Run `npm run build`.
+8. Start the local app at `http://localhost:8888` with `npm run dev:netlify`. Always start GitHub sign-in from this same origin. Do not start sign-in on Netlify and then open the localhost callback, or start locally and return to the Netlify callback: the OAuth state cookie is intentionally restricted to the site where login began.
 9. On your PC, open a second terminal in the DevForge repository folder and run `npm run agent:dev`. Keep the terminal open. If `DEVFORGE_AGENT_TOKEN` is unset, the agent prints a random pairing token in its terminal.
 10. In the signed-in project workspace, paste that token into **Local agent pairing token** and select **Connect local agent**. The token is saved in this browser's local storage. Generated files are written under `<DEVFORGE_WORKSPACE>/projects/<project-id>`.
-11. Select **Build locally** or **Test locally** to run the generated project's corresponding `package.json` script. The app asks for confirmation first because project install/build/test scripts can execute code on your PC.
+11. Select **Build locally** or **Test locally** to run the generated project's corresponding build/test command. The app asks for confirmation first because project scripts can execute code on your PC.
 12. To bring in an existing local project, connect the Local Agent and choose a folder under its workspace in **Import a folder from this workspace**. Folders directly under the workspace and project folders under its `projects/` directory are listed. Review the confirmation before uploading: import skips dependency/build output directories, environment secret files, and common private-key files; it accepts up to 300 text files and 2 MB. Imported files are stored as a `CODE` artifact in PostgreSQL and can be AI-reviewed or copied to an isolated DevForge workspace folder for local build/test.
 13. Use **Local workspace files** to browse and edit text files under the agent workspace. **Save to PC** writes to the selected existing file. Hidden/secret files, dependency folders, symlinks, binary files and files larger than 1 MB are not available in the browser editor; edits are local and are not automatically uploaded into a DevForge project artifact.
 14. Generated artifacts stay in your DevForge account until copied to your computer. Select **Sync files to PC** to copy them under `<DEVFORGE_WORKSPACE>/projects/<project-id>` and open that folder in **Local workspace files**. **Build locally** and **Test locally** also sync the files before running project scripts.
@@ -73,6 +73,8 @@ The agent listens on `127.0.0.1` only and should be started on the same PC and b
 ## Prisma setup
 
 This starter is pinned to Prisma ORM **7.10.0**. `prisma`, `@prisma/client`, and `@prisma/adapter-pg` are intentionally kept on the same exact version. The generated Prisma Client is not committed; `npm run prisma:generate` creates it under `src/generated/prisma/`.
+
+Apply database changes with `npm run prisma:deploy` before starting the app against a new database. For a hosted deployment, run the same command against the production database using the production database connection string configured in Netlify; do not change the local `.env` to point at production unless that is intentional. `DATABASE_URL` takes precedence, with `NETLIFY_DB_URL` used as a fallback.
 
 If you previously installed a broken Prisma package, remove `node_modules` and `package-lock.json`, then run `npm install` before running `npm run prisma:generate`. Do not install Prisma globally.
 

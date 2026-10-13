@@ -909,7 +909,10 @@ function App({ user }: { user: User }) {
         </aside>
       </div>
 
-      <footer className="h-9 border-t border-slate-800 px-4 flex items-center text-xs text-slate-500">IDE · Terminal · Build · Test · Review · Git · GitHub</footer>
+      <footer className="min-h-9 border-t border-slate-800 px-4 py-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-slate-500">
+        <span>IDE · Terminal · Build · Test · Review · Git · GitHub</span>
+        <span>© {new Date().getFullYear()} Aung Ko Lin. All rights reserved.</span>
+      </footer>
     </div>
   );
 }

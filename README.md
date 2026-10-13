@@ -28,6 +28,20 @@ DevForge AI is an AI-assisted project workspace built around GitHub sign-in, Pos
 13. Use **Local workspace files** to browse and edit text files under the agent workspace. **Save to PC** writes to the selected existing file. Hidden/secret files, dependency folders, symlinks, binary files and files larger than 1 MB are not available in the browser editor; edits are local and are not automatically uploaded into a DevForge project artifact.
 14. Generated artifacts stay in your DevForge account until copied to your computer. Select **Sync files to PC** to copy them under `<DEVFORGE_WORKSPACE>/projects/<project-id>` and open that folder in **Local workspace files**. **Build locally** and **Test locally** also sync the files before running project scripts.
 
+## Create and start the Local Agent on Windows
+
+The Local Agent is already included in this repository; you do not need to create a separate project or download an installer.
+
+1. Install Node.js 22 LTS.
+2. Clone or download this DevForge repository onto the PC that should run projects.
+3. Open PowerShell in the repository folder (the folder containing `package.json`).
+4. Install dependencies once with `npm install`.
+5. Start the agent with `npm run agent:dev`.
+6. Keep this terminal open. On startup, the agent prints a **Pairing token**. In the DevForge web app, enter that token under **Local agent pairing token**, then click **Connect local agent**.
+7. After connecting, select **Sync files to PC** to put generated files in the agent workspace. The default workspace is `%USERPROFILE%\DevForge`; change it before starting the agent by setting `$env:DEVFORGE_WORKSPACE = "$HOME\DevForge"` in PowerShell.
+
+If the app cannot connect, check that the Local Agent terminal is still running, the entered token matches the terminal output, and the default port `45821` is not blocked or already in use. The agent listens on `127.0.0.1` only and should be started on the same PC and browser that you use to connect.
+
 ## Prisma setup
 
 This starter is pinned to Prisma ORM **7.10.0**. `prisma`, `@prisma/client`, and `@prisma/adapter-pg` are intentionally kept on the same exact version. The generated Prisma Client is not committed; `npm run prisma:generate` creates it under `src/generated/prisma/`.

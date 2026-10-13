@@ -3,7 +3,7 @@ import { requireAuth, AuthError, createSession, clearSession, } from "./auth.js"
 import { githubLoginUrl, exchange, githubUser, upsertGithubUser, } from "./github.js";
 import { randomToken } from "./crypto.js";
 import { prisma } from "./db.js";
-import { create, detail, importProject, list, owner, remove, startGenerateProject, startReviewProject, } from "./projects.js";
+import { create, chatWithProject, detail, importProject, list, owner, remove, startGenerateProject, startReviewProject, } from "./projects.js";
 import { ensureAgent, registerAgent, queueJob, claimJob, } from "./agent.js";
 const redirect = (url, status = 302) => new Response(null, {
     status,
@@ -117,6 +117,13 @@ export async function handleApi(req) {
                     success: true,
                     ...result,
                 }, 202);
+            }
+            if (action === "chat" && req.method === "POST") {
+                const requestBody = await body(req);
+                return json({
+                    success: true,
+                    ...(await chatWithProject(projectId, user.id, requestBody.messages)),
+                });
             }
             // GET /api/projects/:projectId/runs/:runId
             const runMatch = action?.match(/^runs\/([^/]+)$/);
@@ -237,7 +244,8 @@ export async function handleApi(req) {
         }
         if (message.includes("required") ||
             message.includes("30,000 characters") ||
-            message.includes("Unsupported AI provider")) {
+            message.includes("Unsupported AI provider") ||
+            message.startsWith("Chat ")) {
             return error(message, 400);
         }
         console.error("API request failed", message);

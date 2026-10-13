@@ -6,6 +6,11 @@ export type User = {
   avatarUrl: string | null;
 };
 
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 export type LocalAgentInfo = {
   machine: string;
   platform: string;
@@ -86,7 +91,9 @@ async function localAgentRequest<T>(
     return body as T;
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === "AbortError") {
-      throw new Error("Local agent request timed out.");
+      throw new Error(
+        "The Local Agent request timed out. A build/test can take up to 24 minutes; check the agent terminal and try again if it is still running.",
+      );
     }
     if (cause instanceof TypeError) {
       throw new Error(
@@ -138,6 +145,11 @@ export const api = {
     request<any>(`/api/projects/${id}/generate`, {
       method: "POST",
       body: JSON.stringify({ prompt }),
+    }),
+  chat: (id: string, messages: ChatMessage[]) =>
+    request<{ success: true; answer: string }>(`/api/projects/${id}/chat`, {
+      method: "POST",
+      body: JSON.stringify({ messages }),
     }),
   history: (id: string) => request<any>(`/api/projects/${id}/history`),
   agent: () => request<any>("/api/agent"),
@@ -209,6 +221,7 @@ export const api = {
           method: "POST",
           body: JSON.stringify({ path }),
         },
+        25 * 60 * 1000,
       ),
   },
 };

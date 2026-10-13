@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   api,
+  type ChatMessage,
   type LocalProjectResult,
   type LocalWorkspaceEntry,
   type LocalWorkspaceFile,
@@ -160,6 +161,9 @@ function App({ user }: { user: User }) {
   const [selected, setSelected] = useState<any>();
   const [prompt, setPrompt] = useState("");
   const [logs, setLogs] = useState<string[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
   const [localAgentToken, setLocalAgentToken] = useState(
     () => window.localStorage.getItem("devforge-local-agent-token") || "",
   );
@@ -215,6 +219,7 @@ function App({ user }: { user: User }) {
       setProjects((current) => [response.project, ...current]);
       setSelected(response.project);
       setPrompt("");
+      setChatMessages([]);
       resetGeneration();
     } catch (cause) {
       setLogs((current) => [...current, `ERROR: ${cause instanceof Error ? cause.message : "Could not create project."}`]);
@@ -457,6 +462,7 @@ function App({ user }: { user: User }) {
       setProjects((current) => [response.project, ...current]);
       setSelected(response.project);
       setPrompt("");
+      setChatMessages([]);
       setLocalResult(null);
       resetGeneration();
       setLogs((current) => [
@@ -587,9 +593,39 @@ function App({ user }: { user: User }) {
       const response = await api.project(projectId);
       setSelected(response.project);
       setPrompt("");
+      setChatMessages([]);
       resetGeneration();
     } catch (cause) {
       setLogs((current) => [...current, `ERROR: ${cause instanceof Error ? cause.message : "Could not open project."}`]);
+    }
+  }
+
+  async function sendChatMessage() {
+    const question = chatInput.trim();
+    if (!selected || !question || chatBusy) return;
+
+    const nextMessages: ChatMessage[] = [
+      ...chatMessages.slice(-11),
+      { role: "user", content: question },
+    ];
+    setChatMessages(nextMessages);
+    setChatInput("");
+    setChatBusy(true);
+    try {
+      const response = await api.chat(selected.id, nextMessages);
+      setChatMessages((current) => [
+        ...current,
+        { role: "assistant", content: response.answer },
+      ]);
+    } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : "Could not get an AI response.";
+      setChatMessages((current) => [
+        ...current,
+        { role: "assistant", content: `Sorry, I couldn't answer: ${message}` },
+      ]);
+    } finally {
+      setChatBusy(false);
     }
   }
 
@@ -961,11 +997,87 @@ function App({ user }: { user: User }) {
           )}
         </main>
 
-        <aside className="border-l border-slate-800 flex flex-col min-h-0">
-          <div className="p-4 border-b border-slate-800 font-semibold">AI Assistant</div>
-          <div className="flex-1 p-4 overflow-auto text-sm">
-            {logs.map((entry, index) => <div key={`${index}-${entry}`} className="mb-3 text-slate-300">{entry}</div>)}
+        <aside className="border-l border-slate-800 flex min-h-0 flex-col">
+          <div className="border-b border-slate-800 p-4">
+            <div className="font-semibold">AI Assistant</div>
+            <p className="mt-1 text-xs text-slate-500">
+              Ask follow-up questions about this project.
+            </p>
           </div>
+          <div className="flex-1 space-y-3 overflow-auto p-4 text-sm">
+            {!chatMessages.length && (
+              <p className="text-slate-500">
+                {selected
+                  ? "Ask about the project plan, generated code, build errors, or what to do next."
+                  : "Select a project to start asking questions."}
+              </p>
+            )}
+            {chatMessages.map((message, index) => (
+              <div
+                key={`${index}-${message.role}`}
+                className={`rounded-xl p-3 ${
+                  message.role === "user"
+                    ? "ml-5 bg-indigo-500/15 text-indigo-100"
+                    : "mr-2 border border-slate-800 bg-slate-900 text-slate-200"
+                }`}
+              >
+                <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  {message.role === "user" ? "You" : "DevForge AI"}
+                </div>
+                <p className="whitespace-pre-wrap leading-6">{message.content}</p>
+              </div>
+            ))}
+            {chatBusy && (
+              <p className="text-xs text-amber-300">Thinking about your question...</p>
+            )}
+          </div>
+          <form
+            className="border-t border-slate-800 p-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void sendChatMessage();
+            }}
+          >
+            <textarea
+              value={chatInput}
+              onChange={(event) => setChatInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                  event.preventDefault();
+                  void sendChatMessage();
+                }
+              }}
+              disabled={!selected || chatBusy}
+              maxLength={4000}
+              rows={3}
+              placeholder={selected ? "Ask a question... (Ctrl+Enter to send)" : "Select a project first"}
+              className="w-full resize-y rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-50"
+            />
+            <div className="mt-2 flex items-center justify-between">
+              <span className="text-[10px] text-slate-600">
+                {chatInput.length}/4000
+              </span>
+              <button
+                type="submit"
+                disabled={!selected || !chatInput.trim() || chatBusy}
+                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {chatBusy ? "Answering..." : "Ask"}
+              </button>
+            </div>
+          </form>
+          {logs.length > 0 && (
+            <details className="max-h-36 overflow-auto border-t border-slate-800 px-3 py-2">
+              <summary className="cursor-pointer text-xs text-slate-500">
+                Recent activity ({logs.length})
+              </summary>
+              <div className="mt-2 space-y-2 text-xs text-slate-400">
+                {logs.slice(-20).map((entry, index) => (
+                  <p key={`${index}-${entry}`}>{entry}</p>
+                ))}
+              </div>
+            </details>
+          )}
         </aside>
       </div>
 

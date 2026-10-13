@@ -19,6 +19,8 @@ export const ALLOWED_COMMANDS = [
     "npx",
     "java",
     "javac",
+    "cargo",
+    "go",
     "mvn",
     "mvnw",
     "gradle",

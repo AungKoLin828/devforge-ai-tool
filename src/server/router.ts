@@ -16,6 +16,7 @@ import { randomToken } from "./crypto.js";
 import { prisma } from "./db.js";
 import {
   create,
+  chatWithProject,
   detail,
   importProject,
   list,
@@ -201,6 +202,18 @@ export async function handleApi(req: Request) {
         );
       }
 
+      if (action === "chat" && req.method === "POST") {
+        const requestBody = await body<{ messages: unknown }>(req);
+        return json({
+          success: true,
+          ...(await chatWithProject(
+            projectId,
+            user.id,
+            requestBody.messages,
+          )),
+        });
+      }
+
       // GET /api/projects/:projectId/runs/:runId
       const runMatch = action?.match(/^runs\/([^/]+)$/);
 
@@ -351,7 +364,8 @@ export async function handleApi(req: Request) {
     if (
       message.includes("required") ||
       message.includes("30,000 characters") ||
-      message.includes("Unsupported AI provider")
+      message.includes("Unsupported AI provider") ||
+      message.startsWith("Chat ")
     ) {
       return error(message, 400);
     }

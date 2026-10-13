@@ -78,7 +78,7 @@ If you previously installed a broken Prisma package, remove `node_modules` and `
 
 ## Production notes
 
-Use a managed Postgres database (including Netlify Database if available for the site), set production environment variables in Netlify, and never expose secrets through `VITE_*`. The included Local Agent binds to loopback only and uses a random pairing token unless explicitly configured. By default, it accepts browser requests only from localhost development and the production site; set `DEVFORGE_ALLOWED_ORIGINS` to a comma-separated allowlist for other trusted origins. Build and test are currently supported for generated Node.js projects with `build`, `test`, or `test:unit` scripts. Before public release, add a signed native installer, OS credential storage, CSP/security headers, centralized rate limiting, error tracking and automated CI security scans.
+Use a managed Postgres database (including Netlify Database if available for the site), set production environment variables in Netlify, and never expose secrets through `VITE_*`. The included Local Agent binds to loopback only and uses a random pairing token unless explicitly configured. By default, it accepts browser requests only from localhost development and the production site; set `DEVFORGE_ALLOWED_ORIGINS` to a comma-separated allowlist for other trusted origins. Build/test supports Node.js `package.json` scripts, Python syntax/unit-test commands, Go modules, Rust Cargo projects, Maven and Gradle projects. Static projects containing `index.html` need no build step; unsupported/missing build configurations now return an actionable result instead of an HTTP error. Local builds/tests can run for up to 12 minutes per command; the browser allows up to 25 minutes for a multi-stage operation. The authenticated AI Assistant chat accepts follow-up project questions using the latest saved project context. Before public release, add a signed native installer, OS credential storage, CSP/security headers, centralized rate limiting, error tracking and automated CI security scans.
 
 ## Phases
 
@@ -92,7 +92,7 @@ Use a managed Postgres database (including Netlify Database if available for the
 
 ## API baseline
 
-`GET /api/auth/github` · `GET /api/auth/github/callback` · `POST /api/auth/logout` · `GET /api/auth/me` · `GET/POST /api/projects` · `POST /api/projects/import` · `GET/DELETE /api/projects/:id` · `POST /api/projects/:id/generate` · `POST /api/projects/:id/review` · `GET /api/projects/:id/runs/:runId` · `GET /api/projects/:id/history` · `POST /api/projects/:id/jobs` · `GET /api/agent` · `POST /api/agent/register` · `POST /api/agent/job/claim` · `POST /api/agent/job/result` · `GET /api/ai/providers`.
+`GET /api/auth/github` · `GET /api/auth/github/callback` · `POST /api/auth/logout` · `GET /api/auth/me` · `GET/POST /api/projects` · `POST /api/projects/import` · `GET/DELETE /api/projects/:id` · `POST /api/projects/:id/generate` · `POST /api/projects/:id/review` · `POST /api/projects/:id/chat` · `GET /api/projects/:id/runs/:runId` · `GET /api/projects/:id/history` · `POST /api/projects/:id/jobs` · `GET /api/agent` · `POST /api/agent/register` · `POST /api/agent/job/claim` · `POST /api/agent/job/result` · `GET /api/ai/providers`.
 
 Deleting a project permanently removes its database record and related artifacts, runs, and jobs. A confirmation prompt is shown in the workspace; copies already synced to a Local Agent workspace are not deleted.
 

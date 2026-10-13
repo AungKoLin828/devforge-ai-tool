@@ -239,8 +239,48 @@ export async function writeWorkspaceFile(root, relativeFilePath, content, expect
         await handle.close();
     }
 }
-async function resolveCommand(command, args) {
+async function resolveCommand(command, args, workingDirectory) {
+    if (["gradlew", "mvnw"].includes(command)) {
+        if (process.platform !== "win32") {
+            return { command: `./${command}`, args };
+        }
+        const wrapperPath = path.join(workingDirectory, command === "gradlew" ? "gradlew.bat" : "mvnw.cmd");
+        try {
+            await fs.access(wrapperPath);
+            return {
+                command: process.env.ComSpec || "cmd.exe",
+                args: [
+                    "/d",
+                    "/s",
+                    "/c",
+                    `"${wrapperPath}" ${args
+                        .map((arg) => `"${arg.replaceAll('"', '""')}"`)
+                        .join(" ")}`,
+                ],
+            };
+        }
+        catch {
+            throw new Error(`The ${command} wrapper file was not found in the project`);
+        }
+    }
     if (process.platform !== "win32" || !["npm", "npx", "pnpm", "yarn"].includes(command)) {
+        if (process.platform === "win32" &&
+            ["mvn", "gradle"].includes(command)) {
+            const executable = command === "mvn" ? "mvn.cmd" : "gradle.bat";
+            for (const directory of (process.env.PATH || "").split(path.delimiter)) {
+                const executablePath = path.join(directory, executable);
+                try {
+                    await fs.access(executablePath);
+                    return {
+                        command: process.env.ComSpec || "cmd.exe",
+                        args: ["/d", "/s", "/c", `"${executablePath}" ${args.map((arg) => `"${arg.replaceAll('"', '""')}"`).join(" ")}`],
+                    };
+                }
+                catch {
+                    // Continue searching PATH.
+                }
+            }
+        }
         return { command, args };
     }
     const cliByCommand = {
@@ -501,10 +541,11 @@ export async function readLocalProject(root, relativeProjectPath) {
 export async function runCommand(root, command, timeoutMs = 120000) {
     validateCommand(command);
     const [bin, ...args] = command.trim().split(/\s+/);
-    const invocation = await resolveCommand(bin, args);
+    const workingDirectory = safePath(root, ".");
+    const invocation = await resolveCommand(bin, args, workingDirectory);
     return new Promise((resolve, reject) => {
         const p = spawn(invocation.command, invocation.args, {
-            cwd: safePath(root, "."),
+            cwd: workingDirectory,
             shell: false,
             windowsHide: true,
         });
@@ -558,22 +599,39 @@ export async function runProjectAction(root, relativeProjectPath, action) {
     const rootRealPath = await fs.realpath(root);
     const safeProjectRoot = await ensureSafeDirectory(rootRealPath, path.relative(rootRealPath, projectRoot));
     const manifestPath = path.join(safeProjectRoot, "package.json");
-    let manifest;
+    const stages = [];
+    const addStage = async (name, command, timeoutMs = 12 * 60 * 1000) => {
+        try {
+            const result = await runCommand(safeProjectRoot, command, timeoutMs);
+            stages.push({ name, command, ...result });
+            return result.code === 0;
+        }
+        catch (cause) {
+            stages.push({
+                name,
+                command,
+                code: null,
+                stdout: "",
+                stderr: cause instanceof Error ? cause.message : "Command failed",
+                truncated: false,
+            });
+            return false;
+        }
+    };
+    let manifest = null;
     try {
         manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
     }
     catch (cause) {
-        if (cause.code === "ENOENT") {
-            throw new Error("This project has no package.json; only Node.js projects are supported for now");
-        }
-        if (cause instanceof SyntaxError) {
+        if (cause.code !== "ENOENT" && cause instanceof SyntaxError) {
             throw new Error("The generated package.json is invalid");
         }
-        throw cause;
+        if (cause.code !== "ENOENT")
+            throw cause;
     }
-    const scripts = manifest.scripts ?? {};
+    const scripts = manifest?.scripts ?? {};
     const hasScript = (name) => typeof scripts[name] === "string" && Boolean(scripts[name].trim());
-    const manager = manifest.packageManager?.split("@")[0];
+    const manager = manifest?.packageManager?.split("@")[0];
     const lockFiles = await Promise.all(["pnpm-lock.yaml", "yarn.lock", "package-lock.json"].map(async (name) => {
         try {
             await fs.access(path.join(safeProjectRoot, name));
@@ -588,41 +646,133 @@ export async function runProjectAction(root, relativeProjectPath, action) {
         : manager === "yarn" || lockFiles.includes("yarn.lock")
             ? "yarn"
             : "npm";
-    const stages = [];
-    const addStage = async (name, command) => {
-        const result = await runCommand(safeProjectRoot, command, 10 * 60 * 1000);
-        stages.push({ name, command, ...result });
-        return result.code === 0;
-    };
-    try {
-        await fs.access(path.join(safeProjectRoot, "node_modules"));
+    if (manifest) {
+        try {
+            await fs.access(path.join(safeProjectRoot, "node_modules"));
+        }
+        catch {
+            const installCommand = packageManager === "pnpm"
+                ? "pnpm install --no-frozen-lockfile"
+                : packageManager === "yarn"
+                    ? "yarn install"
+                    : lockFiles.includes("package-lock.json")
+                        ? "npm ci"
+                        : "npm install";
+            if (!(await addStage("Install dependencies", installCommand))) {
+                return { action, stages, success: false };
+            }
+        }
+        if (action === "build") {
+            if (!hasScript("build")) {
+                stages.push({
+                    name: "Build",
+                    command: `${packageManager} run build`,
+                    code: null,
+                    stdout: "",
+                    stderr: "package.json does not define a build script.",
+                    truncated: false,
+                });
+                return { action, stages, success: false };
+            }
+            const success = await addStage("Build", `${packageManager} run build`);
+            return { action, stages, success };
+        }
+        if (hasScript("test")) {
+            const success = await addStage("Test", `${packageManager} test`);
+            return { action, stages, success };
+        }
+        if (hasScript("test:unit")) {
+            const success = await addStage("Unit tests", `${packageManager} run test:unit`);
+            return { action, stages, success };
+        }
+        stages.push({
+            name: "Test",
+            command: `${packageManager} test`,
+            code: null,
+            stdout: "",
+            stderr: "package.json does not define a test or test:unit script.",
+            truncated: false,
+        });
+        return { action, stages, success: false };
     }
-    catch {
-        const installCommand = packageManager === "pnpm"
-            ? "pnpm install --no-frozen-lockfile"
-            : packageManager === "yarn"
-                ? "yarn install"
-                : lockFiles.includes("package-lock.json")
-                    ? "npm ci"
-                    : "npm install";
-        if (!(await addStage("Install dependencies", installCommand))) {
-            return { action, stages, success: false };
+    const projectEntries = await fs.readdir(safeProjectRoot);
+    const entrySet = new Set(projectEntries);
+    const pythonFiles = projectEntries.some((entry) => entry.endsWith(".py"));
+    if (entrySet.has("go.mod") ||
+        entrySet.has("Cargo.toml") ||
+        entrySet.has("pom.xml") ||
+        entrySet.has("build.gradle") ||
+        entrySet.has("build.gradle.kts")) {
+        if (entrySet.has("go.mod")) {
+            const command = action === "build" ? "go build ./..." : "go test ./...";
+            return {
+                action,
+                stages,
+                success: await addStage(action === "build" ? "Go build" : "Go tests", command),
+            };
+        }
+        if (entrySet.has("Cargo.toml")) {
+            const command = action === "build" ? "cargo build" : "cargo test";
+            return {
+                action,
+                stages,
+                success: await addStage(action === "build" ? "Rust build" : "Rust tests", command),
+            };
+        }
+        if (entrySet.has("pom.xml")) {
+            const maven = entrySet.has("mvnw") || entrySet.has("mvnw.cmd") ? "mvnw" : "mvn";
+            const command = action === "build"
+                ? `${maven} package -DskipTests`
+                : `${maven} test`;
+            return {
+                action,
+                stages,
+                success: await addStage(action === "build" ? "Maven build" : "Maven tests", command),
+            };
+        }
+        const gradle = entrySet.has("gradlew") || entrySet.has("gradlew.bat")
+            ? "gradlew"
+            : "gradle";
+        const command = action === "build" ? `${gradle} build` : `${gradle} test`;
+        return {
+            action,
+            stages,
+            success: await addStage(action === "build" ? "Gradle build" : "Gradle tests", command),
+        };
+    }
+    if (entrySet.has("pyproject.toml") ||
+        entrySet.has("setup.py") ||
+        entrySet.has("requirements.txt") ||
+        pythonFiles) {
+        const command = action === "build"
+            ? "python -m compileall -q ."
+            : "python -m unittest discover";
+        return {
+            action,
+            stages,
+            success: await addStage(action === "build" ? "Python syntax check" : "Python unit tests", command),
+        };
+    }
+    if (entrySet.has("index.html")) {
+        if (action === "build") {
+            stages.push({
+                name: "Static site",
+                command: "No build command required",
+                code: 0,
+                stdout: "This project has an index.html and no build configuration. Its static files are ready to serve.",
+                stderr: "",
+                truncated: false,
+            });
+            return { action, stages, success: true };
         }
     }
-    if (action === "build") {
-        if (!hasScript("build")) {
-            throw new Error("No build script is defined in package.json");
-        }
-        const success = await addStage("Build", `${packageManager} run build`);
-        return { action, stages, success };
-    }
-    if (hasScript("test")) {
-        const success = await addStage("Test", `${packageManager} test`);
-        return { action, stages, success };
-    }
-    if (hasScript("test:unit")) {
-        const success = await addStage("Unit tests", `${packageManager} run test:unit`);
-        return { action, stages, success };
-    }
-    throw new Error("No test or test:unit script is defined in package.json");
+    stages.push({
+        name: action === "build" ? "Build configuration" : "Test configuration",
+        command: "Not run",
+        code: null,
+        stdout: "",
+        stderr: "No supported build/test configuration was found. Add a package.json script, Python project files, go.mod, Cargo.toml, pom.xml, or Gradle build file. You can ask the AI Assistant to help create the missing configuration.",
+        truncated: false,
+    });
+    return { action, stages, success: false };
 }

@@ -1,5 +1,14 @@
 import path from "node:path";
 export function safePath(root: string, relative: string) {
+  if (
+    !relative ||
+    path.isAbsolute(relative) ||
+    /^[a-z]:/i.test(relative) ||
+    relative.split(/[\\/]+/).some((segment) => segment === "..")
+  ) {
+    throw new Error("Path outside workspace is blocked");
+  }
+
   const base = path.resolve(root),
     target = path.resolve(base, relative);
   if (target !== base && !target.startsWith(base + path.sep))

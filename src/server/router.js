@@ -3,7 +3,7 @@ import { requireAuth, AuthError, createSession, clearSession, } from "./auth.js"
 import { githubLoginUrl, exchange, githubUser, upsertGithubUser, } from "./github.js";
 import { randomToken } from "./crypto.js";
 import { prisma } from "./db.js";
-import { create, detail, list, owner, startGenerateProject, startReviewProject, } from "./projects.js";
+import { create, detail, importProject, list, owner, remove, startGenerateProject, startReviewProject, } from "./projects.js";
 import { ensureAgent, registerAgent, queueJob, claimJob, } from "./agent.js";
 const redirect = (url, status = 302) => new Response(null, {
     status,
@@ -77,6 +77,12 @@ export async function handleApi(req) {
                 project: await create(user.id, await body(req)),
             }, 201);
         }
+        if (path === "projects/import" && req.method === "POST") {
+            return json({
+                success: true,
+                project: await importProject(user.id, await body(req)),
+            }, 201);
+        }
         const match = path.match(/^projects\/([^/]+)(?:\/(.+))?$/);
         if (match) {
             const projectId = match[1];
@@ -86,6 +92,10 @@ export async function handleApi(req) {
                     success: true,
                     project: await detail(projectId, user.id),
                 });
+            }
+            if (!action && req.method === "DELETE") {
+                await remove(projectId, user.id);
+                return json({ success: true });
             }
             if (action === "generate" && req.method === "POST") {
                 const requestBody = await body(req);

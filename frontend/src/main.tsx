@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { api, type User } from "./api";
+import { api, type LocalProjectResult, type User } from "./api";
 import { useProjectGeneration } from "./hooks/useProjectGeneration";
-import "./index.css";
 
 function Login() {
   const capabilities = [
@@ -22,14 +21,14 @@ function Login() {
       number: "03",
       title: "Develop locally",
       description:
-        "A restricted-workspace local agent is part of the roadmap for building and testing generated code on your PC.",
+        "Connect a workspace-restricted local agent to import projects and run build or test commands on your PC.",
     },
   ];
 
   const roadmap = [
     ["01", "Generation you can verify", "Available"],
     ["02", "AI code review", "Available"],
-    ["03", "Local build and test agent", "In progress"],
+    ["03", "Local project import, build and test", "Available"],
     ["04", "GitHub synchronization", "Planned"],
     ["05", "More AI providers", "Planned"],
   ];
@@ -154,13 +153,28 @@ function App({ user }: { user: User }) {
   const [selected, setSelected] = useState<any>();
   const [prompt, setPrompt] = useState("");
   const [logs, setLogs] = useState<string[]>([]);
-  const [agent, setAgent] = useState<any>();
+  const [localAgentToken, setLocalAgentToken] = useState(
+    () => window.localStorage.getItem("devforge-local-agent-token") || "",
+  );
+  const [localAgentInfo, setLocalAgentInfo] = useState<{
+    machine: string;
+    platform: string;
+    workspaceRoot: string;
+  } | null>(null);
+  const [localAgentError, setLocalAgentError] = useState<string | null>(null);
+  const [workspaceProjects, setWorkspaceProjects] = useState<
+    Array<{ name: string; path: string }>
+  >([]);
+  const [localImportPath, setLocalImportPath] = useState("");
+  const [importingProject, setImportingProject] = useState(false);
+  const [localAction, setLocalAction] = useState<"build" | "test" | null>(null);
+  const [localResult, setLocalResult] = useState<LocalProjectResult | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const { status: generationStatus, operation: activeOperation, runId, error: generationError, isBusy, generate: runGeneration, review: runReview, reset: resetGeneration } = useProjectGeneration();
 
   async function load() {
-    const [projectResponse, agentResponse] = await Promise.all([api.projects(), api.agent()]);
+    const projectResponse = await api.projects();
     setProjects(projectResponse.projects);
-    setAgent(agentResponse.agent);
     if (!selected && projectResponse.projects[0]) {
       const first = await api.project(projectResponse.projects[0].id);
       setSelected(first.project);
@@ -188,6 +202,40 @@ function App({ user }: { user: User }) {
       resetGeneration();
     } catch (cause) {
       setLogs((current) => [...current, `ERROR: ${cause instanceof Error ? cause.message : "Could not create project."}`]);
+    }
+  }
+
+  async function deleteProject(project: { id: string; name: string }) {
+    const confirmed = window.confirm(
+      `Permanently delete "${project.name}" and its saved artifacts, runs, and history? Any copy already synced to your PC will not be deleted.`,
+    );
+    if (!confirmed || deletingProjectId) return;
+
+    setDeletingProjectId(project.id);
+    try {
+      await api.deleteProject(project.id);
+      setProjects((current) =>
+        current.filter((item) => item.id !== project.id),
+      );
+
+      if (selected?.id === project.id) {
+        setSelected(undefined);
+        setPrompt("");
+        setLocalResult(null);
+        resetGeneration();
+      }
+
+      setLogs((current) => [
+        ...current,
+        `Deleted project "${project.name}" and its saved data.`,
+      ]);
+    } catch (cause) {
+      setLogs((current) => [
+        ...current,
+        `ERROR: ${cause instanceof Error ? cause.message : "Could not delete project."}`,
+      ]);
+    } finally {
+      setDeletingProjectId(null);
     }
   }
 
@@ -239,6 +287,152 @@ function App({ user }: { user: User }) {
     }
   }
 
+  async function connectLocalAgent() {
+    const token = localAgentToken.trim();
+    if (!token) {
+      setLocalAgentError("Enter the pairing token printed by your local agent.");
+      return;
+    }
+
+    setLocalAgentError(null);
+    try {
+      const result = await api.localAgent.health(token);
+      window.localStorage.setItem("devforge-local-agent-token", token);
+      setLocalAgentToken(token);
+      setLocalAgentInfo(result);
+      try {
+        const response = await api.localAgent.workspaceProjects(token);
+        setWorkspaceProjects(response.projects);
+        setLocalImportPath((current) =>
+          response.projects.some((project) => project.path === current)
+            ? current
+            : response.projects[0]?.path || "",
+        );
+      } catch (cause) {
+        setWorkspaceProjects([]);
+        setLocalAgentError(
+          cause instanceof Error
+            ? cause.message
+            : "Could not list folders in the agent workspace.",
+        );
+      }
+    } catch (cause) {
+      setLocalAgentInfo(null);
+      setWorkspaceProjects([]);
+      setLocalAgentError(
+        cause instanceof Error ? cause.message : "Could not connect to the local agent.",
+      );
+    }
+  }
+
+  async function importLocalProject() {
+    const source = workspaceProjects.find(
+      (project) => project.path === localImportPath,
+    );
+    if (!source || !localAgentInfo || importingProject) return;
+
+    if (
+      !window.confirm(
+        `Import text files from "${source.path}" into your DevForge account? Files are uploaded to the server for storage and AI review. Secret environment files and generated dependency/build folders are excluded; review source files for other credentials before importing.`,
+      )
+    ) {
+      return;
+    }
+
+    setImportingProject(true);
+    setLocalAgentError(null);
+    try {
+      const localProject = await api.localAgent.importProject(
+        localAgentToken,
+        source.path,
+      );
+      const response = await api.importProject(
+        localProject.project,
+        localProject.project.name,
+      );
+      setProjects((current) => [response.project, ...current]);
+      setSelected(response.project);
+      setPrompt("");
+      setLocalResult(null);
+      resetGeneration();
+      setLogs((current) => [
+        ...current,
+        `Imported ${localProject.project.files.length} files from ${source.path}. The project is ready for AI review and local build/test.`,
+      ]);
+    } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : "Could not import the local project.";
+      setLocalAgentError(message);
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+    } finally {
+      setImportingProject(false);
+    }
+  }
+
+  async function runLocalAction(action: "build" | "test") {
+    if (!selected || !localAgentInfo || !generatedFiles.length || localAction) {
+      return;
+    }
+
+    const label = action === "build" ? "build" : "test";
+    if (
+      !window.confirm(
+        `This will copy the generated files to your PC (overwriting matching files in this DevForge project folder) and run the project's ${label} scripts locally. Project scripts may execute arbitrary code. Continue only if you trust this generated project.`,
+      )
+    ) {
+      return;
+    }
+
+    setLocalAction(action);
+    setLocalResult(null);
+    const localPath = `projects/${selected.id}`;
+
+    try {
+      const synced = await api.localAgent.syncProject(
+        localAgentToken,
+        localPath,
+        generatedFiles,
+      );
+      setLogs((current) => [
+        ...current,
+        `Copied ${synced.files} generated files to ${synced.path} on ${localAgentInfo.machine}.`,
+      ]);
+
+      const response = await api.localAgent.runProject(
+        localAgentToken,
+        action,
+        synced.path,
+      );
+      setLocalResult(response.result);
+      for (const stage of response.result.stages) {
+        const state = stage.code === 0 ? "passed" : "failed";
+        setLogs((current) => [
+          ...current,
+          `${stage.name} ${state} (${stage.command}, exit ${stage.code ?? "unknown"}).`,
+        ]);
+      }
+      if (!response.result.stages.length) {
+        setLogs((current) => [
+          ...current,
+          `The local agent did not run a ${label} command.`,
+        ]);
+      }
+      if (!response.result.success) {
+        setLogs((current) => [
+          ...current,
+          `Local ${label} failed. See the command output below.`,
+        ]);
+      }
+    } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : `Local ${label} failed.`;
+      setLocalAgentError(message);
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+    } finally {
+      setLocalAction(null);
+    }
+  }
+
   async function selectProject(projectId: string) {
     try {
       const response = await api.project(projectId);
@@ -274,7 +468,7 @@ function App({ user }: { user: User }) {
       <header className="h-14 border-b border-slate-800 px-5 flex items-center justify-between">
         <div className="font-bold">DevForge <span className="text-indigo-400">AI</span></div>
         <div className="flex gap-4 items-center text-sm">
-          <span className={agent?.status === "CONNECTED" ? "text-emerald-400" : "text-amber-400"}>● Agent {agent?.status || "Not paired"}</span>
+          <span className={localAgentInfo ? "text-emerald-400" : "text-amber-400"}>● Local Agent {localAgentInfo ? "Connected" : "Not connected"}</span>
           <span className="text-slate-400">{user.githubUsername || user.email}</span>
           <button onClick={() => api.logout().then(() => location.reload())} className="text-slate-400 hover:text-white">Logout</button>
         </div>
@@ -285,10 +479,24 @@ function App({ user }: { user: User }) {
           <button onClick={create} className="w-full bg-indigo-600 rounded-lg py-2 mb-5">+ New Project</button>
           <div className="text-xs uppercase text-slate-500 mb-2">Projects</div>
           {projects.map((project) => (
-            <button key={project.id} onClick={() => void selectProject(project.id)} className={`block w-full text-left rounded-lg p-3 mb-1 ${selected?.id === project.id ? "bg-slate-800" : "hover:bg-slate-900"}`}>
-              <div>{project.name}</div>
-              <div className="text-xs text-slate-500 mt-1">{project.status}</div>
-            </button>
+            <div key={project.id} className={`mb-1 rounded-lg ${selected?.id === project.id ? "bg-slate-800" : "hover:bg-slate-900"}`}>
+              <button
+                onClick={() => void selectProject(project.id)}
+                className="block w-full rounded-t-lg p-3 text-left"
+              >
+                <div>{project.name}</div>
+                <div className="mt-1 text-xs text-slate-500">{project.status}</div>
+              </button>
+              <button
+                type="button"
+                disabled={deletingProjectId !== null}
+                onClick={() => void deleteProject(project)}
+                className="w-full rounded-b-lg px-3 pb-2 text-left text-xs text-slate-500 transition hover:text-red-300 disabled:cursor-wait disabled:opacity-50"
+                aria-label={`Delete ${project.name}`}
+              >
+                {deletingProjectId === project.id ? "Deleting..." : "Delete project"}
+              </button>
+            </div>
           ))}
         </aside>
 
@@ -367,9 +575,83 @@ function App({ user }: { user: User }) {
                 <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={isBusy} className="w-full h-36 rounded-xl bg-slate-950 border border-slate-800 p-3 outline-none focus:border-indigo-500 disabled:opacity-60" placeholder="Describe the software you want to build..." />
                 <div className="flex gap-2 mt-3">
                   <button disabled={isBusy} onClick={() => void generate()} className="bg-indigo-600 disabled:opacity-50 rounded-lg px-4 py-2">{activeOperation === "generate" && generationStatus === "STARTING" ? "Starting..." : activeOperation === "generate" && generationStatus === "RUNNING" ? "Generating..." : "Generate"}</button>
-                  <button disabled title="Local build and test workflow is not connected in the web app yet." className="cursor-not-allowed rounded-lg bg-slate-800 px-4 py-2 text-slate-500">Build · coming soon</button>
+                  <button disabled={Boolean(localAction) || !localAgentInfo || !generatedFiles.length} onClick={() => void runLocalAction("build")} className="rounded-lg bg-slate-800 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50">{localAction === "build" ? "Building..." : "Build locally"}</button>
+                  <button disabled={Boolean(localAction) || !localAgentInfo || !generatedFiles.length} onClick={() => void runLocalAction("test")} className="rounded-lg bg-slate-800 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50">{localAction === "test" ? "Testing..." : "Test locally"}</button>
                   <button disabled={isBusy || !generatedFiles.length} onClick={() => void review()} className="rounded-lg bg-slate-800 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50">{activeOperation === "review" && isBusy ? "Reviewing..." : "AI Review"}</button>
                 </div>
+                <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                    <label className="flex-1 text-xs text-slate-400">
+                      Local agent pairing token
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        value={localAgentToken}
+                        onChange={(event) => {
+                          const token = event.target.value;
+                          setLocalAgentToken(token);
+                          setLocalAgentInfo(null);
+                          setLocalAgentError(null);
+                          setWorkspaceProjects([]);
+                        }}
+                        placeholder="Paste the token shown in the agent terminal"
+                        className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
+                      />
+                    </label>
+                    <button onClick={() => void connectLocalAgent()} className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-indigo-400">
+                      {localAgentInfo ? "Reconnect agent" : "Connect local agent"}
+                    </button>
+                  </div>
+                  {localAgentInfo && (
+                    <p className="mt-3 text-xs text-emerald-300">
+                      Connected to {localAgentInfo.machine} ({localAgentInfo.platform}). Workspace: {localAgentInfo.workspaceRoot}
+                    </p>
+                  )}
+                  {localAgentInfo && (
+                    <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end">
+                      <label className="flex-1 text-xs text-slate-400">
+                        Import a folder from this workspace
+                        <select
+                          value={localImportPath}
+                          onChange={(event) => setLocalImportPath(event.target.value)}
+                          disabled={!workspaceProjects.length || importingProject}
+                          className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-60"
+                        >
+                          {!workspaceProjects.length && <option value="">No project folders found</option>}
+                          {workspaceProjects.map((project) => (
+                            <option key={project.path} value={project.path}>{project.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => void importLocalProject()}
+                        disabled={!localImportPath || importingProject}
+                        className="rounded-lg border border-indigo-500/50 px-4 py-2 text-sm text-indigo-200 hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {importingProject ? "Importing..." : "Import local project"}
+                      </button>
+                    </div>
+                  )}
+                  {localAgentError && (
+                    <p role="alert" className="mt-3 text-xs text-red-300">{localAgentError}</p>
+                  )}
+                  <p className="mt-3 text-xs leading-5 text-slate-500">
+                    Import uploads up to 300 text files and 2 MB from a folder in the agent workspace; dependency/build folders and secret environment files are skipped. Imported source is stored in your account for AI review. Build and test scripts run on your PC; only connect to projects you trust.
+                  </p>
+                </div>
+                {localResult && (
+                  <div className="mt-4 space-y-3">
+                    {localResult.stages.map((stage, index) => (
+                      <details key={`${stage.name}-${index}`} open={stage.code !== 0} className="rounded-lg border border-slate-800 bg-slate-950/70">
+                        <summary className={`cursor-pointer px-3 py-2.5 text-sm ${stage.code === 0 ? "text-emerald-300" : "text-red-300"}`}>
+                          {stage.name} · {stage.command} · exit {stage.code ?? "unknown"}
+                        </summary>
+                        <pre className="max-h-80 overflow-auto whitespace-pre-wrap border-t border-slate-800 p-3 text-xs leading-5 text-slate-300">{[stage.stdout, stage.stderr && `STDERR:\n${stage.stderr}`, stage.truncated && "[Output truncated at 128 KB]"].filter(Boolean).join("\n\n") || "No command output."}</pre>
+                      </details>
+                    ))}
+                  </div>
+                )}
                 {isBusy && <p className="mt-3 text-sm text-amber-300">{activeOperation === "review" ? "AI review is in progress. You can keep this page open; please avoid submitting another operation for this project." : "Generation is in progress. You can keep this page open; please avoid submitting another operation for this project."}</p>}
                 {runId && <p className="mt-2 text-xs text-slate-500">Project run: {runId}</p>}
                 {generationError && (
@@ -388,7 +670,6 @@ function App({ user }: { user: User }) {
           <div className="flex-1 p-4 overflow-auto text-sm">
             {logs.map((entry, index) => <div key={`${index}-${entry}`} className="mb-3 text-slate-300">{entry}</div>)}
           </div>
-          <div className="p-4 border-t border-slate-800 text-xs text-slate-500">AI provider: OpenRouter · Local execution: Agent</div>
         </aside>
       </div>
 

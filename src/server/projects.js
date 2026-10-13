@@ -33,6 +33,19 @@ export async function detail(id, userId) {
 export const list = (userId) => prisma.project.findMany({
     where: { userId },
 });
+export async function remove(id, userId) {
+    const project = await prisma.project.findUnique({
+        where: { id },
+        select: { id: true, userId: true },
+    });
+    if (!project) {
+        throw new Error("Project not found");
+    }
+    if (project.userId !== userId) {
+        throw new Error("Forbidden");
+    }
+    await prisma.project.delete({ where: { id } });
+}
 export async function create(userId, input) {
     const name = input.name?.trim();
     if (!name) {
@@ -57,6 +70,94 @@ export async function create(userId, input) {
         return createdProject;
     });
     return project;
+}
+export async function importProject(userId, input) {
+    const name = typeof input.name === "string" ? input.name.trim() : "";
+    const sourcePath = typeof input.sourcePath === "string" ? input.sourcePath.trim() : "";
+    const files = input.files;
+    if (!name || name.length > 120) {
+        throw new Error("Project name must be between 1 and 120 characters");
+    }
+    if (!sourcePath || sourcePath.length > 512) {
+        throw new Error("A valid local workspace path is required");
+    }
+    if (sourcePath.startsWith("/") ||
+        /^[a-z]:/i.test(sourcePath) ||
+        sourcePath.includes("\\") ||
+        sourcePath.split("/").some((segment) => !segment || segment === "." || segment === "..")) {
+        throw new Error("Local workspace path must be relative to the agent workspace");
+    }
+    if (!Array.isArray(files) || files.length === 0 || files.length > 300) {
+        throw new Error("Project must contain between 1 and 300 importable files");
+    }
+    let totalBytes = 0;
+    const seenPaths = new Set();
+    const importedFiles = files.map((file) => {
+        if (!file || typeof file !== "object") {
+            throw new Error("Local project contains an invalid file");
+        }
+        const candidate = file;
+        if (typeof candidate.path !== "string" ||
+            typeof candidate.content !== "string") {
+            throw new Error("Local project contains an invalid file");
+        }
+        const filePath = candidate.path;
+        const segments = filePath.split("/");
+        if (!filePath ||
+            filePath.startsWith("/") ||
+            filePath.includes("\\") ||
+            /^[a-z]:/i.test(filePath) ||
+            segments.some((segment) => !segment ||
+                segment === "." ||
+                segment === ".." ||
+                /[<>:"|?*\u0000-\u001f]/.test(segment) ||
+                /[. ]$/.test(segment) ||
+                /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(segment))) {
+            throw new Error("Local project contains a path outside its project folder");
+        }
+        if (/^\.env(?:\.|$)/i.test(segments[segments.length - 1]) &&
+            ![".env.example", ".env.sample"].includes(segments[segments.length - 1].toLowerCase())) {
+            throw new Error("Environment secret files cannot be imported");
+        }
+        const normalizedPath = filePath.toLowerCase();
+        if (seenPaths.has(normalizedPath)) {
+            throw new Error("Local project contains duplicate file paths");
+        }
+        seenPaths.add(normalizedPath);
+        totalBytes += Buffer.byteLength(candidate.content, "utf8");
+        if (totalBytes > 2 * 1024 * 1024) {
+            throw new Error("Local project exceeds the 2 MB text import limit");
+        }
+        return { path: filePath, content: candidate.content };
+    });
+    const project = await prisma.$transaction(async (tx) => {
+        const createdProject = await tx.project.create({
+            data: {
+                userId,
+                name,
+                description: `Imported from local workspace: ${sourcePath}`,
+                stack: "Imported project",
+                status: "READY",
+            },
+        });
+        await tx.projectMember.create({
+            data: {
+                projectId: createdProject.id,
+                userId,
+                role: "OWNER",
+            },
+        });
+        await tx.artifact.create({
+            data: {
+                projectId: createdProject.id,
+                type: "CODE",
+                name: "imported-files.json",
+                content: importedFiles,
+            },
+        });
+        return createdProject;
+    });
+    return detail(project.id, userId);
 }
 /**
  * Start generation without waiting for the AI provider.

@@ -17,8 +17,10 @@ import { prisma } from "./db.js";
 import {
   create,
   detail,
+  importProject,
   list,
   owner,
+  remove,
   startGenerateProject,
   startReviewProject,
 } from "./projects.js";
@@ -129,6 +131,21 @@ export async function handleApi(req: Request) {
       );
     }
 
+    if (path === "projects/import" && req.method === "POST") {
+      return json(
+        {
+          success: true,
+          project: await importProject(
+            user.id,
+            await body<{ name: unknown; sourcePath: unknown; files: unknown }>(
+              req,
+            ),
+          ),
+        },
+        201,
+      );
+    }
+
     const match = path.match(/^projects\/([^/]+)(?:\/(.+))?$/);
 
     if (match) {
@@ -140,6 +157,11 @@ export async function handleApi(req: Request) {
           success: true,
           project: await detail(projectId, user.id),
         });
+      }
+
+      if (!action && req.method === "DELETE") {
+        await remove(projectId, user.id);
+        return json({ success: true });
       }
 
       if (action === "generate" && req.method === "POST") {

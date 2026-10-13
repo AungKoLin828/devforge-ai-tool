@@ -59,7 +59,7 @@ class RequestTimeoutError extends Error {
 class PollingTimeoutError extends Error {
   constructor() {
     super(
-      "Status checking timed out. Generation may still be running on the server. Check the existing run before retrying.",
+      "Status checking timed out. The operation may still be running on the server. Check the existing run before retrying.",
     );
     this.name = "PollingTimeoutError";
   }
@@ -92,7 +92,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
 
     if (response.status === 409) {
       throw new ApiError(
-        `${message} An existing generation may still be running; check its status before retrying.`,
+        `${message} An existing project operation may still be running; check its status before retrying.`,
         response.status,
       );
     }
@@ -207,6 +207,7 @@ export function useProjectGeneration(options: Options = {}) {
   } = options;
 
   const [status, setStatus] = useState<GenerationStatus>("IDLE");
+  const [operation, setOperation] = useState<"generate" | "review" | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -279,7 +280,7 @@ export function useProjectGeneration(options: Options = {}) {
           }
 
           if (["FAILED", "ERROR", "CANCELLED"].includes(current)) {
-            throw new Error(run.error || data.message || "Generation failed.");
+            throw new Error(run.error || data.message || "Project operation failed.");
           }
 
           updateStatus("RUNNING");
@@ -294,7 +295,7 @@ export function useProjectGeneration(options: Options = {}) {
           consecutiveErrors += 1;
           if (consecutiveErrors > maxConsecutivePollErrors) {
             throw new Error(
-              `Unable to check generation status after ${maxConsecutivePollErrors} retries. ${errorMessage(cause)} The generation may still be running; check run ${id} before retrying.`,
+              `Unable to check project status after ${maxConsecutivePollErrors} retries. ${errorMessage(cause)} The operation may still be running; check run ${id} before retrying.`,
             );
           }
 
@@ -313,9 +314,10 @@ export function useProjectGeneration(options: Options = {}) {
       projectId: string,
       prompt: string,
       provider = "OPENROUTER",
+      operation: "generate" | "review" = "generate",
     ): Promise<GenerationRun | null> => {
       if (activeRef.current) {
-        updateError("A generation request is already active in this page.");
+        updateError("Another project operation is already active in this page.");
         return null;
       }
 
@@ -324,7 +326,7 @@ export function useProjectGeneration(options: Options = {}) {
         return null;
       }
 
-      if (!prompt.trim()) {
+      if (operation === "generate" && !prompt.trim()) {
         updateError("Please enter a project description.");
         return null;
       }
@@ -334,11 +336,12 @@ export function useProjectGeneration(options: Options = {}) {
       controllerRef.current = controller;
       updateError(null);
       updateStatus("STARTING");
+      setOperation(operation);
       updateRunId(null);
 
       try {
         const response = await fetchWithTimeout(
-          `/api/projects/${encodeURIComponent(projectId)}/generate`,
+          `/api/projects/${encodeURIComponent(projectId)}/${operation}`,
           {
             method: "POST",
             credentials: "include",
@@ -347,7 +350,11 @@ export function useProjectGeneration(options: Options = {}) {
               "Content-Type": "application/json",
               Accept: "application/json",
             },
-            body: JSON.stringify({ prompt: prompt.trim(), provider }),
+            body: JSON.stringify(
+              operation === "generate"
+                ? { prompt: prompt.trim(), provider }
+                : {},
+            ),
           },
           controller.signal,
           Math.max(requestTimeoutMs * 2, 20_000),
@@ -357,13 +364,13 @@ export function useProjectGeneration(options: Options = {}) {
 
         if (response.status !== 202) {
           throw new Error(
-            "The server did not return HTTP 202 for the queued generation job. Verify that the backend returns 202 and a run ID.",
+            `The server did not return HTTP 202 for the queued ${operation} job.`,
           );
         }
 
         if (!data.run?.id) {
           throw new Error(
-            "The server accepted the request but did not return a run ID. Check project/run status before retrying.",
+            `The server accepted the ${operation} request but did not return a run ID. Check project/run status before retrying.`,
           );
         }
 
@@ -382,7 +389,7 @@ export function useProjectGeneration(options: Options = {}) {
 
         const message =
           cause instanceof RequestTimeoutError
-            ? "The generation request timed out before the server confirmed the run. The server may still have accepted it; check the project/run status before retrying."
+            ? `The ${operation} request timed out before the server confirmed the run. The server may still have accepted it; check the project/run status before retrying.`
             : errorMessage(cause);
 
         updateError(message);
@@ -397,21 +404,29 @@ export function useProjectGeneration(options: Options = {}) {
     [onFailure, onSuccess, pollRun, requestTimeoutMs, updateError, updateRunId, updateStatus],
   );
 
+  const review = useCallback(
+    (projectId: string) => generate(projectId, "", "OPENROUTER", "review"),
+    [generate],
+  );
+
   const reset = useCallback(() => {
     controllerRef.current?.abort();
     controllerRef.current = null;
     activeRef.current = false;
     updateError(null);
     updateStatus("IDLE");
+    setOperation(null);
     updateRunId(null);
   }, [updateError, updateRunId, updateStatus]);
 
   return {
     status,
+    operation,
     runId,
     error,
     isBusy: status === "STARTING" || status === "RUNNING",
     generate,
+    review,
     reset,
   };
 }

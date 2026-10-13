@@ -1,11 +1,11 @@
 # DevForge AI Tool
 
-Production-oriented foundation covering Phases 1–7: GitHub OAuth, Prisma/Postgres, project orchestration, multi-provider AI abstraction, AI usage model, Local Agent security, browser IDE foundation, job/event protocol, GitHub-ready project metadata, RBAC-ready membership, audit logging, rate-limit-ready boundaries, and production deployment configuration.
+DevForge AI is an AI-assisted project workspace built around GitHub sign-in, PostgreSQL-backed project artifacts, and a separately run local agent. The web app generates project plans and code and reviews generated code with OpenRouter; the end-to-end local build workflow and GitHub synchronization remain on the roadmap.
 
 ## Important architecture
 
 - Netlify hosts the browser and API functions.
-- PostgreSQL stores metadata, plans, artifacts, jobs, audit logs and usage; source code remains on GitHub/local PC.
+- PostgreSQL stores metadata, plans, generated-code artifacts, jobs, audit logs and usage. Local working copies and synced repositories live on GitHub or the developer's PC.
 - The Local Agent runs separately on the developer machine and is restricted to a workspace root.
 - AI credentials are server-side only.
 - GitHub OAuth is the only authentication path in this baseline.
@@ -45,4 +45,10 @@ Use a managed Postgres database (including Netlify Database if available for the
 
 ## API baseline
 
-`GET /api/auth/github` · `GET /api/auth/github/callback` · `POST /api/auth/logout` · `GET /api/auth/me` · `GET/POST /api/projects` · `GET /api/projects/:id` · `POST /api/projects/:id/generate` · `GET /api/projects/:id/history` · `POST /api/projects/:id/jobs` · `GET /api/agent` · `POST /api/agent/register` · `POST /api/agent/job/claim` · `POST /api/agent/job/result` · `GET /api/ai/providers`.
+`GET /api/auth/github` · `GET /api/auth/github/callback` · `POST /api/auth/logout` · `GET /api/auth/me` · `GET/POST /api/projects` · `GET /api/projects/:id` · `POST /api/projects/:id/generate` · `POST /api/projects/:id/review` · `GET /api/projects/:id/runs/:runId` · `GET /api/projects/:id/history` · `POST /api/projects/:id/jobs` · `GET /api/agent` · `POST /api/agent/register` · `POST /api/agent/job/claim` · `POST /api/agent/job/result` · `GET /api/ai/providers`.
+
+## Project generation lifecycle
+
+Generation creates a PostgreSQL `ProjectRun` and runs in a Netlify Background Function. A successful run saves requirements, architecture, database design, API design, the implementation plan, and generated files as `Artifact` records in one transaction before marking the project `READY`. Invalid or empty generated file lists fail the run instead of reporting a ready project. `GET /api/projects/:id` returns those saved artifacts so they remain available when the project is opened again or the page is refreshed.
+
+`POST /api/projects/:id/review` queues an OpenRouter review of the saved generated files. Review findings are validated and saved as a `REVIEW` artifact; the run and project transition through `REVIEWING` to `READY` on success or `FAILED` on error. The signed-out homepage distinguishes available capabilities from roadmap work. A complete web-to-local-agent build/test experience and GitHub synchronization are not yet implemented end to end.

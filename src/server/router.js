@@ -3,7 +3,7 @@ import { requireAuth, AuthError, createSession, clearSession, } from "./auth.js"
 import { githubLoginUrl, exchange, githubUser, upsertGithubUser, } from "./github.js";
 import { randomToken } from "./crypto.js";
 import { prisma } from "./db.js";
-import { create, list, owner, startGenerateProject, } from "./projects.js";
+import { create, detail, list, owner, startGenerateProject, startReviewProject, } from "./projects.js";
 import { ensureAgent, registerAgent, queueJob, claimJob, } from "./agent.js";
 const redirect = (url, status = 302) => new Response(null, {
     status,
@@ -84,7 +84,7 @@ export async function handleApi(req) {
             if (!action && req.method === "GET") {
                 return json({
                     success: true,
-                    project: await owner(projectId, user.id),
+                    project: await detail(projectId, user.id),
                 });
             }
             if (action === "generate" && req.method === "POST") {
@@ -96,6 +96,13 @@ export async function handleApi(req) {
                 const result = await startGenerateProject(projectId, user.id, String(requestBody.prompt || ""), provider);
                 // Return immediately. The AI generation runs in the
                 // Netlify Background Function.
+                return json({
+                    success: true,
+                    ...result,
+                }, 202);
+            }
+            if (action === "review" && req.method === "POST") {
+                const result = await startReviewProject(projectId, user.id);
                 return json({
                     success: true,
                     ...result,

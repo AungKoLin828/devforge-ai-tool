@@ -26,3 +26,35 @@ button {
   border: 1px solid rgba(148, 163, 184, 0.14);
   backdrop-filter: blur(16px);
 }
+.landing {
+  background:
+    radial-gradient(ellipse at 78% 9%, rgba(79, 70, 229, 0.18), transparent 35%),
+    radial-gradient(ellipse at 8% 38%, rgba(30, 64, 175, 0.12), transparent 30%),
+    #070b14;
+}
+.brand-mark {
+  background: linear-gradient(145deg, #818cf8, #4f46e5);
+  box-shadow: 0 8px 26px rgba(79, 70, 229, 0.3);
+}
+.landing-gradient {
+  background: linear-gradient(95deg, #a5b4fc 0%, #818cf8 40%, #c4b5fd 100%);
+  background-clip: text;
+  color: transparent;
+}
+.landing-preview {
+  position: relative;
+}
+.landing-preview::before {
+  position: absolute;
+  z-index: -1;
+  inset: 12% -8% -12% 18%;
+  border-radius: 2rem;
+  background: rgba(79, 70, 229, 0.16);
+  content: "";
+  filter: blur(38px);
+}
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}

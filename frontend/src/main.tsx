@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   api,
@@ -158,7 +158,18 @@ function Login() {
 }
 
 function App({ user }: { user: User }) {
+  type ModalKind = "info" | "success" | "warning" | "error";
+  type ModalState = {
+    kind: ModalKind;
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+  };
+
   const [projects, setProjects] = useState<any[]>([]);
+  const [modal, setModal] = useState<ModalState | null>(null);
+  const modalResolver = useRef<((confirmed: boolean) => void) | null>(null);
   const [selected, setSelected] = useState<any>();
   const [prompt, setPrompt] = useState("");
   const [logs, setLogs] = useState<string[]>([]);
@@ -202,6 +213,55 @@ function App({ user }: { user: User }) {
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const { status: generationStatus, operation: activeOperation, runId, error: generationError, isBusy, generate: runGeneration, review: runReview, reset: resetGeneration } = useProjectGeneration();
 
+  function closeModal(confirmed = false) {
+    modalResolver.current?.(confirmed);
+    modalResolver.current = null;
+    setModal(null);
+  }
+
+  function showModal(kind: ModalKind, title: string, message: string) {
+    if (modalResolver.current) closeModal(false);
+    setModal({ kind, title, message });
+  }
+
+  function confirmModal(
+    title: string,
+    message: string,
+    confirmLabel = "Continue",
+  ): Promise<boolean> {
+    if (modalResolver.current) closeModal(false);
+    setModal({
+      kind: "warning",
+      title,
+      message,
+      confirmLabel,
+      cancelLabel: "Cancel",
+    });
+    return new Promise((resolve) => {
+      modalResolver.current = resolve;
+    });
+  }
+
+  useEffect(() => {
+    if (workspaceBrowserError) {
+      showModal("error", "Workspace error", workspaceBrowserError);
+    }
+  }, [workspaceBrowserError]);
+
+  useEffect(() => {
+    if (localAgentError) showModal("error", "Local Agent error", localAgentError);
+  }, [localAgentError]);
+
+  useEffect(() => {
+    if (githubError) showModal("error", "GitHub error", githubError);
+  }, [githubError]);
+
+  useEffect(() => {
+    if (generationError) {
+      showModal("error", "Operation failed", generationError);
+    }
+  }, [generationError]);
+
   async function load() {
     const projectResponse = await api.projects();
     setProjects(projectResponse.projects);
@@ -213,7 +273,10 @@ function App({ user }: { user: User }) {
 
   useEffect(() => {
     load().catch((cause) => {
-      setLogs((current) => [...current, `ERROR: ${cause instanceof Error ? cause.message : "Could not load projects."}`]);
+      const message =
+        cause instanceof Error ? cause.message : "Could not load projects.";
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+      showModal("error", "Could not load projects", message);
     });
     void refreshGitHubRepositories();
     // Initial page load only. Selection changes are handled by the project buttons.
@@ -254,14 +317,19 @@ function App({ user }: { user: User }) {
       setPrompt("");
       setChatMessages([]);
       resetGeneration();
+      showModal("success", "Project created", `Created "${response.project.name}".`);
     } catch (cause) {
-      setLogs((current) => [...current, `ERROR: ${cause instanceof Error ? cause.message : "Could not create project."}`]);
+      const message = cause instanceof Error ? cause.message : "Could not create project.";
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+      showModal("error", "Could not create project", message);
     }
   }
 
   async function deleteProject(project: { id: string; name: string }) {
-    const confirmed = window.confirm(
+    const confirmed = await confirmModal(
+      "Delete project",
       `Permanently delete "${project.name}" and its saved artifacts, runs, and history? Any copy already synced to your PC will not be deleted.`,
+      "Delete project",
     );
     if (!confirmed || deletingProjectId) return;
 
@@ -283,11 +351,15 @@ function App({ user }: { user: User }) {
         ...current,
         `Deleted project "${project.name}" and its saved data.`,
       ]);
+      showModal("success", "Project deleted", `Deleted "${project.name}" and its saved data.`);
     } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : "Could not delete project.";
       setLogs((current) => [
         ...current,
-        `ERROR: ${cause instanceof Error ? cause.message : "Could not delete project."}`,
+        `ERROR: ${message}`,
       ]);
+      showModal("error", "Could not delete project", message);
     } finally {
       setDeletingProjectId(null);
     }
@@ -296,7 +368,9 @@ function App({ user }: { user: User }) {
   async function generate() {
     if (!selected || isBusy) return;
     if (!prompt.trim()) {
-      setLogs((current) => [...current, "Enter a project description before generating."]);
+      const message = "Enter a project description before generating.";
+      setLogs((current) => [...current, message]);
+      showModal("warning", "Project description required", message);
       return;
     }
 
@@ -305,6 +379,7 @@ function App({ user }: { user: User }) {
       const completedRun = await runGeneration(selected.id, prompt);
       if (!completedRun) return;
       setLogs((current) => [...current, "Generation completed."]);
+      showModal("success", "Generation complete", "The generated project and plan have been saved.");
       const [projectResponse, projectsResponse] = await Promise.all([
         api.project(selected.id),
         api.projects(),
@@ -314,6 +389,7 @@ function App({ user }: { user: User }) {
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Generation failed.";
       setLogs((current) => [...current, `ERROR: ${message}`]);
+      showModal("error", "Generation failed", message);
       // Keep the page usable after 400/409/network errors; the hook also clears its busy flag in finally.
     }
   }
@@ -333,11 +409,15 @@ function App({ user }: { user: User }) {
       setSelected(projectResponse.project);
       setProjects(projectsResponse.projects);
       setLogs((current) => [...current, "Code review completed and saved."]);
+      showModal("success", "Review complete", "The AI code review has been saved.");
     } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : "Could not load review results.";
       setLogs((current) => [
         ...current,
-        `ERROR: ${cause instanceof Error ? cause.message : "Could not load review results."}`,
+        `ERROR: ${message}`,
       ]);
+      showModal("error", "Could not load review", message);
     }
   }
 
@@ -363,7 +443,11 @@ function App({ user }: { user: User }) {
     if (
       workspaceEditorFile &&
       workspaceEditorDraft !== workspaceEditorFile.content &&
-      !window.confirm("Discard unsaved edits and open this folder?")
+      !(await confirmModal(
+        "Discard unsaved changes?",
+        "Your unsaved edits will be lost if you open this folder.",
+        "Discard changes",
+      ))
     ) {
       return;
     }
@@ -377,7 +461,11 @@ function App({ user }: { user: User }) {
     if (
       workspaceEditorFile &&
       workspaceEditorDraft !== workspaceEditorFile.content &&
-      !window.confirm("Discard unsaved edits and open another file?")
+      !(await confirmModal(
+        "Discard unsaved changes?",
+        "Your unsaved edits will be lost if you open another file.",
+        "Discard changes",
+      ))
     ) {
       return;
     }
@@ -416,6 +504,7 @@ function App({ user }: { user: User }) {
         ...current,
         `Saved ${workspaceEditorFile.path} to your local workspace.`,
       ]);
+      showModal("success", "File saved", `Saved ${workspaceEditorFile.path} to your PC.`);
     } catch (cause) {
       setWorkspaceBrowserError(
         cause instanceof Error ? cause.message : "Could not save this file.",
@@ -474,9 +563,11 @@ function App({ user }: { user: User }) {
     if (!source || !localAgentInfo || importingProject) return;
 
     if (
-      !window.confirm(
+      !(await confirmModal(
+        "Import local project",
         `Import text files from "${source.path}" into your DevForge account? Files are uploaded to the server for storage and AI review. Secret environment files and generated dependency/build folders are excluded; review source files for other credentials before importing.`,
-      )
+        "Import project",
+      ))
     ) {
       return;
     }
@@ -502,6 +593,11 @@ function App({ user }: { user: User }) {
         ...current,
         `Imported ${localProject.project.files.length} files from ${source.path}. The project is ready for AI review and local build/test.`,
       ]);
+      showModal(
+        "success",
+        "Project imported",
+        `Imported ${localProject.project.files.length} files from ${source.path}.`,
+      );
     } catch (cause) {
       const message =
         cause instanceof Error ? cause.message : "Could not import the local project.";
@@ -519,9 +615,11 @@ function App({ user }: { user: User }) {
 
     const label = action === "build" ? "build" : "test";
     if (
-      !window.confirm(
+      !(await confirmModal(
+        `Run local ${label}`,
         `This will copy the generated files to your PC (overwriting matching files in this DevForge project folder) and run the project's ${label} scripts locally. Project scripts may execute arbitrary code. Continue only if you trust this generated project.`,
-      )
+        `Run ${label}`,
+      ))
     ) {
       return;
     }
@@ -565,6 +663,17 @@ function App({ user }: { user: User }) {
           ...current,
           `Local ${label} failed. See the command output below.`,
         ]);
+        showModal(
+          "warning",
+          `Local ${label} did not pass`,
+          `The local ${label} operation did not succeed. Review the command output for details.`,
+        );
+      } else {
+        showModal(
+          "success",
+          `Local ${label} complete`,
+          `The local ${label} operation completed successfully.`,
+        );
       }
     } catch (cause) {
       const message =
@@ -589,9 +698,11 @@ function App({ user }: { user: User }) {
 
     const localPath = `projects/${selected.id}`;
     if (
-      !window.confirm(
+      !(await confirmModal(
+        "Sync files to PC",
         `Copy ${generatedFiles.length} generated files to ${localAgentInfo.workspaceRoot}\\${localPath.replaceAll("/", "\\")}? Matching files in this DevForge project folder will be overwritten.`,
-      )
+        "Sync files",
+      ))
     ) {
       return;
     }
@@ -611,6 +722,11 @@ function App({ user }: { user: User }) {
         ...current,
         `Copied ${synced.files} generated files to ${synced.path} on ${localAgentInfo.machine}. The folder is open in Local workspace files.`,
       ]);
+      showModal(
+        "success",
+        "Files synced to PC",
+        `Copied ${synced.files} files to ${synced.path}.`,
+      );
     } catch (cause) {
       const message =
         cause instanceof Error ? cause.message : "Could not copy generated files to your PC.";
@@ -666,6 +782,11 @@ function App({ user }: { user: User }) {
         ...current,
         `Connected ${githubRepositorySelection} to "${selected.name}".`,
       ]);
+      showModal(
+        "success",
+        "Repository connected",
+        `Connected ${githubRepositorySelection} to "${selected.name}".`,
+      );
     } catch (cause) {
       setGitHubError(
         cause instanceof Error ? cause.message : "Could not connect this repository.",
@@ -694,6 +815,11 @@ function App({ user }: { user: User }) {
         ...current,
         `Created and connected private repository ${response.repository.fullName}.`,
       ]);
+      showModal(
+        "success",
+        "Private repository created",
+        `Created and connected ${response.repository.fullName}.`,
+      );
     } catch (cause) {
       setGitHubError(
         cause instanceof Error ? cause.message : "Could not create a GitHub repository.",
@@ -708,9 +834,11 @@ function App({ user }: { user: User }) {
     const path = currentGitHubPath();
     if (!selected || !repository || !localAgentInfo || !path || githubBusy) return;
     if (
-      !window.confirm(
+      !(await confirmModal(
+        "Clone GitHub repository",
         `Clone https://github.com/${repository.owner}/${repository.repository} into ${localAgentInfo.workspaceRoot}\\${path.replaceAll("/", "\\")}? The destination must not already exist. Git uses the credentials configured on this PC; DevForge will not send your GitHub token to the Local Agent.`,
-      )
+        "Clone repository",
+      ))
     ) {
       return;
     }
@@ -731,6 +859,11 @@ function App({ user }: { user: User }) {
         refreshSelectedProject(),
       ]);
       setLogs((current) => [...current, `Cloned ${repository.owner}/${repository.repository} to ${result.path}.`]);
+      showModal(
+        "success",
+        "Repository cloned",
+        `Cloned ${repository.owner}/${repository.repository} to ${result.path}.`,
+      );
     } catch (cause) {
       const message =
         cause instanceof Error ? cause.message : "Could not clone the GitHub repository.";
@@ -746,9 +879,11 @@ function App({ user }: { user: User }) {
     const path = currentGitHubPath();
     if (!selected || !repository || !localAgentInfo || !path || githubBusy) return;
     if (
-      !window.confirm(
+      !(await confirmModal(
+        "Pull from GitHub",
         `Pull the latest ${repository.branch} branch into ${path}? Pull is allowed only when the local repository has no uncommitted changes.`,
-      )
+        "Pull latest",
+      ))
     ) {
       return;
     }
@@ -766,6 +901,11 @@ function App({ user }: { user: User }) {
         refreshSelectedProject(),
       ]);
       setLogs((current) => [...current, `Pulled ${repository.owner}/${repository.repository}: ${result.output}`]);
+      showModal(
+        "success",
+        "Pull complete",
+        result.output || `Pulled ${repository.owner}/${repository.repository}.`,
+      );
     } catch (cause) {
       const message =
         cause instanceof Error ? cause.message : "Could not pull from GitHub.";
@@ -781,9 +921,11 @@ function App({ user }: { user: User }) {
     const path = currentGitHubPath();
     if (!selected || !repository || !localAgentInfo || !path || githubBusy) return;
     if (
-      !window.confirm(
+      !(await confirmModal(
+        initializeRepository ? "Initialize and push to GitHub" : "Commit and push to GitHub",
         `${initializeRepository ? `Configure or initialize Git in ${path}, then ` : ""}${generatedFiles.length ? `copy ${generatedFiles.length} saved DevForge files into ${path} (matching files will be overwritten), then ` : ""}stage and commit all changes in ${path} and push them to ${repository.owner}/${repository.repository} (${repository.branch})? Secret environment files and common private keys are blocked. Review your project before publishing.`,
-      )
+        initializeRepository ? "Initialize & push" : "Commit & push",
+      ))
     ) {
       return;
     }
@@ -821,6 +963,11 @@ function App({ user }: { user: User }) {
         loadWorkspaceDirectory(result.path),
         refreshSelectedProject(),
       ]);
+      showModal(
+        "success",
+        "Push complete",
+        result.commit || result.output || `Pushed ${repository.owner}/${repository.repository}.`,
+      );
       setLogs((current) => [
         ...current,
         `Pushed ${repository.owner}/${repository.repository}: ${result.commit || result.output}`,
@@ -844,7 +991,9 @@ function App({ user }: { user: User }) {
       setChatMessages([]);
       resetGeneration();
     } catch (cause) {
-      setLogs((current) => [...current, `ERROR: ${cause instanceof Error ? cause.message : "Could not open project."}`]);
+      const message = cause instanceof Error ? cause.message : "Could not open project.";
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+      showModal("error", "Could not open project", message);
     }
   }
 
@@ -872,6 +1021,7 @@ function App({ user }: { user: User }) {
         ...current,
         { role: "assistant", content: `Sorry, I couldn't answer: ${message}` },
       ]);
+      showModal("error", "Could not get an AI response", message);
     } finally {
       setChatBusy(false);
     }
@@ -1071,9 +1221,6 @@ function App({ user }: { user: User }) {
                   </div>
                 </div>
                 <div className="border-t border-slate-800 px-4 py-3">
-                  {workspaceBrowserError && (
-                    <p role="alert" className="mb-2 text-xs text-red-300">{workspaceBrowserError}</p>
-                  )}
                   <p className="text-xs leading-5 text-slate-500">
                     Saving writes directly to the selected local file. Hidden/secret files, dependency folders, symlinks, binary files, and files over 1 MB are not editable here. Review your changes before saving.
                   </p>
@@ -1355,13 +1502,7 @@ function App({ user }: { user: User }) {
                         Connect the Local Agent to clone, pull, or push. Install Git on this PC and sign in through its Git Credential Manager for private repository access; the GitHub token is never sent to the agent.
                       </p>
                     )}
-                    {githubError && (
-                      <p role="alert" className="mt-3 text-xs leading-5 text-red-300">{githubError}</p>
-                    )}
                   </section>
-                  {localAgentError && (
-                    <p role="alert" className="mt-3 text-xs text-red-300">{localAgentError}</p>
-                  )}
                   {!localAgentInfo && (
                     <p className="mt-3 text-xs leading-5 text-amber-300">
                       To start the Local Agent, open a terminal in the DevForge project folder on your PC and run <code>npm run agent:dev</code>. Keep that terminal open, copy the pairing token printed there, paste it above, then select <strong>Connect local agent</strong>.
@@ -1385,12 +1526,6 @@ function App({ user }: { user: User }) {
                 )}
                 {isBusy && <p className="mt-3 text-sm text-amber-300">{activeOperation === "review" ? "AI review is in progress. You can keep this page open; please avoid submitting another operation for this project." : "Generation is in progress. You can keep this page open; please avoid submitting another operation for this project."}</p>}
                 {runId && <p className="mt-2 text-xs text-slate-500">Project run: {runId}</p>}
-                {generationError && (
-                  <div role="alert" className="mt-3 rounded-lg border border-red-900 bg-red-950/40 p-3 text-sm text-red-200">
-                    <p>{generationError}</p>
-                    <button onClick={resetGeneration} className="mt-2 underline underline-offset-2">Dismiss error</button>
-                  </div>
-                )}
               </div>
             </>
           )}
@@ -1484,6 +1619,82 @@ function App({ user }: { user: User }) {
         <span>IDE · Terminal · Build · Test · Review · Git · GitHub</span>
         <span>© {new Date().getFullYear()} Aung Ko Lin. All rights reserved.</span>
       </footer>
+      {modal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/75 p-4 backdrop-blur-sm">
+          <section
+            aria-labelledby="message-modal-title"
+            aria-describedby="message-modal-description"
+            aria-modal="true"
+            role={modal.cancelLabel ? "alertdialog" : "dialog"}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                closeModal(false);
+              }
+            }}
+            className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl shadow-black/50"
+          >
+            <div className="flex items-start gap-4">
+              <span
+                aria-hidden="true"
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-lg font-bold ${
+                  modal.kind === "error"
+                    ? "bg-red-400/10 text-red-300"
+                    : modal.kind === "warning"
+                      ? "bg-amber-400/10 text-amber-300"
+                      : modal.kind === "success"
+                        ? "bg-emerald-400/10 text-emerald-300"
+                        : "bg-indigo-400/10 text-indigo-300"
+                }`}
+              >
+                {modal.kind === "error"
+                  ? "!"
+                  : modal.kind === "warning"
+                    ? "⚠"
+                    : modal.kind === "success"
+                      ? "✓"
+                      : "i"}
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 id="message-modal-title" className="text-lg font-semibold text-white">
+                  {modal.title}
+                </h2>
+                <p
+                  id="message-modal-description"
+                  className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-300"
+                >
+                  {modal.message}
+                </p>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              {modal.cancelLabel && (
+                <button
+                  type="button"
+                  onClick={() => closeModal(false)}
+                  className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:border-slate-500 hover:text-white"
+                >
+                  {modal.cancelLabel}
+                </button>
+              )}
+              <button
+                type="button"
+                autoFocus
+                onClick={() => closeModal(Boolean(modal.confirmLabel))}
+                className={`rounded-lg px-4 py-2 text-sm font-medium text-white transition ${
+                  modal.kind === "error"
+                    ? "bg-red-700 hover:bg-red-600"
+                    : modal.kind === "warning"
+                      ? "bg-amber-600 hover:bg-amber-500"
+                      : "bg-indigo-600 hover:bg-indigo-500"
+                }`}
+              >
+                {modal.confirmLabel || "Close"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

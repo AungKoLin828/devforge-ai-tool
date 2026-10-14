@@ -14,7 +14,7 @@ DevForge AI is an AI-assisted project workspace built around GitHub sign-in, Pos
 ## Local setup
 
 1. Install Node.js 22 LTS, Git and PostgreSQL.
-2. Copy `.env.example` to `.env` and fill values, including `DATABASE_URL` with the PostgreSQL URL for the database you intend the local app to use. The server loads `.env` directly; `DATABASE_URL` takes precedence over `NETLIFY_DB_URL`.
+2. Copy `.env.example` to `.env` and set `DATABASE_URL` to the PostgreSQL connection string from **Supabase Dashboard → Connect**. For local development, use Supabase's session pooler connection string if a direct connection is not reachable. The app, Prisma CLI, and database check all use this one variable.
 3. Create a **separate GitHub OAuth App for local development**. Set its Homepage URL to `http://localhost:8888` and its Authorization callback URL to `http://localhost:8888/api/auth/github/callback`. Put its client ID and secret in `GITHUB_LOCAL_CLIENT_ID` and `GITHUB_LOCAL_CLIENT_SECRET` in your local `.env`. Keep production `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `GITHUB_CALLBACK_URL` configured in Netlify; the app selects OAuth credentials based on whether the sign-in request comes from localhost or the deployed host.
 4. Run `npm install`.
 5. Run `npm run prisma:generate`.
@@ -76,7 +76,7 @@ The agent listens on `127.0.0.1` only and should be started on the same PC and b
 
 This starter is pinned to Prisma ORM **7.10.0**. `prisma`, `@prisma/client`, and `@prisma/adapter-pg` are intentionally kept on the same exact version. The generated Prisma Client is not committed; `npm run prisma:generate` creates it under `src/generated/prisma/`.
 
-Apply database changes with `npm run prisma:deploy` before starting the app against a new database. For a hosted deployment, run the same command against the production database using the production database connection string configured in Netlify; do not change the local `.env` to point at production unless that is intentional. `DATABASE_URL` takes precedence, with `NETLIFY_DB_URL` used as a fallback.
+Apply database changes with `npm run prisma:deploy` before starting the app against a new Supabase database. Configure the same Supabase PostgreSQL connection string as `DATABASE_URL` in the environment where the app or Prisma CLI runs. Keep production and local Supabase project URLs separate unless you intentionally want to modify production data.
 
 If you previously installed a broken Prisma package, remove `node_modules` and `package-lock.json`, then run `npm install` before running `npm run prisma:generate`. Do not install Prisma globally.
 

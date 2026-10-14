@@ -2,12 +2,11 @@ import "dotenv/config";
 import { PrismaClient } from "../src/generated/prisma/client.js";
 import { PrismaPg } from "@prisma/adapter-pg";
 
-const connectionString =
-  process.env.DATABASE_URL || process.env.NETLIFY_DB_URL;
+const connectionString = process.env.DATABASE_URL;
 
 if (!connectionString) {
   console.error(
-    "No database URL configured. Set DATABASE_URL in the project-root .env.",
+    "No database URL configured. Set DATABASE_URL in the project-root .env to your Supabase PostgreSQL connection string.",
   );
   process.exitCode = 1;
 } else {

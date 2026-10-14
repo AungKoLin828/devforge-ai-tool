@@ -197,6 +197,7 @@ export async function importProject(
         description: `Imported from local workspace: ${sourcePath}`,
         stack: "Imported project",
         status: "READY",
+        localPath: sourcePath,
       },
     });
 

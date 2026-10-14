@@ -1,6 +1,6 @@
 import { json, error, body } from "./http.js";
 import { requireAuth, AuthError, createSession, clearSession, } from "./auth.js";
-import { githubOAuthConfig, githubLoginUrl, exchange, githubUser, upsertGithubUser, } from "./github.js";
+import { githubOAuthConfig, githubLoginUrl, exchange, githubUser, upsertGithubUser, listGitHubRepositories, connectGitHubRepository, createGitHubRepository, updateGitHubSync, } from "./github.js";
 import { randomToken } from "./crypto.js";
 import { prisma } from "./db.js";
 import { create, chatWithProject, detail, importProject, list, owner, remove, startGenerateProject, startReviewProject, } from "./projects.js";
@@ -9,6 +9,24 @@ const redirect = (url, status = 302) => new Response(null, {
     status,
     headers: { Location: url },
 });
+function getErrorInfo(caught) {
+    let current = caught;
+    let message = "";
+    let code = "";
+    const seen = new Set();
+    while (current && typeof current === "object" && !seen.has(current)) {
+        seen.add(current);
+        const details = current;
+        if (!message && typeof details.message === "string") {
+            message = details.message.trim();
+        }
+        if (!code && typeof details.code === "string") {
+            code = details.code;
+        }
+        current = details.cause;
+    }
+    return { message, code };
+}
 export async function handleApi(req) {
     try {
         const url = new URL(req.url);
@@ -96,6 +114,12 @@ export async function handleApi(req) {
             return json({ success: true, user });
         }
         const user = await requireAuth(req);
+        if (path === "github/repositories" && req.method === "GET") {
+            return json({
+                success: true,
+                repositories: await listGitHubRepositories(user.id),
+            });
+        }
         if (path === "projects" && req.method === "GET") {
             return json({
                 success: true,
@@ -118,6 +142,60 @@ export async function handleApi(req) {
         if (match) {
             const projectId = match[1];
             const action = match[2];
+            if (action === "github/connect" && req.method === "POST") {
+                await owner(projectId, user.id);
+                const requestBody = await body(req);
+                if (typeof requestBody.owner !== "string" ||
+                    typeof requestBody.repository !== "string" ||
+                    !/^[A-Za-z0-9_.-]{1,100}$/.test(requestBody.owner.trim()) ||
+                    !/^[A-Za-z0-9_.-]{1,100}$/.test(requestBody.repository.trim()) ||
+                    requestBody.owner.trim() === "." ||
+                    requestBody.owner.trim() === ".." ||
+                    requestBody.repository.trim() === "." ||
+                    requestBody.repository.trim() === "..") {
+                    return error("Enter a valid GitHub owner and repository name", 400);
+                }
+                return json({
+                    success: true,
+                    repository: await connectGitHubRepository(projectId, user.id, requestBody.owner.trim(), requestBody.repository.trim()),
+                });
+            }
+            if (action === "github/create" && req.method === "POST") {
+                await owner(projectId, user.id);
+                const requestBody = await body(req);
+                if (typeof requestBody.name !== "string" ||
+                    !/^[A-Za-z0-9_.-]{1,100}$/.test(requestBody.name.trim()) ||
+                    requestBody.name.trim() === "." ||
+                    requestBody.name.trim() === "..") {
+                    return error("Repository name must use 1-100 letters, numbers, dots, dashes or underscores", 400);
+                }
+                return json({
+                    success: true,
+                    repository: await createGitHubRepository(projectId, user.id, requestBody.name.trim(), typeof requestBody.description === "string"
+                        ? requestBody.description.trim()
+                        : ""),
+                }, 201);
+            }
+            if (action === "github/status" && req.method === "POST") {
+                await owner(projectId, user.id);
+                const requestBody = await body(req);
+                if (typeof requestBody.path !== "string" ||
+                    !requestBody.path ||
+                    requestBody.path.length > 512 ||
+                    requestBody.path.startsWith("/") ||
+                    requestBody.path.includes("\\") ||
+                    /^[a-z]:/i.test(requestBody.path) ||
+                    requestBody.path.split("/").some((part) => !part || part === "." || part === "..") ||
+                    (requestBody.status !== "CONNECTED" &&
+                        requestBody.status !== "CLEAN" &&
+                        requestBody.status !== "ERROR")) {
+                    return error("A valid local repository path and sync status are required", 400);
+                }
+                return json({
+                    success: true,
+                    ...await updateGitHubSync(projectId, user.id, requestBody.path, requestBody.status),
+                });
+            }
             if (!action && req.method === "GET") {
                 return json({
                     success: true,
@@ -263,9 +341,24 @@ export async function handleApi(req) {
         if (caught instanceof AuthError) {
             return error(caught.message, caught.status);
         }
-        const message = caught instanceof Error
-            ? caught.message
-            : "Internal server error";
+        const { code, message: originalMessage } = getErrorInfo(caught);
+        let message = originalMessage || "Internal server error";
+        if (code === "P2021" ||
+            code === "42P01" ||
+            message.includes('The table `public.User` does not exist')) {
+            message =
+                'The configured database is missing public."User". Verify the target with `npm run db:check`. Apply `npm run prisma:deploy` only if the database is empty; for a manually created or partially initialized schema, add the missing tables without rerunning the full initial migration.';
+        }
+        else if (code === "ETIMEDOUT" ||
+            code === "ECONNREFUSED" ||
+            code === "P1001" ||
+            message.toLowerCase().includes("timed out")) {
+            message =
+                "Cannot connect to the PostgreSQL database selected by DATABASE_URL. Check that the database is reachable from this PC, then run `npm run db:check`.";
+        }
+        else if (!originalMessage) {
+            message = `The database request failed${code ? ` (${code})` : ""}. Run \`npm run db:check\` to verify the local database connection and schema.`;
+        }
         if (message === "Forbidden")
             return error(message, 403);
         if (message === "Project not found")

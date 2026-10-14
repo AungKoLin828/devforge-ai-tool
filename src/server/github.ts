@@ -1,5 +1,5 @@
 import { prisma } from "./db.js";
-import { encrypt } from "./crypto.js";
+import { decrypt, encrypt } from "./crypto.js";
 const required = (n: string) => {
   const v = process.env[n];
   if (!v) throw new Error(`${n} is required`);
@@ -122,4 +122,228 @@ export async function upsertGithubUser(token: string, profile: any) {
       githubAccessTokenEnc: encrypt(token),
     },
   });
+}
+
+type GitHubRepositoryResponse = {
+  id: number;
+  name: string;
+  full_name: string;
+  private: boolean;
+  default_branch: string;
+  permissions?: { push?: boolean };
+};
+
+async function githubApi<T>(
+  token: string,
+  endpoint: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const response = await fetch(`https://api.github.com${endpoint}`, {
+    ...init,
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+      ...(init.headers || {}),
+    },
+  });
+  const result = (await response.json().catch(() => ({}))) as {
+    message?: string;
+  };
+  if (!response.ok) {
+    const detail =
+      typeof result.message === "string" ? result.message : "Unknown GitHub error";
+    throw new Error(`GitHub API request failed (${response.status}): ${detail}`);
+  }
+  return result as T;
+}
+
+async function githubTokenForUser(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { githubAccessTokenEnc: true },
+  });
+  if (!user?.githubAccessTokenEnc) {
+    throw new Error(
+      "GitHub access is unavailable. Sign out and sign in again to refresh your repository permissions.",
+    );
+  }
+  return decrypt(user.githubAccessTokenEnc);
+}
+
+function validateRepositoryName(owner: string, repository: string) {
+  if (
+    !/^[A-Za-z0-9_.-]{1,100}$/.test(owner) ||
+    owner === "." ||
+    owner === ".." ||
+    !/^[A-Za-z0-9_.-]{1,100}$/.test(repository) ||
+    repository === "." ||
+    repository === ".."
+  ) {
+    throw new Error("Enter a valid GitHub owner and repository name");
+  }
+}
+
+function repositoryPath(owner: string, repository: string) {
+  validateRepositoryName(owner, repository);
+  return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`;
+}
+
+export async function listGitHubRepositories(userId: string) {
+  const token = await githubTokenForUser(userId);
+  const repositories = await githubApi<GitHubRepositoryResponse[]>(
+    token,
+    "/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member",
+  );
+  return repositories
+    .filter((repository) => repository.permissions?.push === true)
+    .map((repository) => ({
+      id: String(repository.id),
+      name: repository.name,
+      fullName: repository.full_name,
+      private: repository.private,
+      defaultBranch: repository.default_branch,
+    }));
+}
+
+async function persistGitHubRepository(
+  projectId: string,
+  repository: GitHubRepositoryResponse,
+) {
+  const [owner, name] = repository.full_name.split("/");
+  if (!owner || !name || !repository.default_branch) {
+    throw new Error("GitHub returned incomplete repository information");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.project.update({
+      where: { id: projectId },
+      data: {
+        gitProvider: "GITHUB",
+        githubOwner: owner,
+        githubRepository: name,
+        githubBranch: repository.default_branch,
+        githubRepoId: String(repository.id),
+        gitSyncStatus: "CONNECTED",
+      },
+    });
+    await tx.gitRepository.upsert({
+      where: {
+        projectId_owner_repository: {
+          projectId,
+          owner,
+          repository: name,
+        },
+      },
+      create: {
+        projectId,
+        owner,
+        repository: name,
+        githubRepoId: String(repository.id),
+        defaultBranch: repository.default_branch,
+        connected: true,
+      },
+      update: {
+        githubRepoId: String(repository.id),
+        defaultBranch: repository.default_branch,
+        connected: true,
+      },
+    });
+  });
+
+  return {
+    owner,
+    repository: name,
+    fullName: repository.full_name,
+    defaultBranch: repository.default_branch,
+    private: repository.private,
+  };
+}
+
+export async function connectGitHubRepository(
+  projectId: string,
+  userId: string,
+  owner: string,
+  repository: string,
+) {
+  const token = await githubTokenForUser(userId);
+  const details = await githubApi<GitHubRepositoryResponse>(
+    token,
+    repositoryPath(owner, repository),
+  );
+  if (details.permissions?.push !== true) {
+    throw new Error("You need write access to connect this GitHub repository");
+  }
+  return persistGitHubRepository(projectId, details);
+}
+
+export async function createGitHubRepository(
+  projectId: string,
+  userId: string,
+  name: string,
+  description: string,
+) {
+  if (!/^[A-Za-z0-9_.-]{1,100}$/.test(name) || name === "." || name === "..") {
+    throw new Error("Repository name must use 1-100 letters, numbers, dots, dashes or underscores");
+  }
+  const token = await githubTokenForUser(userId);
+  const repository = await githubApi<GitHubRepositoryResponse>(
+    token,
+    "/user/repos",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        description: description.slice(0, 350),
+        private: true,
+        auto_init: false,
+      }),
+    },
+  );
+  return persistGitHubRepository(projectId, repository);
+}
+
+export async function updateGitHubSync(
+  projectId: string,
+  userId: string,
+  relativePath: string,
+  status: "CONNECTED" | "CLEAN" | "ERROR",
+) {
+  if (
+    !relativePath ||
+    relativePath.length > 512 ||
+    relativePath.startsWith("/") ||
+    relativePath.includes("\\") ||
+    /^[a-z]:/i.test(relativePath) ||
+    relativePath.split("/").some((part) => !part || part === "." || part === "..")
+  ) {
+    throw new Error("Local repository path must be relative to the agent workspace");
+  }
+
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, userId },
+    select: { id: true, githubOwner: true, githubRepository: true },
+  });
+  if (!project) throw new Error("Project not found");
+  if (!project.githubOwner || !project.githubRepository) {
+    throw new Error("Connect a GitHub repository before synchronizing");
+  }
+
+  const lastSyncedAt = status === "CLEAN" ? new Date() : undefined;
+  await prisma.$transaction([
+    prisma.project.update({
+      where: { id: projectId },
+      data: { localPath: relativePath, gitSyncStatus: status, lastSyncedAt },
+    }),
+    prisma.gitRepository.updateMany({
+      where: {
+        projectId,
+        owner: project.githubOwner,
+        repository: project.githubRepository,
+      },
+      data: { lastSyncAt: lastSyncedAt },
+    }),
+  ]);
+  return { localPath: relativePath, gitSyncStatus: status, lastSyncedAt };
 }

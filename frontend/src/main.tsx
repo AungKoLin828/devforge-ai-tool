@@ -7,6 +7,7 @@ import {
   type LocalWorkspaceEntry,
   type LocalWorkspaceFile,
   type LocalWorkspaceListing,
+  type GitHubRepository,
   type User,
 } from "./api";
 import { useProjectGeneration } from "./hooks/useProjectGeneration";
@@ -37,7 +38,7 @@ function Login() {
     ["01", "Generation you can verify", "Available"],
     ["02", "AI code review", "Available"],
     ["03", "Local project import, build and test", "Available"],
-    ["04", "GitHub synchronization", "Planned"],
+    ["04", "GitHub synchronization", "Available"],
     ["05", "More AI providers", "Planned"],
   ];
 
@@ -77,7 +78,7 @@ function Login() {
             </a>
           </div>
           <p className="mt-4 text-xs leading-5 text-slate-500">
-            GitHub is used to sign in. Your AI provider key stays on the server.
+            GitHub is used to sign in and optionally sync repositories. Your AI provider key stays on the server.
           </p>
         </div>
 
@@ -187,6 +188,15 @@ function App({ user }: { user: User }) {
   const [workspaceEditorDraft, setWorkspaceEditorDraft] = useState("");
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [syncingGeneratedFiles, setSyncingGeneratedFiles] = useState(false);
+  const [githubRepositories, setGitHubRepositories] = useState<GitHubRepository[]>([]);
+  const [githubRepositorySelection, setGitHubRepositorySelection] = useState("");
+  const [githubNewRepository, setGitHubNewRepository] = useState("");
+  const [githubLocalPath, setGitHubLocalPath] = useState("");
+  const [githubCommitMessage, setGitHubCommitMessage] = useState("");
+  const [githubBusy, setGitHubBusy] = useState<
+    "repositories" | "connect" | "create" | "clone" | "pull" | "push" | null
+  >(null);
+  const [githubError, setGitHubError] = useState<string | null>(null);
   const [localAction, setLocalAction] = useState<"build" | "test" | null>(null);
   const [localResult, setLocalResult] = useState<LocalProjectResult | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
@@ -205,9 +215,32 @@ function App({ user }: { user: User }) {
     load().catch((cause) => {
       setLogs((current) => [...current, `ERROR: ${cause instanceof Error ? cause.message : "Could not load projects."}`]);
     });
+    void refreshGitHubRepositories();
     // Initial page load only. Selection changes are handled by the project buttons.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function refreshGitHubRepositories() {
+    setGitHubError(null);
+    setGitHubBusy("repositories");
+    try {
+      const response = await api.githubRepositories();
+      setGitHubRepositories(response.repositories);
+      setGitHubRepositorySelection((current) =>
+        response.repositories.some((repository) => repository.fullName === current)
+          ? current
+          : response.repositories[0]?.fullName || "",
+      );
+    } catch (cause) {
+      setGitHubError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not load repositories from GitHub.",
+      );
+    } finally {
+      setGitHubBusy(null);
+    }
+  }
 
   async function create() {
     try {
@@ -588,10 +621,225 @@ function App({ user }: { user: User }) {
     }
   }
 
+  function linkedGitHubRepository() {
+    if (!selected?.githubOwner || !selected?.githubRepository) return null;
+    return {
+      owner: selected.githubOwner as string,
+      repository: selected.githubRepository as string,
+      branch: (selected.githubBranch || "main") as string,
+    };
+  }
+
+  function currentGitHubPath() {
+    return (
+      githubLocalPath.trim() ||
+      selected?.localPath ||
+      (selected ? `projects/${selected.id}-github` : "")
+    );
+  }
+
+  async function refreshSelectedProject() {
+    if (!selected) return;
+    const [projectResponse, projectsResponse] = await Promise.all([
+      api.project(selected.id),
+      api.projects(),
+    ]);
+    setSelected(projectResponse.project);
+    setProjects(projectsResponse.projects);
+  }
+
+  async function connectSelectedGitHubRepository() {
+    if (!selected || !githubRepositorySelection || githubBusy) return;
+    const [ownerName, ...repositoryParts] = githubRepositorySelection.split("/");
+    const repository = repositoryParts.join("/");
+    if (!ownerName || !repository) return;
+
+    setGitHubBusy("connect");
+    setGitHubError(null);
+    try {
+      await api.connectGitHubRepository(selected.id, ownerName, repository);
+      setGitHubLocalPath(
+        selected.localPath || `projects/${selected.id}-github`,
+      );
+      await refreshSelectedProject();
+      setLogs((current) => [
+        ...current,
+        `Connected ${githubRepositorySelection} to "${selected.name}".`,
+      ]);
+    } catch (cause) {
+      setGitHubError(
+        cause instanceof Error ? cause.message : "Could not connect this repository.",
+      );
+    } finally {
+      setGitHubBusy(null);
+    }
+  }
+
+  async function createGitHubRepository() {
+    if (!selected || !githubNewRepository.trim() || githubBusy) return;
+    setGitHubBusy("create");
+    setGitHubError(null);
+    try {
+      const response = await api.createGitHubRepository(
+        selected.id,
+        githubNewRepository.trim(),
+        selected.description || `Created with DevForge AI: ${selected.name}`,
+      );
+      setGitHubLocalPath(
+        selected.localPath || `projects/${selected.id}-github`,
+      );
+      await refreshSelectedProject();
+      await refreshGitHubRepositories();
+      setLogs((current) => [
+        ...current,
+        `Created and connected private repository ${response.repository.fullName}.`,
+      ]);
+    } catch (cause) {
+      setGitHubError(
+        cause instanceof Error ? cause.message : "Could not create a GitHub repository.",
+      );
+    } finally {
+      setGitHubBusy(null);
+    }
+  }
+
+  async function cloneGitHubRepository() {
+    const repository = linkedGitHubRepository();
+    const path = currentGitHubPath();
+    if (!selected || !repository || !localAgentInfo || !path || githubBusy) return;
+    if (
+      !window.confirm(
+        `Clone https://github.com/${repository.owner}/${repository.repository} into ${localAgentInfo.workspaceRoot}\\${path.replaceAll("/", "\\")}? The destination must not already exist. Git uses the credentials configured on this PC; DevForge will not send your GitHub token to the Local Agent.`,
+      )
+    ) {
+      return;
+    }
+
+    setGitHubBusy("clone");
+    setGitHubError(null);
+    try {
+      const result = await api.localAgent.cloneGitHubRepository(localAgentToken, {
+        ...repository,
+        path,
+      });
+      await api.updateGitHubSync(selected.id, result.path, "CONNECTED");
+      setGitHubLocalPath(result.path);
+      setWorkspaceEditorFile(null);
+      setWorkspaceEditorDraft("");
+      await Promise.all([
+        loadWorkspaceDirectory(result.path),
+        refreshSelectedProject(),
+      ]);
+      setLogs((current) => [...current, `Cloned ${repository.owner}/${repository.repository} to ${result.path}.`]);
+    } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : "Could not clone the GitHub repository.";
+      setGitHubError(message);
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+    } finally {
+      setGitHubBusy(null);
+    }
+  }
+
+  async function pullGitHubRepository() {
+    const repository = linkedGitHubRepository();
+    const path = currentGitHubPath();
+    if (!selected || !repository || !localAgentInfo || !path || githubBusy) return;
+    if (
+      !window.confirm(
+        `Pull the latest ${repository.branch} branch into ${path}? Pull is allowed only when the local repository has no uncommitted changes.`,
+      )
+    ) {
+      return;
+    }
+
+    setGitHubBusy("pull");
+    setGitHubError(null);
+    try {
+      const result = await api.localAgent.pullGitHubRepository(localAgentToken, {
+        ...repository,
+        path,
+      });
+      await api.updateGitHubSync(selected.id, result.path, "CLEAN");
+      await Promise.all([
+        loadWorkspaceDirectory(result.path),
+        refreshSelectedProject(),
+      ]);
+      setLogs((current) => [...current, `Pulled ${repository.owner}/${repository.repository}: ${result.output}`]);
+    } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : "Could not pull from GitHub.";
+      setGitHubError(message);
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+    } finally {
+      setGitHubBusy(null);
+    }
+  }
+
+  async function pushGitHubRepository(initializeRepository = false) {
+    const repository = linkedGitHubRepository();
+    const path = currentGitHubPath();
+    if (!selected || !repository || !localAgentInfo || !path || githubBusy) return;
+    if (
+      !window.confirm(
+        `${initializeRepository ? `Configure or initialize Git in ${path}, then ` : ""}${generatedFiles.length ? `copy ${generatedFiles.length} saved DevForge files into ${path} (matching files will be overwritten), then ` : ""}stage and commit all changes in ${path} and push them to ${repository.owner}/${repository.repository} (${repository.branch})? Secret environment files and common private keys are blocked. Review your project before publishing.`,
+      )
+    ) {
+      return;
+    }
+
+    setGitHubBusy("push");
+    setGitHubError(null);
+    try {
+      if (generatedFiles.length) {
+        await api.localAgent.syncProject(
+          localAgentToken,
+          path,
+          generatedFiles,
+        );
+      }
+      if (initializeRepository) {
+        await api.localAgent.initializeGitHubRepository(
+          localAgentToken,
+          { ...repository, path },
+        );
+      }
+      const result = await api.localAgent.pushGitHubRepository(
+        localAgentToken,
+        {
+          ...repository,
+          path,
+          message:
+            githubCommitMessage.trim() ||
+            `Sync ${selected.name} from DevForge`,
+        },
+      );
+      await api.updateGitHubSync(selected.id, result.path, "CLEAN");
+      setWorkspaceEditorFile(null);
+      setWorkspaceEditorDraft("");
+      await Promise.all([
+        loadWorkspaceDirectory(result.path),
+        refreshSelectedProject(),
+      ]);
+      setLogs((current) => [
+        ...current,
+        `Pushed ${repository.owner}/${repository.repository}: ${result.commit || result.output}`,
+      ]);
+    } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : "Could not push to GitHub.";
+      setGitHubError(message);
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+    } finally {
+      setGitHubBusy(null);
+    }
+  }
+
   async function selectProject(projectId: string) {
     try {
       const response = await api.project(projectId);
       setSelected(response.project);
+      setGitHubLocalPath(response.project.localPath || "");
       setPrompt("");
       setChatMessages([]);
       resetGeneration();
@@ -960,6 +1208,157 @@ function App({ user }: { user: User }) {
                       </button>
                     </div>
                   )}
+                  <section className="mt-5 rounded-xl border border-slate-800 bg-slate-900/50 p-4" aria-label="GitHub synchronization">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-100">GitHub synchronization</h3>
+                        <p className="mt-1 text-xs leading-5 text-slate-400">
+                          Connect a repository, clone or pull it to this PC, then commit and push local changes.
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-slate-800 px-2.5 py-1 text-xs text-slate-300">
+                        {selected.githubOwner && selected.githubRepository
+                          ? `${selected.gitSyncStatus || "CONNECTED"} · ${selected.githubOwner}/${selected.githubRepository}`
+                          : "No repository connected"}
+                      </span>
+                    </div>
+                    {selected.githubOwner && selected.githubRepository ? (
+                      <>
+                        <p className="mt-3 text-xs text-slate-400">
+                          Branch: <span className="text-slate-200">{selected.githubBranch}</span>
+                          {selected.lastSyncedAt && (
+                            <> · Last synced: {new Date(selected.lastSyncedAt).toLocaleString()}</>
+                          )}
+                        </p>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                          <label className="text-xs text-slate-400">
+                            Local workspace folder
+                            <input
+                              value={githubLocalPath || selected.localPath || `projects/${selected.id}-github`}
+                              onChange={(event) => setGitHubLocalPath(event.target.value)}
+                              disabled={!localAgentInfo || Boolean(githubBusy)}
+                              placeholder={`projects/${selected.id}-github`}
+                              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-60"
+                            />
+                          </label>
+                          <label className="text-xs text-slate-400">
+                            Commit message
+                            <input
+                              value={githubCommitMessage}
+                              onChange={(event) => setGitHubCommitMessage(event.target.value)}
+                              disabled={Boolean(githubBusy)}
+                              placeholder={`Sync ${selected.name} from DevForge`}
+                              maxLength={200}
+                              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-60"
+                            />
+                          </label>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void cloneGitHubRepository()}
+                            disabled={!localAgentInfo || Boolean(githubBusy)}
+                            className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {githubBusy === "clone" ? "Cloning..." : "Clone to PC"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void pullGitHubRepository()}
+                            disabled={!localAgentInfo || Boolean(githubBusy)}
+                            className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {githubBusy === "pull" ? "Pulling..." : "Pull latest"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void pushGitHubRepository()}
+                            disabled={!localAgentInfo || Boolean(githubBusy)}
+                            className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {githubBusy === "push" ? "Pushing..." : "Commit & push"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void pushGitHubRepository(true)}
+                            disabled={!localAgentInfo || Boolean(githubBusy)}
+                            className="rounded-lg border border-indigo-500/50 px-3 py-2 text-xs text-indigo-200 hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+                            title="Initialize Git in this folder or attach the connected GitHub repository as its origin, then commit and push."
+                          >
+                            {githubBusy === "push" ? "Pushing..." : "Initialize & push"}
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end">
+                          <label className="flex-1 text-xs text-slate-400">
+                            Existing repository with write access
+                            <select
+                              value={githubRepositorySelection}
+                              onChange={(event) => setGitHubRepositorySelection(event.target.value)}
+                              disabled={Boolean(githubBusy)}
+                              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-60"
+                            >
+                              {!githubRepositories.length && (
+                                <option value="">No writable repositories found</option>
+                              )}
+                              {githubRepositories.map((repository) => (
+                                <option key={repository.id} value={repository.fullName}>
+                                  {repository.fullName}{repository.private ? " (private)" : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => void refreshGitHubRepositories()}
+                            disabled={Boolean(githubBusy)}
+                            className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-indigo-400 disabled:opacity-50"
+                          >
+                            {githubBusy === "repositories" ? "Loading..." : "Refresh"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void connectSelectedGitHubRepository()}
+                            disabled={!githubRepositorySelection || Boolean(githubBusy)}
+                            className="rounded-lg border border-indigo-500/50 px-3 py-2 text-xs text-indigo-200 hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {githubBusy === "connect" ? "Connecting..." : "Connect existing"}
+                          </button>
+                        </div>
+                        <div className="mt-4 flex flex-col gap-2 border-t border-slate-800 pt-4 sm:flex-row sm:items-end">
+                          <label className="flex-1 text-xs text-slate-400">
+                            Or create a new private repository
+                            <input
+                              value={githubNewRepository}
+                              onChange={(event) => setGitHubNewRepository(event.target.value)}
+                              disabled={Boolean(githubBusy)}
+                              placeholder="repository-name"
+                              maxLength={100}
+                              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-60"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => void createGitHubRepository()}
+                            disabled={!githubNewRepository.trim() || Boolean(githubBusy)}
+                            className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {githubBusy === "create" ? "Creating..." : "Create private repo"}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                    {!localAgentInfo && (
+                      <p className="mt-3 text-xs leading-5 text-amber-300">
+                        Connect the Local Agent to clone, pull, or push. Install Git on this PC and sign in through its Git Credential Manager for private repository access; the GitHub token is never sent to the agent.
+                      </p>
+                    )}
+                    {githubError && (
+                      <p role="alert" className="mt-3 text-xs leading-5 text-red-300">{githubError}</p>
+                    )}
+                  </section>
                   {localAgentError && (
                     <p role="alert" className="mt-3 text-xs text-red-300">{localAgentError}</p>
                   )}

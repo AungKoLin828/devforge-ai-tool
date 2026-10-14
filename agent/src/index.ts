@@ -8,6 +8,10 @@ import {
   listWorkspaceEntries,
   readLocalProject,
   readWorkspaceFile,
+  cloneGitHubRepository,
+  initializeGitHubRepository,
+  pullGitHubRepository,
+  pushGitHubRepository,
   runCommand,
   runProjectAction,
   writeWorkspaceFile,
@@ -205,6 +209,58 @@ const server = http.createServer(async (req, res) => {
         body.files,
       );
       return respond(res, { success: true, ...result }, 200, origin);
+    }
+
+    if (
+      (requestUrl.pathname === "/git/clone" ||
+        requestUrl.pathname === "/git/init" ||
+        requestUrl.pathname === "/git/pull" ||
+        requestUrl.pathname === "/git/push") &&
+      req.method === "POST"
+    ) {
+      const body = await readBody(req);
+      const input = {
+        owner: String(body.owner || ""),
+        repository: String(body.repository || ""),
+        branch: String(body.branch || ""),
+        path: String(body.path || ""),
+      };
+      if (requestUrl.pathname === "/git/clone") {
+        return respond(
+          res,
+          { success: true, ...(await cloneGitHubRepository(root, input)) },
+          200,
+          origin,
+        );
+      }
+      if (requestUrl.pathname === "/git/init") {
+        return respond(
+          res,
+          { success: true, ...(await initializeGitHubRepository(root, input)) },
+          200,
+          origin,
+        );
+      }
+      if (requestUrl.pathname === "/git/pull") {
+        return respond(
+          res,
+          { success: true, ...(await pullGitHubRepository(root, input)) },
+          200,
+          origin,
+        );
+      }
+      return respond(
+        res,
+        {
+          success: true,
+          ...(await pushGitHubRepository(root, {
+            ...input,
+            message: String(body.message || ""),
+          })),
+        },
+        200,
+        origin,
+      );
     }
 
     if (

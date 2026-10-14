@@ -138,6 +138,7 @@ export async function importProject(userId, input) {
                 description: `Imported from local workspace: ${sourcePath}`,
                 stack: "Imported project",
                 status: "READY",
+                localPath: sourcePath,
             },
         });
         await tx.projectMember.create({

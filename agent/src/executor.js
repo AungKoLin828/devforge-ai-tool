@@ -394,6 +394,379 @@ export async function writeProjectFiles(root, relativeProjectPath, files) {
         files: files.length,
     };
 }
+async function runGit(cwd, args, timeoutMs = 5 * 60 * 1000) {
+    return new Promise((resolve, reject) => {
+        const child = spawn("git", args, {
+            cwd,
+            shell: false,
+            windowsHide: true,
+            env: {
+                ...process.env,
+                GIT_TERMINAL_PROMPT: "0",
+                GCM_INTERACTIVE: "Never",
+            },
+        });
+        let stdout = "";
+        let stderr = "";
+        let outputBytes = 0;
+        let settled = false;
+        const append = (target, chunk) => {
+            const remaining = MAX_OUTPUT_BYTES - outputBytes;
+            if (remaining <= 0)
+                return;
+            const text = chunk.subarray(0, remaining).toString("utf8");
+            outputBytes += Buffer.byteLength(text, "utf8");
+            if (target === "stdout")
+                stdout += text;
+            else
+                stderr += text;
+        };
+        const timer = setTimeout(() => {
+            child.kill();
+            if (!settled) {
+                settled = true;
+                reject(new Error("Git operation timed out"));
+            }
+        }, timeoutMs);
+        child.stdout.on("data", (chunk) => append("stdout", chunk));
+        child.stderr.on("data", (chunk) => append("stderr", chunk));
+        child.on("error", (cause) => {
+            clearTimeout(timer);
+            if (!settled) {
+                settled = true;
+                if (cause.code === "ENOENT") {
+                    reject(new Error("Git is not installed or is not available on PATH"));
+                }
+                else {
+                    reject(cause);
+                }
+            }
+        });
+        child.on("close", (code) => {
+            clearTimeout(timer);
+            if (!settled) {
+                settled = true;
+                resolve({ code, stdout, stderr });
+            }
+        });
+    });
+}
+function validateGitWorkspacePath(relativePath) {
+    const segments = relativePath.split("/");
+    if (!relativePath ||
+        relativePath.length > 512 ||
+        relativePath.startsWith("/") ||
+        relativePath.includes("\\") ||
+        /^[a-z]:/i.test(relativePath) ||
+        segments.some((segment) => !segment ||
+            segment === "." ||
+            segment === ".." ||
+            /[<>:"|?*\u0000-\u001f]/.test(segment) ||
+            /[. ]$/.test(segment) ||
+            /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(segment))) {
+        throw new Error("Repository path must be a valid folder inside the agent workspace");
+    }
+}
+function validateGitHubTarget(owner, repository, branch) {
+    if (!/^[A-Za-z0-9_.-]{1,100}$/.test(owner) ||
+        owner === "." ||
+        owner === ".." ||
+        !/^[A-Za-z0-9_.-]{1,100}$/.test(repository) ||
+        repository === "." ||
+        repository === "..") {
+        throw new Error("Invalid GitHub owner or repository");
+    }
+    if (!branch ||
+        branch.length > 255 ||
+        branch.startsWith("-") ||
+        branch.startsWith("/") ||
+        branch.endsWith("/") ||
+        branch.includes("..") ||
+        branch.includes("@{") ||
+        /[\s~^:?*[\]\\\u0000-\u001f]/.test(branch) ||
+        branch.split("/").some((part) => !part || part.startsWith(".") || part.endsWith(".lock"))) {
+        throw new Error("Invalid GitHub branch name");
+    }
+}
+function assertGitHubRemote(remote, owner, repository) {
+    let target = null;
+    const https = remote.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/i);
+    const ssh = remote.match(/^(?:git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+)\/([^/]+?)(?:\.git)?$/i);
+    if (https)
+        target = [https[1], https[2]];
+    if (ssh)
+        target = [ssh[1], ssh[2]];
+    if (!target ||
+        target[0].toLowerCase() !== owner.toLowerCase() ||
+        target[1].toLowerCase() !== repository.toLowerCase()) {
+        throw new Error("The local Git remote does not match the connected GitHub repository");
+    }
+}
+async function resolveGitProject(root, relativePath, owner, repository, branch) {
+    validateGitWorkspacePath(relativePath);
+    validateGitHubTarget(owner, repository, branch);
+    const rootPath = await fs.realpath(root);
+    const target = safePath(rootPath, relativePath);
+    const targetStat = await fs.lstat(target);
+    if (targetStat.isSymbolicLink() || !targetStat.isDirectory()) {
+        throw new Error("The selected local repository folder is not a real directory");
+    }
+    const targetPath = await fs.realpath(target);
+    const topLevel = await runGit(targetPath, ["rev-parse", "--show-toplevel"]);
+    if (topLevel.code !== 0 || path.resolve(topLevel.stdout.trim()) !== targetPath) {
+        throw new Error("The selected folder is not a Git repository root");
+    }
+    const remote = await runGit(targetPath, [
+        "config",
+        "--get",
+        "remote.origin.url",
+    ]);
+    if (remote.code !== 0) {
+        throw new Error("The local Git repository has no origin remote");
+    }
+    assertGitHubRemote(remote.stdout.trim(), owner, repository);
+    const currentBranch = await runGit(targetPath, ["branch", "--show-current"]);
+    if (currentBranch.code !== 0 || currentBranch.stdout.trim() !== branch) {
+        throw new Error(`The local repository is not on the connected default branch "${branch}"`);
+    }
+    return { targetPath, relativePath };
+}
+function changedPaths(status) {
+    const entries = status.split("\0").filter(Boolean);
+    const paths = [];
+    for (let index = 0; index < entries.length; index++) {
+        const entry = entries[index];
+        if (entry.length < 4)
+            throw new Error("Git returned an invalid status result");
+        paths.push(entry.slice(3));
+        if (entry[0] === "R" || entry[0] === "C" || entry[1] === "R" || entry[1] === "C") {
+            index++;
+            if (entries[index])
+                paths.push(entries[index]);
+        }
+    }
+    return paths;
+}
+function assertNoSensitiveGitPaths(paths) {
+    const excludedDirectories = new Set([
+        ".aws",
+        ".azure",
+        ".config",
+        ".gnupg",
+        ".kube",
+        ".ssh",
+        "node_modules",
+        ".venv",
+    ]);
+    const unsafe = paths.find((filePath) => {
+        const segments = filePath.split(/[\\/]/);
+        const basename = segments[segments.length - 1];
+        const lower = basename.toLowerCase();
+        return (segments.some((segment) => excludedDirectories.has(segment.toLowerCase())) ||
+            /^\.env(?:\.|$)/i.test(basename) &&
+                ![".env.example", ".env.sample"].includes(lower) ||
+            /\.(?:key|pem|p12|pfx|keystore)$/i.test(basename) ||
+            /^(?:id_rsa|id_ed25519|credentials(?:\..*)?|service-account(?:\..*)?)$/i.test(basename));
+    });
+    if (unsafe) {
+        throw new Error(`Push blocked because "${unsafe}" may contain credentials or private key material. Remove it from the Git changes and retry.`);
+    }
+}
+export async function cloneGitHubRepository(root, input) {
+    validateGitWorkspacePath(input.path);
+    validateGitHubTarget(input.owner, input.repository, input.branch);
+    const rootPath = await fs.realpath(root);
+    const target = safePath(rootPath, input.path);
+    try {
+        await fs.lstat(target);
+        throw new Error("The clone destination already exists; choose a new workspace folder");
+    }
+    catch (cause) {
+        if (cause.code !== "ENOENT")
+            throw cause;
+    }
+    const parentPath = path.posix.dirname(input.path);
+    if (parentPath !== ".") {
+        await ensureSafeDirectory(rootPath, parentPath);
+    }
+    const remoteUrl = `https://github.com/${input.owner}/${input.repository}.git`;
+    const result = await runGit(rootPath, ["clone", "--", remoteUrl, target]);
+    if (result.code !== 0) {
+        throw new Error(result.stderr.trim() ||
+            "Git clone failed. Check your network and GitHub access on this PC.");
+    }
+    const targetPath = await fs.realpath(target);
+    const branchResult = await runGit(targetPath, ["branch", "--show-current"]);
+    if (branchResult.code !== 0) {
+        throw new Error(branchResult.stderr.trim() || "Could not read the cloned branch");
+    }
+    if (!branchResult.stdout.trim()) {
+        const initialized = await runGit(targetPath, ["checkout", "-b", input.branch]);
+        if (initialized.code !== 0) {
+            throw new Error(initialized.stderr.trim() || "Could not initialize the empty repository branch");
+        }
+    }
+    else if (branchResult.stdout.trim() !== input.branch) {
+        throw new Error(`Git cloned branch "${branchResult.stdout.trim()}" instead of "${input.branch}".`);
+    }
+    return {
+        path: input.path,
+        branch: input.branch,
+        output: result.stderr.trim() || "Repository cloned successfully.",
+    };
+}
+export async function initializeGitHubRepository(root, input) {
+    validateGitWorkspacePath(input.path);
+    validateGitHubTarget(input.owner, input.repository, input.branch);
+    const rootPath = await fs.realpath(root);
+    const targetPath = await ensureSafeDirectory(rootPath, input.path);
+    const targetRealPath = await fs.realpath(targetPath);
+    const existing = await runGit(targetRealPath, ["rev-parse", "--show-toplevel"]);
+    if (existing.code === 0) {
+        if (path.resolve(existing.stdout.trim()) !== targetRealPath) {
+            throw new Error("The selected folder is inside another Git repository");
+        }
+        const remote = await runGit(targetRealPath, [
+            "config",
+            "--get",
+            "remote.origin.url",
+        ]);
+        if (remote.code === 0) {
+            assertGitHubRemote(remote.stdout.trim(), input.owner, input.repository);
+        }
+        else {
+            const added = await runGit(targetRealPath, [
+                "remote",
+                "add",
+                "origin",
+                `https://github.com/${input.owner}/${input.repository}.git`,
+            ]);
+            if (added.code !== 0) {
+                throw new Error(added.stderr.trim() || "Could not add the GitHub remote");
+            }
+        }
+        const currentBranch = await runGit(targetRealPath, ["branch", "--show-current"]);
+        if (currentBranch.code !== 0) {
+            throw new Error(currentBranch.stderr.trim() || "Could not read the local branch");
+        }
+        if (!currentBranch.stdout.trim()) {
+            const checkedOut = await runGit(targetRealPath, ["checkout", "-b", input.branch]);
+            if (checkedOut.code !== 0) {
+                throw new Error(checkedOut.stderr.trim() || "Could not create the local branch");
+            }
+        }
+        else if (currentBranch.stdout.trim() !== input.branch) {
+            throw new Error(`The local repository is on "${currentBranch.stdout.trim()}"; switch it to "${input.branch}" before syncing.`);
+        }
+        return { path: input.path, branch: input.branch, output: "GitHub remote is configured." };
+    }
+    const initialized = await runGit(targetRealPath, [
+        "init",
+        "--initial-branch",
+        input.branch,
+    ]);
+    if (initialized.code !== 0) {
+        throw new Error(initialized.stderr.trim() || "Could not initialize the local Git repository");
+    }
+    const added = await runGit(targetRealPath, [
+        "remote",
+        "add",
+        "origin",
+        `https://github.com/${input.owner}/${input.repository}.git`,
+    ]);
+    if (added.code !== 0) {
+        throw new Error(added.stderr.trim() || "Could not add the GitHub remote");
+    }
+    return {
+        path: input.path,
+        branch: input.branch,
+        output: "Initialized the local Git repository and configured its GitHub remote.",
+    };
+}
+export async function pullGitHubRepository(root, input) {
+    const { targetPath } = await resolveGitProject(root, input.path, input.owner, input.repository, input.branch);
+    const status = await runGit(targetPath, [
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+    ]);
+    if (status.code !== 0) {
+        throw new Error(status.stderr.trim() || "Could not inspect local Git changes");
+    }
+    if (status.stdout) {
+        throw new Error("Commit or discard local changes before pulling from GitHub");
+    }
+    const result = await runGit(targetPath, [
+        "pull",
+        "--ff-only",
+        "--",
+        "origin",
+        input.branch,
+    ]);
+    if (result.code !== 0) {
+        throw new Error(result.stderr.trim() || "Git pull failed");
+    }
+    return {
+        path: input.path,
+        branch: input.branch,
+        output: result.stdout.trim() || result.stderr.trim() || "Repository is up to date.",
+    };
+}
+export async function pushGitHubRepository(root, input) {
+    const message = input.message.trim();
+    if (!message || message.length > 200) {
+        throw new Error("Commit message must contain between 1 and 200 characters");
+    }
+    const { targetPath } = await resolveGitProject(root, input.path, input.owner, input.repository, input.branch);
+    const status = await runGit(targetPath, [
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+    ]);
+    if (status.code !== 0) {
+        throw new Error(status.stderr.trim() || "Could not inspect local Git changes");
+    }
+    assertNoSensitiveGitPaths(changedPaths(status.stdout));
+    const staged = await runGit(targetPath, ["add", "--all"]);
+    if (staged.code !== 0) {
+        throw new Error(staged.stderr.trim() || "Could not stage local project changes");
+    }
+    const stagedPaths = await runGit(targetPath, [
+        "diff",
+        "--cached",
+        "--name-only",
+        "-z",
+    ]);
+    if (stagedPaths.code !== 0) {
+        throw new Error(stagedPaths.stderr.trim() || "Could not inspect staged Git changes");
+    }
+    assertNoSensitiveGitPaths(stagedPaths.stdout.split("\0").filter(Boolean));
+    let commit = "No local changes to commit.";
+    if (stagedPaths.stdout.split("\0").filter(Boolean).length > 0) {
+        const committed = await runGit(targetPath, ["commit", "-m", message]);
+        if (committed.code !== 0) {
+            throw new Error(committed.stderr.trim() || "Git commit failed");
+        }
+        commit = committed.stdout.trim() || committed.stderr.trim();
+    }
+    const pushed = await runGit(targetPath, [
+        "push",
+        "--set-upstream",
+        "origin",
+        `${input.branch}:${input.branch}`,
+    ]);
+    if (pushed.code !== 0) {
+        throw new Error(pushed.stderr.trim() || "Git push failed");
+    }
+    return {
+        path: input.path,
+        branch: input.branch,
+        commit,
+        output: pushed.stderr.trim() || pushed.stdout.trim() || "Repository pushed successfully.",
+    };
+}
 export async function listWorkspaceProjects(root) {
     const rootPath = await fs.realpath(root);
     const entries = await fs.readdir(rootPath, { withFileTypes: true });

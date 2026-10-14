@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { listWorkspaceProjects, listWorkspaceEntries, readLocalProject, readWorkspaceFile, runCommand, runProjectAction, writeWorkspaceFile, writeProjectFiles, } from "./executor.js";
+import { listWorkspaceProjects, listWorkspaceEntries, readLocalProject, readWorkspaceFile, cloneGitHubRepository, initializeGitHubRepository, pullGitHubRepository, pushGitHubRepository, runCommand, runProjectAction, writeWorkspaceFile, writeProjectFiles, } from "./executor.js";
 const port = Number(process.env.DEVFORGE_AGENT_PORT || 45821);
 const token = process.env.DEVFORGE_AGENT_TOKEN || randomBytes(32).toString("hex");
 const root = process.env.DEVFORGE_WORKSPACE || path.join(os.homedir(), "DevForge");
@@ -118,6 +118,35 @@ const server = http.createServer(async (req, res) => {
             const body = await readBody(req);
             const result = await writeProjectFiles(root, String(body.path || ""), body.files);
             return respond(res, { success: true, ...result }, 200, origin);
+        }
+        if ((requestUrl.pathname === "/git/clone" ||
+            requestUrl.pathname === "/git/init" ||
+            requestUrl.pathname === "/git/pull" ||
+            requestUrl.pathname === "/git/push") &&
+            req.method === "POST") {
+            const body = await readBody(req);
+            const input = {
+                owner: String(body.owner || ""),
+                repository: String(body.repository || ""),
+                branch: String(body.branch || ""),
+                path: String(body.path || ""),
+            };
+            if (requestUrl.pathname === "/git/clone") {
+                return respond(res, { success: true, ...(await cloneGitHubRepository(root, input)) }, 200, origin);
+            }
+            if (requestUrl.pathname === "/git/init") {
+                return respond(res, { success: true, ...(await initializeGitHubRepository(root, input)) }, 200, origin);
+            }
+            if (requestUrl.pathname === "/git/pull") {
+                return respond(res, { success: true, ...(await pullGitHubRepository(root, input)) }, 200, origin);
+            }
+            return respond(res, {
+                success: true,
+                ...(await pushGitHubRepository(root, {
+                    ...input,
+                    message: String(body.message || ""),
+                })),
+            }, 200, origin);
         }
         if ((req.url === "/project/build" || req.url === "/project/test") &&
             req.method === "POST") {

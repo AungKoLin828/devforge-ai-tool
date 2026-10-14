@@ -37,6 +37,30 @@ export type LocalProjectFile = {
   content: string;
 };
 
+export type GitHubRepository = {
+  id: string;
+  name: string;
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
+};
+
+export type ConnectedGitHubRepository = {
+  owner: string;
+  repository: string;
+  fullName: string;
+  defaultBranch: string;
+  private: boolean;
+};
+
+export type LocalGitResult = {
+  success: true;
+  path: string;
+  branch: string;
+  output: string;
+  commit?: string;
+};
+
 export type LocalProjectImport = {
   name: string;
   path: string;
@@ -92,7 +116,7 @@ async function localAgentRequest<T>(
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === "AbortError") {
       throw new Error(
-        "The Local Agent request timed out. A build/test can take up to 24 minutes; check the agent terminal and try again if it is still running.",
+        "The Local Agent request timed out. Check the agent terminal and retry when it is ready.",
       );
     }
     if (cause instanceof TypeError) {
@@ -122,6 +146,38 @@ export const api = {
     location.href = "/api/auth/github";
   },
   logout: () => request("/api/auth/logout", { method: "POST" }),
+  githubRepositories: () =>
+    request<{ success: true; repositories: GitHubRepository[] }>(
+      "/api/github/repositories",
+    ),
+  connectGitHubRepository: (projectId: string, owner: string, repository: string) =>
+    request<{ success: true; repository: ConnectedGitHubRepository }>(
+      `/api/projects/${encodeURIComponent(projectId)}/github/connect`,
+      {
+        method: "POST",
+        body: JSON.stringify({ owner, repository }),
+      },
+    ),
+  createGitHubRepository: (projectId: string, name: string, description: string) =>
+    request<{ success: true; repository: ConnectedGitHubRepository }>(
+      `/api/projects/${encodeURIComponent(projectId)}/github/create`,
+      {
+        method: "POST",
+        body: JSON.stringify({ name, description }),
+      },
+    ),
+  updateGitHubSync: (
+    projectId: string,
+    path: string,
+    status: "CONNECTED" | "CLEAN" | "ERROR",
+  ) =>
+    request<{ success: true; localPath: string; gitSyncStatus: string }>(
+      `/api/projects/${encodeURIComponent(projectId)}/github/status`,
+      {
+        method: "POST",
+        body: JSON.stringify({ path, status }),
+      },
+    ),
   projects: () => request<{ success: true; projects: any[] }>("/api/projects"),
   project: (id: string) =>
     request<{ success: true; project: any }>(`/api/projects/${id}`),
@@ -212,6 +268,52 @@ export const api = {
           method: "POST",
           body: JSON.stringify({ path, files }),
         },
+      ),
+    cloneGitHubRepository: (
+      token: string,
+      input: { owner: string; repository: string; branch: string; path: string },
+    ) =>
+      localAgentRequest<LocalGitResult>(
+        token,
+        "/git/clone",
+        { method: "POST", body: JSON.stringify(input) },
+        25 * 60 * 1000,
+      ),
+    initializeGitHubRepository: (
+      token: string,
+      input: { owner: string; repository: string; branch: string; path: string },
+    ) =>
+      localAgentRequest<LocalGitResult>(
+        token,
+        "/git/init",
+        { method: "POST", body: JSON.stringify(input) },
+        25 * 60 * 1000,
+      ),
+    pullGitHubRepository: (
+      token: string,
+      input: { owner: string; repository: string; branch: string; path: string },
+    ) =>
+      localAgentRequest<LocalGitResult>(
+        token,
+        "/git/pull",
+        { method: "POST", body: JSON.stringify(input) },
+        25 * 60 * 1000,
+      ),
+    pushGitHubRepository: (
+      token: string,
+      input: {
+        owner: string;
+        repository: string;
+        branch: string;
+        path: string;
+        message: string;
+      },
+    ) =>
+      localAgentRequest<LocalGitResult>(
+        token,
+        "/git/push",
+        { method: "POST", body: JSON.stringify(input) },
+        25 * 60 * 1000,
       ),
     runProject: (token: string, action: "build" | "test", path: string) =>
       localAgentRequest<{ success: true; result: LocalProjectResult }>(

@@ -63,10 +63,32 @@ if (!connectionString) {
       }
     }
   } catch (error) {
-    const code = error?.code ? ` (${error.code})` : "";
-    console.error(
-      `Database check failed${code}: ${error instanceof Error ? error.message.split("\n")[0] : "unknown database error"}`,
-    );
+    let current = error;
+    let code = "";
+    let message = "";
+    const seen = new Set();
+    while (current && typeof current === "object" && !seen.has(current)) {
+      seen.add(current);
+      if (!code && typeof current.code === "string") code = current.code;
+      if (!message && typeof current.message === "string") {
+        message = current.message.split("\n")[0];
+      }
+      current = current.cause;
+    }
+
+    console.error(`Database check failed${code ? ` (${code})` : ""}${message ? `: ${message}` : "."}`);
+    if (["ETIMEDOUT", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "P1001"].includes(code)) {
+      try {
+        const database = new URL(connectionString);
+        console.error(
+          `Could not reach ${database.hostname}:${database.port || "5432"}. Check outbound TCP access on this port and allowlist/firewall settings. Supabase's session and transaction poolers commonly use ports 5432 and 6543, respectively.`,
+        );
+      } catch {
+        console.error(
+          "Check outbound TCP access to the Supabase PostgreSQL host and port configured in DATABASE_URL.",
+        );
+      }
+    }
     process.exitCode = 1;
   } finally {
     await prisma.$disconnect();

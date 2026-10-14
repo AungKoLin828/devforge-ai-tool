@@ -529,7 +529,7 @@ export async function handleApi(req: Request) {
       message.toLowerCase().includes("timed out")
     ) {
       message =
-        "Cannot connect to the PostgreSQL database selected by DATABASE_URL. Check that the database is reachable from this PC, then run `npm run db:check`.";
+        "The local server timed out connecting to Supabase PostgreSQL. Verify that your network, VPN, and firewall allow outbound TCP to the Supabase database on the port in DATABASE_URL (usually 5432 for the session pooler or 6543 for the transaction pooler), then run `npm run db:check`.";
     } else if (!originalMessage) {
       message = `The database request failed${code ? ` (${code})` : ""}. Run \`npm run db:check\` to verify the local database connection and schema.`;
     }

@@ -110,6 +110,11 @@ async function localAgentRequest<T>(
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error(
+          `The Local Agent does not recognize ${path}. Stop the running agent, update/reinstall it, and start it again before retrying.`,
+        );
+      }
       throw new Error(body.error || `Local agent request failed (${response.status})`);
     }
     return body as T;

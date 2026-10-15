@@ -66,7 +66,7 @@ You do **not** need to clone or download the DevForge application repository, an
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\DevForgeAgent\Start-DevForgeAgent.ps1"
    ```
 
-   If you installed the agent to a custom location, replace the path with the full path to `Start-DevForgeAgent.ps1` printed by the installer. This process-only bypass also lets the generated launcher run without changing the machine's execution policy. Keep its PowerShell window open. The agent prints a random **Pairing token** when it starts.
+   If you installed the agent to a custom location, replace the path with the full path to `Start-DevForgeAgent.ps1` printed by the installer. To update an existing standalone agent, stop its running PowerShell window, rerun the installer from step 2, then start it again. This process-only bypass also lets the generated launcher run without changing the machine's execution policy. Keep its PowerShell window open. The agent prints a random **Pairing token** when it starts.
 5. In the signed-in DevForge web app, paste the token into **Local agent pairing token** and select **Connect local agent**.
 6. Select **Sync files to PC** to copy generated artifacts into `<workspace>\projects\<project-id>`. This direction transfers generated files from DevForge to your PC. Your other local project files are not uploaded unless you explicitly use **Import local project**.
 

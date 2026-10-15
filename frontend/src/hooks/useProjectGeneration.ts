@@ -207,7 +207,9 @@ export function useProjectGeneration(options: Options = {}) {
   } = options;
 
   const [status, setStatus] = useState<GenerationStatus>("IDLE");
-  const [operation, setOperation] = useState<"generate" | "review" | null>(null);
+  const [operation, setOperation] = useState<
+    "generate" | "modify" | "review" | null
+  >(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -314,7 +316,7 @@ export function useProjectGeneration(options: Options = {}) {
       projectId: string,
       prompt: string,
       provider = "OPENROUTER",
-      operation: "generate" | "review" = "generate",
+      operation: "generate" | "modify" | "review" = "generate",
     ): Promise<GenerationRun | null> => {
       if (activeRef.current) {
         updateError("Another project operation is already active in this page.");
@@ -326,8 +328,12 @@ export function useProjectGeneration(options: Options = {}) {
         return null;
       }
 
-      if (operation === "generate" && !prompt.trim()) {
-        updateError("Please enter a project description.");
+      if (operation !== "review" && !prompt.trim()) {
+        updateError(
+          operation === "modify"
+            ? "Please describe the project changes you want."
+            : "Please enter a project description.",
+        );
         return null;
       }
 
@@ -351,7 +357,7 @@ export function useProjectGeneration(options: Options = {}) {
               Accept: "application/json",
             },
             body: JSON.stringify(
-              operation === "generate"
+              operation !== "review"
                 ? { prompt: prompt.trim(), provider }
                 : {},
             ),

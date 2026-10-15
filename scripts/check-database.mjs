@@ -66,18 +66,49 @@ if (!connectionString) {
     let current = error;
     let code = "";
     let message = "";
+    let adapterErrorName = "";
     const seen = new Set();
-    while (current && typeof current === "object" && !seen.has(current)) {
+    const pending = [error];
+    while (pending.length > 0) {
+      current = pending.pop();
+      if (!current || typeof current !== "object" || seen.has(current)) continue;
       seen.add(current);
       if (!code && typeof current.code === "string") code = current.code;
       if (!message && typeof current.message === "string") {
         message = current.message.split("\n")[0];
       }
-      current = current.cause;
+      if (
+        !adapterErrorName &&
+        current.name === "DriverAdapterError" &&
+        typeof current.message === "string"
+      ) {
+        adapterErrorName = current.message;
+      }
+      if (current.cause && typeof current.cause === "object") {
+        pending.push(current.cause);
+      }
+      if (current.meta && typeof current.meta === "object") {
+        pending.push(current.meta);
+      }
+      if (
+        current.driverAdapterError &&
+        typeof current.driverAdapterError === "object"
+      ) {
+        pending.push(current.driverAdapterError);
+      }
     }
 
-    console.error(`Database check failed${code ? ` (${code})` : ""}${message ? `: ${message}` : "."}`);
-    if (["ETIMEDOUT", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "P1001"].includes(code)) {
+    if (/authenticationfailed/i.test(adapterErrorName)) {
+      console.error(
+        "PostgreSQL is reachable, but it rejected the DATABASE_URL credentials. Reset the password for the configured database role, then update DATABASE_URL with that exact password.",
+      );
+    } else {
+      console.error(`Database check failed${code ? ` (${code})` : ""}${message ? `: ${message}` : "."}`);
+    }
+    if (
+      !/authenticationfailed/i.test(adapterErrorName) &&
+      ["ETIMEDOUT", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "P1001"].includes(code)
+    ) {
       try {
         const database = new URL(connectionString);
         console.error(

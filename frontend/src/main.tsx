@@ -202,15 +202,24 @@ function App({ user }: { user: User }) {
   const [githubRepositories, setGitHubRepositories] = useState<GitHubRepository[]>([]);
   const [githubRepositorySelection, setGitHubRepositorySelection] = useState("");
   const [githubNewRepository, setGitHubNewRepository] = useState("");
+  const [githubNewRepositoryPrivate, setGitHubNewRepositoryPrivate] = useState(true);
   const [githubLocalPath, setGitHubLocalPath] = useState("");
   const [githubCommitMessage, setGitHubCommitMessage] = useState("");
   const [githubBusy, setGitHubBusy] = useState<
-    "repositories" | "connect" | "create" | "clone" | "pull" | "push" | null
+    | "repositories"
+    | "connect"
+    | "create"
+    | "clone"
+    | "pull"
+    | "push"
+    | "disconnect"
+    | null
   >(null);
   const [githubError, setGitHubError] = useState<string | null>(null);
   const [localAction, setLocalAction] = useState<"build" | "test" | null>(null);
   const [localResult, setLocalResult] = useState<LocalProjectResult | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+  const [removingImportedProjectId, setRemovingImportedProjectId] = useState<string | null>(null);
   const { status: generationStatus, operation: activeOperation, runId, error: generationError, isBusy, generate: runGeneration, review: runReview, reset: resetGeneration } = useProjectGeneration();
 
   function closeModal(confirmed = false) {
@@ -365,21 +374,129 @@ function App({ user }: { user: User }) {
     }
   }
 
-  async function generate() {
-    if (!selected || isBusy) return;
-    if (!prompt.trim()) {
-      const message = "Enter a project description before generating.";
-      setLogs((current) => [...current, message]);
-      showModal("warning", "Project description required", message);
+  async function removeImportedProject(project: { id: string; name: string }) {
+    const confirmed = await confirmModal(
+      "Remove imported project",
+      `Remove "${project.name}" and its imported files, artifacts, and history from DevForge? The original project files on your PC will not be changed or deleted.`,
+      "Remove from DevForge",
+    );
+    if (!confirmed || removingImportedProjectId || deletingProjectId) return;
+
+    setRemovingImportedProjectId(project.id);
+    try {
+      await api.removeImportedProject(project.id);
+      setProjects((current) => current.filter((item) => item.id !== project.id));
+
+      if (selected?.id === project.id) {
+        setSelected(undefined);
+        setPrompt("");
+        setLocalResult(null);
+        resetGeneration();
+      }
+
+      setLogs((current) => [
+        ...current,
+        `Removed imported project "${project.name}" from DevForge. The local PC files were left untouched.`,
+      ]);
+      showModal(
+        "success",
+        "Imported project removed",
+        `"${project.name}" and its DevForge copy were removed. The original files on your PC were left untouched.`,
+      );
+    } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : "Could not remove the imported project.";
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+      showModal("error", "Could not remove imported project", message);
+    } finally {
+      setRemovingImportedProjectId(null);
+    }
+  }
+
+  async function disconnectGitHubRepository() {
+    if (
+      !selected?.githubOwner ||
+      !selected.githubRepository ||
+      githubBusy
+    ) {
       return;
     }
 
-    setLogs((current) => [...current, "Starting AI project generation..."]);
+    const fullName = `${selected.githubOwner}/${selected.githubRepository}`;
+    const confirmed = await confirmModal(
+      "Disconnect GitHub repository",
+      `Disconnect ${fullName} from "${selected.name}" in DevForge? This will not delete the GitHub repository or any files on your PC.`,
+      "Disconnect repository",
+    );
+    if (!confirmed || githubBusy) return;
+
+    setGitHubBusy("disconnect");
+    setGitHubError(null);
     try {
-      const completedRun = await runGeneration(selected.id, prompt);
+      await api.disconnectGitHubRepository(selected.id);
+      const [projectResponse, projectsResponse] = await Promise.all([
+        api.project(selected.id),
+        api.projects(),
+      ]);
+      setSelected(projectResponse.project);
+      setProjects(projectsResponse.projects);
+      setGitHubLocalPath(projectResponse.project.localPath || "");
+      setLogs((current) => [
+        ...current,
+        `Disconnected ${fullName} from "${selected.name}". The GitHub repository and local files were left untouched.`,
+      ]);
+      showModal(
+        "success",
+        "Repository disconnected",
+        `Disconnected ${fullName} from this DevForge project. The GitHub repository and local files were not changed.`,
+      );
+    } catch (cause) {
+      const message =
+        cause instanceof Error
+          ? cause.message
+          : "Could not disconnect the GitHub repository.";
+      setGitHubError(message);
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+    } finally {
+      setGitHubBusy(null);
+    }
+  }
+
+  async function generate(mode: "generate" | "modify" = "generate") {
+    if (!selected || isBusy) return;
+    if (!prompt.trim()) {
+      const message =
+        mode === "modify"
+          ? "Describe the project changes you want."
+          : "Enter a project description before generating.";
+      setLogs((current) => [...current, message]);
+      showModal(
+        "warning",
+        mode === "modify" ? "Modification request required" : "Project description required",
+        message,
+      );
+      return;
+    }
+
+    const operationLabel = mode === "modify" ? "modification" : "project generation";
+    setLogs((current) => [...current, `Starting AI ${operationLabel}...`]);
+    try {
+      const completedRun = await runGeneration(
+        selected.id,
+        prompt,
+        "OPENROUTER",
+        mode,
+      );
       if (!completedRun) return;
-      setLogs((current) => [...current, "Generation completed."]);
-      showModal("success", "Generation complete", "The generated project and plan have been saved.");
+      setPrompt("");
+      setLogs((current) => [...current, `${mode === "modify" ? "Modification" : "Generation"} completed.`]);
+      showModal(
+        "success",
+        mode === "modify" ? "Modification complete" : "Generation complete",
+        mode === "modify"
+          ? "The requested changes and updated project files have been saved."
+          : "The generated project and plan have been saved.",
+      );
       const [projectResponse, projectsResponse] = await Promise.all([
         api.project(selected.id),
         api.projects(),
@@ -389,7 +506,11 @@ function App({ user }: { user: User }) {
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Generation failed.";
       setLogs((current) => [...current, `ERROR: ${message}`]);
-      showModal("error", "Generation failed", message);
+      showModal(
+        "error",
+        mode === "modify" ? "Modification failed" : "Generation failed",
+        message,
+      );
       // Keep the page usable after 400/409/network errors; the hook also clears its busy flag in finally.
     }
   }
@@ -805,6 +926,7 @@ function App({ user }: { user: User }) {
         selected.id,
         githubNewRepository.trim(),
         selected.description || `Created with DevForge AI: ${selected.name}`,
+        githubNewRepositoryPrivate,
       );
       setGitHubLocalPath(
         selected.localPath || `projects/${selected.id}-github`,
@@ -813,11 +935,11 @@ function App({ user }: { user: User }) {
       await refreshGitHubRepositories();
       setLogs((current) => [
         ...current,
-        `Created and connected private repository ${response.repository.fullName}.`,
+        `Created and connected ${response.repository.private ? "private" : "public"} repository ${response.repository.fullName}.`,
       ]);
       showModal(
         "success",
-        "Private repository created",
+        `${response.repository.private ? "Private" : "Public"} repository created`,
         `Created and connected ${response.repository.fullName}.`,
       );
     } catch (cause) {
@@ -1061,26 +1183,52 @@ function App({ user }: { user: User }) {
         <aside className="border-r border-slate-800 p-4 overflow-auto">
           <button onClick={create} className="w-full bg-indigo-600 rounded-lg py-2 mb-5">+ New Project</button>
           <div className="text-xs uppercase text-slate-500 mb-2">Projects</div>
-          {projects.map((project) => (
-            <div key={project.id} className={`mb-1 rounded-lg ${selected?.id === project.id ? "bg-slate-800" : "hover:bg-slate-900"}`}>
-              <button
-                onClick={() => void selectProject(project.id)}
-                className="block w-full rounded-t-lg p-3 text-left"
+          {projects.map((project) => {
+            const isImportedProject =
+              project.stack === "Imported project" &&
+              project.description?.startsWith("Imported from local workspace:");
+            const actionDisabled =
+              deletingProjectId !== null || removingImportedProjectId !== null;
+
+            return (
+              <div
+                key={project.id}
+                className={`mb-1 rounded-lg ${selected?.id === project.id ? "bg-slate-800" : "hover:bg-slate-900"}`}
               >
-                <div>{project.name}</div>
-                <div className="mt-1 text-xs text-slate-500">{project.status}</div>
-              </button>
-              <button
-                type="button"
-                disabled={deletingProjectId !== null}
-                onClick={() => void deleteProject(project)}
-                className="w-full rounded-b-lg px-3 pb-2 text-left text-xs text-slate-500 transition hover:text-red-300 disabled:cursor-wait disabled:opacity-50"
-                aria-label={`Delete ${project.name}`}
-              >
-                {deletingProjectId === project.id ? "Deleting..." : "Delete project"}
-              </button>
-            </div>
-          ))}
+                <button
+                  onClick={() => void selectProject(project.id)}
+                  className="block w-full rounded-t-lg p-3 text-left"
+                >
+                  <div>{project.name}</div>
+                  <div className="mt-1 text-xs text-slate-500">{project.status}</div>
+                </button>
+                {isImportedProject && (
+                  <button
+                    type="button"
+                    disabled={actionDisabled}
+                    onClick={() => void removeImportedProject(project)}
+                    className="block w-full px-3 pb-1 text-left text-xs text-slate-500 transition hover:text-amber-300 disabled:cursor-wait disabled:opacity-50"
+                    aria-label={`Remove imported ${project.name} from DevForge`}
+                  >
+                    {removingImportedProjectId === project.id
+                      ? "Removing..."
+                      : "Remove imported project"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={actionDisabled}
+                  onClick={() => void deleteProject(project)}
+                  className="block w-full rounded-b-lg px-3 pb-2 text-left text-xs text-slate-500 transition hover:text-red-300 disabled:cursor-wait disabled:opacity-50"
+                  aria-label={`Delete ${project.name}`}
+                >
+                  {deletingProjectId === project.id
+                    ? "Deleting..."
+                    : "Delete project"}
+                </button>
+              </div>
+            );
+          })}
         </aside>
 
         <main className="min-w-0 overflow-auto p-6">
@@ -1282,9 +1430,23 @@ function App({ user }: { user: User }) {
 
               <div className="mt-5 glass rounded-2xl p-4">
                 <div className="text-sm font-semibold mb-3">AI Project Builder</div>
-                <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={isBusy} className="w-full h-36 rounded-xl bg-slate-950 border border-slate-800 p-3 outline-none focus:border-indigo-500 disabled:opacity-60" placeholder="Describe the software you want to build..." />
+                <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={isBusy} className="w-full h-36 rounded-xl bg-slate-950 border border-slate-800 p-3 outline-none focus:border-indigo-500 disabled:opacity-60" placeholder={generatedFiles.length ? "Describe the software you want to build, or enter a modification request..." : "Describe the software you want to build..."} />
                 <div className="flex gap-2 mt-3">
                   <button disabled={isBusy} onClick={() => void generate()} className="bg-indigo-600 disabled:opacity-50 rounded-lg px-4 py-2">{activeOperation === "generate" && generationStatus === "STARTING" ? "Starting..." : activeOperation === "generate" && generationStatus === "RUNNING" ? "Generating..." : "Generate"}</button>
+                  {generatedFiles.length > 0 && (
+                    <button
+                      type="button"
+                      disabled={isBusy || !prompt.trim()}
+                      onClick={() => void generate("modify")}
+                      className="rounded-lg border border-indigo-500/50 px-4 py-2 text-indigo-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {activeOperation === "modify" && generationStatus === "STARTING"
+                        ? "Starting..."
+                        : activeOperation === "modify" && generationStatus === "RUNNING"
+                          ? "Applying changes..."
+                          : "Request modification"}
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={!localAgentInfo || !generatedFiles.length || syncingGeneratedFiles || Boolean(localAction)}
@@ -1368,6 +1530,18 @@ function App({ user }: { user: User }) {
                           ? `${selected.gitSyncStatus || "CONNECTED"} · ${selected.githubOwner}/${selected.githubRepository}`
                           : "No repository connected"}
                       </span>
+                      {selected.githubOwner && selected.githubRepository && (
+                        <button
+                          type="button"
+                          onClick={() => void disconnectGitHubRepository()}
+                          disabled={Boolean(githubBusy)}
+                          className="rounded-lg border border-red-500/40 px-3 py-1.5 text-xs text-red-200 hover:border-red-400 disabled:cursor-wait disabled:opacity-50"
+                        >
+                          {githubBusy === "disconnect"
+                            ? "Disconnecting..."
+                            : "Disconnect repository"}
+                        </button>
+                      )}
                     </div>
                     {selected.githubOwner && selected.githubRepository ? (
                       <>
@@ -1476,7 +1650,7 @@ function App({ user }: { user: User }) {
                         </div>
                         <div className="mt-4 flex flex-col gap-2 border-t border-slate-800 pt-4 sm:flex-row sm:items-end">
                           <label className="flex-1 text-xs text-slate-400">
-                            Or create a new private repository
+                            Create a new repository
                             <input
                               value={githubNewRepository}
                               onChange={(event) => setGitHubNewRepository(event.target.value)}
@@ -1486,13 +1660,29 @@ function App({ user }: { user: User }) {
                               className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-60"
                             />
                           </label>
+                          <label className="text-xs text-slate-400">
+                            Visibility
+                            <select
+                              value={githubNewRepositoryPrivate ? "private" : "public"}
+                              onChange={(event) =>
+                                setGitHubNewRepositoryPrivate(event.target.value === "private")
+                              }
+                              disabled={Boolean(githubBusy)}
+                              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-60"
+                            >
+                              <option value="private">Private</option>
+                              <option value="public">Public</option>
+                            </select>
+                          </label>
                           <button
                             type="button"
                             onClick={() => void createGitHubRepository()}
                             disabled={!githubNewRepository.trim() || Boolean(githubBusy)}
                             className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {githubBusy === "create" ? "Creating..." : "Create private repo"}
+                            {githubBusy === "create"
+                              ? "Creating..."
+                              : `Create ${githubNewRepositoryPrivate ? "private" : "public"} repo`}
                           </button>
                         </div>
                       </>

@@ -1,9 +1,9 @@
 import { json, error, body } from "./http.js";
 import { requireAuth, AuthError, createSession, clearSession, } from "./auth.js";
-import { githubOAuthConfig, githubLoginUrl, exchange, githubUser, upsertGithubUser, listGitHubRepositories, connectGitHubRepository, createGitHubRepository, updateGitHubSync, } from "./github.js";
+import { githubOAuthConfig, githubLoginUrl, exchange, githubUser, upsertGithubUser, listGitHubRepositories, connectGitHubRepository, createGitHubRepository, disconnectGitHubRepository, updateGitHubSync, } from "./github.js";
 import { randomToken } from "./crypto.js";
 import { prisma } from "./db.js";
-import { create, chatWithProject, detail, importProject, list, owner, remove, startGenerateProject, startReviewProject, } from "./projects.js";
+import { create, chatWithProject, detail, importProject, list, owner, remove, removeImportedProject, startGenerateProject, startReviewProject, } from "./projects.js";
 import { ensureAgent, registerAgent, queueJob, claimJob, } from "./agent.js";
 const redirect = (url, status = 302) => new Response(null, {
     status,
@@ -169,11 +169,15 @@ export async function handleApi(req) {
                     requestBody.name.trim() === "..") {
                     return error("Repository name must use 1-100 letters, numbers, dots, dashes or underscores", 400);
                 }
+                if (requestBody.private !== undefined &&
+                    typeof requestBody.private !== "boolean") {
+                    return error("Repository visibility must be private or public", 400);
+                }
                 return json({
                     success: true,
                     repository: await createGitHubRepository(projectId, user.id, requestBody.name.trim(), typeof requestBody.description === "string"
                         ? requestBody.description.trim()
-                        : ""),
+                        : "", requestBody.private !== false),
                 }, 201);
             }
             if (action === "github/status" && req.method === "POST") {
@@ -196,6 +200,14 @@ export async function handleApi(req) {
                     ...await updateGitHubSync(projectId, user.id, requestBody.path, requestBody.status),
                 });
             }
+            if (action === "github/disconnect" && req.method === "POST") {
+                await disconnectGitHubRepository(projectId, user.id);
+                return json({ success: true });
+            }
+            if (action === "import/remove" && req.method === "POST") {
+                await removeImportedProject(projectId, user.id);
+                return json({ success: true });
+            }
             if (!action && req.method === "GET") {
                 return json({
                     success: true,
@@ -206,13 +218,14 @@ export async function handleApi(req) {
                 await remove(projectId, user.id);
                 return json({ success: true });
             }
-            if (action === "generate" && req.method === "POST") {
+            if ((action === "generate" || action === "modify") &&
+                req.method === "POST") {
                 const requestBody = await body(req);
                 const provider = requestBody.provider || "OPENROUTER";
                 if (provider !== "OPENROUTER") {
                     return error("Unsupported AI provider", 400);
                 }
-                const result = await startGenerateProject(projectId, user.id, String(requestBody.prompt || ""), provider);
+                const result = await startGenerateProject(projectId, user.id, String(requestBody.prompt || ""), provider, action);
                 // Return immediately. The AI generation runs in the
                 // Netlify Background Function.
                 return json({

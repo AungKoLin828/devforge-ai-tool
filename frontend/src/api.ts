@@ -158,12 +158,17 @@ export const api = {
         body: JSON.stringify({ owner, repository }),
       },
     ),
-  createGitHubRepository: (projectId: string, name: string, description: string) =>
+  createGitHubRepository: (
+    projectId: string,
+    name: string,
+    description: string,
+    isPrivate: boolean,
+  ) =>
     request<{ success: true; repository: ConnectedGitHubRepository }>(
       `/api/projects/${encodeURIComponent(projectId)}/github/create`,
       {
         method: "POST",
-        body: JSON.stringify({ name, description }),
+        body: JSON.stringify({ name, description, private: isPrivate }),
       },
     ),
   updateGitHubSync: (
@@ -178,11 +183,21 @@ export const api = {
         body: JSON.stringify({ path, status }),
       },
     ),
+  disconnectGitHubRepository: (projectId: string) =>
+    request<{ success: true }>(
+      `/api/projects/${encodeURIComponent(projectId)}/github/disconnect`,
+      { method: "POST" },
+    ),
   projects: () => request<{ success: true; projects: any[] }>("/api/projects"),
   project: (id: string) =>
     request<{ success: true; project: any }>(`/api/projects/${id}`),
   deleteProject: (id: string) =>
     request<{ success: true }>(`/api/projects/${id}`, { method: "DELETE" }),
+  removeImportedProject: (id: string) =>
+    request<{ success: true }>(
+      `/api/projects/${encodeURIComponent(id)}/import/remove`,
+      { method: "POST" },
+    ),
   importProject: (project: LocalProjectImport, name: string) =>
     request<{ success: true; project: any }>("/api/projects/import", {
       method: "POST",

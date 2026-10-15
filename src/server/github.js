@@ -219,7 +219,7 @@ export async function connectGitHubRepository(projectId, userId, owner, reposito
     }
     return persistGitHubRepository(projectId, details);
 }
-export async function createGitHubRepository(projectId, userId, name, description) {
+export async function createGitHubRepository(projectId, userId, name, description, isPrivate) {
     if (!/^[A-Za-z0-9_.-]{1,100}$/.test(name) || name === "." || name === "..") {
         throw new Error("Repository name must use 1-100 letters, numbers, dots, dashes or underscores");
     }
@@ -230,7 +230,7 @@ export async function createGitHubRepository(projectId, userId, name, descriptio
         body: JSON.stringify({
             name,
             description: description.slice(0, 350),
-            private: true,
+            private: isPrivate,
             auto_init: false,
         }),
     });
@@ -270,4 +270,33 @@ export async function updateGitHubSync(projectId, userId, relativePath, status) 
         }),
     ]);
     return { localPath: relativePath, gitSyncStatus: status, lastSyncedAt };
+}
+export async function disconnectGitHubRepository(projectId, userId) {
+    const project = await prisma.project.findFirst({
+        where: { id: projectId, userId },
+        select: { id: true, githubOwner: true, githubRepository: true },
+    });
+    if (!project)
+        throw new Error("Project not found");
+    if (!project.githubOwner || !project.githubRepository) {
+        throw new Error("No GitHub repository is connected to this project");
+    }
+    await prisma.$transaction([
+        prisma.project.update({
+            where: { id: projectId },
+            data: {
+                gitProvider: null,
+                githubOwner: null,
+                githubRepository: null,
+                githubBranch: "main",
+                githubRepoId: null,
+                gitSyncStatus: "NOT_CONNECTED",
+                lastSyncedAt: null,
+            },
+        }),
+        prisma.gitRepository.updateMany({
+            where: { projectId, connected: true },
+            data: { connected: false },
+        }),
+    ]);
 }

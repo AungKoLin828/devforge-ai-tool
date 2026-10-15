@@ -15,6 +15,7 @@ import {
   listGitHubRepositories,
   connectGitHubRepository,
   createGitHubRepository,
+  disconnectGitHubRepository,
   updateGitHubSync,
 } from "./github.js";
 import { randomToken } from "./crypto.js";
@@ -27,6 +28,7 @@ import {
   list,
   owner,
   remove,
+  removeImportedProject,
   startGenerateProject,
   startReviewProject,
 } from "./projects.js";
@@ -263,6 +265,7 @@ export async function handleApi(req: Request) {
         const requestBody = await body<{
           name: unknown;
           description?: unknown;
+          private?: unknown;
         }>(req);
         if (
           typeof requestBody.name !== "string" ||
@@ -271,6 +274,12 @@ export async function handleApi(req: Request) {
           requestBody.name.trim() === ".."
         ) {
           return error("Repository name must use 1-100 letters, numbers, dots, dashes or underscores", 400);
+        }
+        if (
+          requestBody.private !== undefined &&
+          typeof requestBody.private !== "boolean"
+        ) {
+          return error("Repository visibility must be private or public", 400);
         }
         return json({
           success: true,
@@ -281,6 +290,7 @@ export async function handleApi(req: Request) {
             typeof requestBody.description === "string"
               ? requestBody.description.trim()
               : "",
+            requestBody.private !== false,
           ),
         }, 201);
       }
@@ -316,6 +326,16 @@ export async function handleApi(req: Request) {
         });
       }
 
+      if (action === "github/disconnect" && req.method === "POST") {
+        await disconnectGitHubRepository(projectId, user.id);
+        return json({ success: true });
+      }
+
+      if (action === "import/remove" && req.method === "POST") {
+        await removeImportedProject(projectId, user.id);
+        return json({ success: true });
+      }
+
       if (!action && req.method === "GET") {
         return json({
           success: true,
@@ -328,7 +348,10 @@ export async function handleApi(req: Request) {
         return json({ success: true });
       }
 
-      if (action === "generate" && req.method === "POST") {
+      if (
+        (action === "generate" || action === "modify") &&
+        req.method === "POST"
+      ) {
         const requestBody = await body<any>(req);
 
         const provider = requestBody.provider || "OPENROUTER";
@@ -341,6 +364,7 @@ export async function handleApi(req: Request) {
           user.id,
           String(requestBody.prompt || ""),
           provider,
+          action,
         );
 
         // Return immediately. The AI generation runs in the

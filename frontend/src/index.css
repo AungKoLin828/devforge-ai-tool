@@ -17,6 +17,30 @@ body {
   margin: 0;
   min-width: 320px;
 }
+
+/* Match the app's dark palette while keeping scrollbars visible and easy to grab. */
+* {
+  scrollbar-color: #475569 #0b1220;
+  scrollbar-width: thin;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: #0b1220;
+}
+*::-webkit-scrollbar-thumb {
+  border: 2px solid #0b1220;
+  border-radius: 999px;
+  background: #475569;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+*::-webkit-scrollbar-corner {
+  background: #0b1220;
+}
 button,
 input,
 textarea {
@@ -24,6 +48,51 @@ textarea {
 }
 button {
   cursor: pointer;
+}
+
+/* A small, non-blocking global indicator for network requests without local busy text. */
+.api-loading-indicator {
+  position: fixed;
+  z-index: 40;
+  top: 4.25rem;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  transform: translateX(-50%);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.96);
+  padding: 0.5rem 0.875rem;
+  color: #c7d2fe;
+  box-shadow: 0 12px 32px rgba(2, 6, 23, 0.35);
+  font-size: 0.75rem;
+  pointer-events: none;
+  animation: api-loading-appear 160ms ease-out;
+}
+.api-loading-spinner {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  border: 2px solid rgba(129, 140, 248, 0.25);
+  border-top-color: #a5b4fc;
+  border-radius: 50%;
+  animation: api-loading-spin 700ms linear infinite;
+}
+@keyframes api-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes api-loading-appear {
+  from {
+    opacity: 0;
+    translate: 0 -4px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
 }
 
 /* Shared translucent panel treatment used throughout the dashboard. */
@@ -41,11 +110,32 @@ button {
     #070b14;
 }
 
-/* Reusable logo and headline accents for the public landing page. */
-.brand-mark {
-  background: linear-gradient(145deg, #818cf8, #4f46e5);
-  box-shadow: 0 8px 26px rgba(79, 70, 229, 0.3);
+/* Keep the wordmark simple, with AI as a small indigo text badge. */
+.brand-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  white-space: nowrap;
 }
+.brand-wordmark-name {
+  font-size: 1.2rem;
+  font-weight: 750;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  color: #f8fafc;
+}
+.brand-wordmark-ai {
+  border: 1px solid rgba(129, 140, 248, 0.28);
+  border-radius: 0.35rem;
+  background: rgba(99, 102, 241, 0.12);
+  padding: 0.2rem 0.35rem;
+  color: #a5b4fc;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+
 .landing-gradient {
   background: linear-gradient(95deg, #a5b4fc 0%, #818cf8 40%, #c4b5fd 100%);
   background-clip: text;
@@ -68,5 +158,12 @@ button {
 @media (prefers-reduced-motion: no-preference) {
   html {
     scroll-behavior: smooth;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .api-loading-indicator,
+  .api-loading-spinner {
+    animation: none;
   }
 }

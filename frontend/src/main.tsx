@@ -1,7 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import {
   api,
+  getApiActivitySnapshot,
+  subscribeToApiActivity,
   type ChatMessage,
   type LocalProjectResult,
   type LocalWorkspaceEntry,
@@ -12,8 +14,25 @@ import {
 } from "./api";
 import { useProjectGeneration } from "./hooks/useProjectGeneration";
 
+// Text-only brand lockup shared by the landing page and dashboard headers.
+function BrandWordmark() {
+  return (
+    <span className="brand-wordmark">
+      <span className="brand-wordmark-name">DevForge</span>
+      <span className="brand-wordmark-ai">AI</span>
+    </span>
+  );
+}
+
 // Landing screen and GitHub sign-in entry point for unauthenticated visitors.
 function Login() {
+  const [signingIn, setSigningIn] = useState(false);
+  function startGitHubLogin() {
+    if (signingIn) return;
+    setSigningIn(true);
+    api.login();
+  }
+
   const capabilities = [
     // Keep feature cards declarative so the landing-page copy stays in one place.
     {
@@ -48,12 +67,17 @@ function Login() {
   return (
     <main className="landing min-h-screen overflow-hidden">
       <header className="landing-nav mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
-        <a href="/" className="flex items-center gap-3 font-semibold tracking-tight" aria-label="DevForge AI home">
-          <span className="brand-mark grid h-9 w-9 place-items-center rounded-xl text-sm font-black">D</span>
-          <span>DevForge <span className="text-indigo-400">AI</span></span>
+        <a href="/" className="inline-flex items-center" aria-label="DevForge AI home">
+          <BrandWordmark />
         </a>
-        <button onClick={() => api.login()} className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-indigo-400 hover:text-white">
-          Sign in with GitHub
+        <button
+          onClick={startGitHubLogin}
+          disabled={signingIn}
+          aria-busy={signingIn}
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-indigo-400 hover:text-white disabled:cursor-wait disabled:opacity-75"
+        >
+          {signingIn && <span className="api-loading-spinner" aria-hidden="true" />}
+          {signingIn ? "Connecting to GitHub..." : "Sign in with GitHub"}
         </button>
       </header>
 
@@ -73,8 +97,20 @@ function Login() {
             development workflow into the loop.
           </p>
           <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-            <button onClick={() => api.login()} className="rounded-xl bg-indigo-600 px-6 py-3.5 font-semibold text-white shadow-lg shadow-indigo-950/40 transition hover:bg-indigo-500">
-              Continue with GitHub <span aria-hidden="true">→</span>
+            <button
+              onClick={startGitHubLogin}
+              disabled={signingIn}
+              aria-busy={signingIn}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-6 py-3.5 font-semibold text-white shadow-lg shadow-indigo-950/40 transition hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-75"
+            >
+              {signingIn ? (
+                <>
+                  <span className="api-loading-spinner" aria-hidden="true" />
+                  Connecting to GitHub...
+                </>
+              ) : (
+                <>Continue with GitHub <span aria-hidden="true">→</span></>
+              )}
             </button>
             <a href="#how-it-works" className="rounded-xl border border-slate-700 px-6 py-3.5 text-center font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-900">
               Explore the workflow
@@ -175,6 +211,11 @@ function App({ user }: { user: User }) {
 
   // Dashboard selection and transient state for independent workflow panels.
   const [projects, setProjects] = useState<any[]>([]);
+  const activeApiRequests = useSyncExternalStore(
+    subscribeToApiActivity,
+    getApiActivitySnapshot,
+    () => 0,
+  );
   const [modal, setModal] = useState<ModalState | null>(null);
   const modalResolver = useRef<((confirmed: boolean) => void) | null>(null);
   const [selected, setSelected] = useState<any>();
@@ -1215,13 +1256,24 @@ function App({ user }: { user: User }) {
     <div className="h-screen flex flex-col bg-slate-950">
       {/* Global session status and sign-out controls. */}
       <header className="h-14 border-b border-slate-800 px-5 flex items-center justify-between">
-        <div className="font-bold">DevForge <span className="text-indigo-400">AI</span></div>
+        <BrandWordmark />
         <div className="flex gap-4 items-center text-sm">
           <span className={localAgentInfo ? "text-emerald-400" : "text-amber-400"}>● Local Agent {localAgentInfo ? "Connected" : "Not connected"}</span>
           <span className="text-slate-400">{user.githubUsername || user.email}</span>
           <button onClick={() => api.logout().then(() => location.reload())} className="text-slate-400 hover:text-white">Logout</button>
         </div>
       </header>
+      {activeApiRequests > 0 && (
+        <div
+          className="api-loading-indicator"
+          role="status"
+          aria-live="polite"
+          aria-label="Waiting for an API response"
+        >
+          <span className="api-loading-spinner" aria-hidden="true" />
+          <span>Waiting for response...</span>
+        </div>
+      )}
 
       <div className="flex-1 grid grid-cols-[250px_1fr_350px] min-h-0">
         {/* Project navigation exposes distinct remove-import and permanent-delete actions. */}
@@ -1950,7 +2002,16 @@ function Root() {
     // A failed session lookup is treated as signed out, while loading always completes.
     api.me().then((response) => setUser(response.user)).catch(() => {}).finally(() => setLoading(false));
   }, []);
-  if (loading) return <div className="min-h-screen grid place-items-center">Loading DevForge...</div>;
+  if (loading) {
+    return (
+      <div className="min-h-screen grid place-items-center bg-slate-950 text-slate-200">
+        <div className="flex items-center gap-3" role="status" aria-live="polite">
+          <span className="api-loading-spinner" aria-hidden="true" />
+          <span>Loading DevForge...</span>
+        </div>
+      </div>
+    );
+  }
   return user ? <App user={user} /> : <Login />;
 }
 

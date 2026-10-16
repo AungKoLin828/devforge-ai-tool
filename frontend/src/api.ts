@@ -103,6 +103,34 @@ export type LocalWorkspaceFile = {
 // The agent binds to loopback so the browser can reach only this machine's service.
 const LOCAL_AGENT_URL = "http://127.0.0.1:45821";
 
+let activeApiRequests = 0;
+const apiActivitySubscribers = new Set<() => void>();
+
+/** Subscribe to the number of API and Local Agent requests currently in flight. */
+export function subscribeToApiActivity(subscriber: () => void) {
+  apiActivitySubscribers.add(subscriber);
+  return () => apiActivitySubscribers.delete(subscriber);
+}
+
+/** Read the stable request count used by React's external-store subscription. */
+export function getApiActivitySnapshot() {
+  return activeApiRequests;
+}
+
+/** Mark a request active and return an idempotent callback to finish its activity. */
+export function beginApiActivity() {
+  activeApiRequests += 1;
+  apiActivitySubscribers.forEach((subscriber) => subscriber());
+
+  let finished = false;
+  return () => {
+    if (finished) return;
+    finished = true;
+    activeApiRequests = Math.max(0, activeApiRequests - 1);
+    apiActivitySubscribers.forEach((subscriber) => subscriber());
+  };
+}
+
 // Attach the pairing token, enforce a request deadline, and preserve agent errors.
 async function localAgentRequest<T>(
   token: string,
@@ -112,6 +140,7 @@ async function localAgentRequest<T>(
 ): Promise<T> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  const finishActivity = beginApiActivity();
 
   try {
     const response = await fetch(`${LOCAL_AGENT_URL}${path}`, {
@@ -147,19 +176,25 @@ async function localAgentRequest<T>(
     throw cause;
   } finally {
     window.clearTimeout(timeout);
+    finishActivity();
   }
 }
 
 // Send same-origin API requests with the signed-in session cookie.
 async function request<T>(url: string, init: RequestInit = {}) {
-  const r = await fetch(url, {
-    credentials: "include",
-    ...init,
-    headers: { "content-type": "application/json", ...(init.headers || {}) },
-  });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(d.message || "Request failed");
-  return d as T;
+  const finishActivity = beginApiActivity();
+  try {
+    const r = await fetch(url, {
+      credentials: "include",
+      ...init,
+      headers: { "content-type": "application/json", ...(init.headers || {}) },
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.message || "Request failed");
+    return d as T;
+  } finally {
+    finishActivity();
+  }
 }
 
 // Browser-facing API surface grouped with the local-agent operations below.

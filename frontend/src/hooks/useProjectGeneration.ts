@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { beginApiActivity } from "../api";
 
 // UI lifecycle states for a queued background generation, modification, or review.
 export type GenerationStatus =
@@ -353,6 +354,7 @@ export function useProjectGeneration(options: Options = {}) {
       const controller = new AbortController();
       activeRef.current = true;
       controllerRef.current = controller;
+      const finishApiActivity = beginApiActivity();
       updateError(null);
       updateStatus("STARTING");
       setOperation(operation);
@@ -416,6 +418,7 @@ export function useProjectGeneration(options: Options = {}) {
         onFailure?.(message);
         return null;
       } finally {
+        finishApiActivity();
         activeRef.current = false;
         if (controllerRef.current === controller) controllerRef.current = null;
       }

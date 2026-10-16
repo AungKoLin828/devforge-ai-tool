@@ -46,18 +46,24 @@ function UserGuide() {
     },
     {
       number: "03",
-      title: "Work with files on your PC",
+      title: "Open and edit the project in VS Code",
       description:
-        "Start the Local Agent on your PC, enter its pairing token in the signed-in workspace, and connect. Sync generated files to your workspace, or import an existing project. Build and test actions ask for confirmation before running project scripts.",
+        "Start the Local Agent on your PC, enter its pairing token in the signed-in workspace, and connect. Sync generated files, then open <workspace>\\projects\\<project-id> in VS Code (File → Open Folder, or run code \"<folder-path>\" in PowerShell). You can also open an imported project folder. DevForge does not currently provide a dedicated VS Code extension.",
     },
     {
       number: "04",
+      title: "Build and test safely",
+      description:
+        "DevForge's Build locally and Test locally actions ask before running scripts, but first copy the saved generated files onto the PC and may overwrite matching local edits. After editing in VS Code, run checks in its terminal if you need to preserve those edits. Local edits are not automatically saved back to DevForge.",
+    },
+    {
+      number: "05",
       title: "Synchronize with GitHub",
       description:
         "From a project, connect an existing repository or create a new public or private repository. Use the Local Agent for clone, pull, and push operations. Git must be installed and authenticated on the PC running the agent.",
     },
     {
-      number: "05",
+      number: "06",
       title: "Choose the right removal action",
       description:
         "Remove imported project removes its DevForge copy without deleting local PC files. Delete project permanently removes the DevForge project and its saved artifacts. Disconnect repository removes the GitHub link without deleting the remote repository.",

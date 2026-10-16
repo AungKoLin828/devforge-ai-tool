@@ -4,6 +4,18 @@ DevForge AI is an AI-assisted project workspace built around GitHub sign-in, Pos
 
 The public user guide is available at `/guide` and can be read without signing in. Creating or managing projects and using connected services still requires GitHub authentication.
 
+## Use DevForge with VS Code
+
+There is no dedicated DevForge VS Code extension at this time. You can use VS Code as the editor for a project on your PC:
+
+1. Sign in to DevForge, create or select a project, and generate its code.
+2. Start the Local Agent on the same PC and browser, then connect it using its pairing token. See the Windows setup steps below.
+3. Select **Sync files to PC** in the project workspace and confirm. The generated files are copied to `<DEVFORGE_WORKSPACE>\projects\<project-id>`.
+4. Open that folder in VS Code using **File → Open Folder**, or from PowerShell run `code "<DEVFORGE_WORKSPACE>\projects\<project-id>"`. Use the workspace root reported by the Local Agent for `<DEVFORGE_WORKSPACE>`.
+5. Edit the files in VS Code. Those local edits do not automatically update the code artifact stored in DevForge.
+
+**Important:** DevForge's **Sync files to PC**, **Build locally**, **Test locally**, and GitHub push workflows copy the saved generated files onto the PC and can overwrite matching edits in the project folder. After editing files locally, run build/test commands in the VS Code terminal and use Git in VS Code (or its terminal) to commit and push those changes if you want to preserve them. Do not run a DevForge operation that syncs generated files until you are ready for the saved DevForge version to overwrite matching local files.
+
 ## Important architecture
 
 - Netlify hosts the browser and API functions.

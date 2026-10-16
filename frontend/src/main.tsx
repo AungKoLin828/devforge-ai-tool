@@ -12,8 +12,10 @@ import {
 } from "./api";
 import { useProjectGeneration } from "./hooks/useProjectGeneration";
 
+// Landing screen and GitHub sign-in entry point for unauthenticated visitors.
 function Login() {
   const capabilities = [
+    // Keep feature cards declarative so the landing-page copy stays in one place.
     {
       number: "01",
       title: "Plan the project",
@@ -35,6 +37,7 @@ function Login() {
   ];
 
   const roadmap = [
+    // Display shipped and planned workflow areas in their numbered roadmap order.
     ["01", "Generation you can verify", "Available"],
     ["02", "AI code review", "Available"],
     ["03", "Local project import, build and test", "Available"],
@@ -157,8 +160,11 @@ function Login() {
   );
 }
 
+// Authenticated project workspace, Local Agent controls, and GitHub tools.
 function App({ user }: { user: User }) {
+  // Message dialogs and confirmations share one resolver so every action is modal-based.
   type ModalKind = "info" | "success" | "warning" | "error";
+  // Optional labels distinguish a confirmation dialog from a dismiss-only message.
   type ModalState = {
     kind: ModalKind;
     title: string;
@@ -167,6 +173,7 @@ function App({ user }: { user: User }) {
     cancelLabel?: string;
   };
 
+  // Dashboard selection and transient state for independent workflow panels.
   const [projects, setProjects] = useState<any[]>([]);
   const [modal, setModal] = useState<ModalState | null>(null);
   const modalResolver = useRef<((confirmed: boolean) => void) | null>(null);
@@ -176,6 +183,7 @@ function App({ user }: { user: User }) {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
+  // Keep the pairing secret in this browser only; it is sent directly to loopback.
   const [localAgentToken, setLocalAgentToken] = useState(
     () => window.localStorage.getItem("devforge-local-agent-token") || "",
   );
@@ -199,6 +207,7 @@ function App({ user }: { user: User }) {
   const [workspaceEditorDraft, setWorkspaceEditorDraft] = useState("");
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [syncingGeneratedFiles, setSyncingGeneratedFiles] = useState(false);
+  // GitHub selection, workspace path, and mutually exclusive repository operations.
   const [githubRepositories, setGitHubRepositories] = useState<GitHubRepository[]>([]);
   const [githubRepositorySelection, setGitHubRepositorySelection] = useState("");
   const [githubNewRepository, setGitHubNewRepository] = useState("");
@@ -216,23 +225,28 @@ function App({ user }: { user: User }) {
     | null
   >(null);
   const [githubError, setGitHubError] = useState<string | null>(null);
+  // Local action state controls build/test output panels independently of AI runs.
   const [localAction, setLocalAction] = useState<"build" | "test" | null>(null);
   const [localResult, setLocalResult] = useState<LocalProjectResult | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [removingImportedProjectId, setRemovingImportedProjectId] = useState<string | null>(null);
+  // Background run state is kept in a hook so polling and cancellation survive UI rerenders.
   const { status: generationStatus, operation: activeOperation, runId, error: generationError, isBusy, generate: runGeneration, review: runReview, reset: resetGeneration } = useProjectGeneration();
 
+  // Resolve any pending confirmation before closing the shared message modal.
   function closeModal(confirmed = false) {
     modalResolver.current?.(confirmed);
     modalResolver.current = null;
     setModal(null);
   }
 
+  // Replace any current message with a non-blocking informational modal.
   function showModal(kind: ModalKind, title: string, message: string) {
     if (modalResolver.current) closeModal(false);
     setModal({ kind, title, message });
   }
 
+  // Present a confirmation modal and return the user's explicit choice.
   function confirmModal(
     title: string,
     message: string,
@@ -251,6 +265,7 @@ function App({ user }: { user: User }) {
     });
   }
 
+  // Route asynchronous workflow errors through the shared modal presentation.
   useEffect(() => {
     if (workspaceBrowserError) {
       showModal("error", "Workspace error", workspaceBrowserError);
@@ -271,6 +286,7 @@ function App({ user }: { user: User }) {
     }
   }, [generationError]);
 
+  // Load the user's project list and select an initial project when available.
   async function load() {
     const projectResponse = await api.projects();
     setProjects(projectResponse.projects);
@@ -292,6 +308,7 @@ function App({ user }: { user: User }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Refresh the list of writable repositories used by the connect selector.
   async function refreshGitHubRepositories() {
     setGitHubError(null);
     setGitHubBusy("repositories");
@@ -314,6 +331,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Create a blank project and initialize the workspace around it.
   async function create() {
     try {
       const response = await api.createProject({
@@ -334,6 +352,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Permanently delete a project's DevForge records after explicit confirmation.
   async function deleteProject(project: { id: string; name: string }) {
     const confirmed = await confirmModal(
       "Delete project",
@@ -374,6 +393,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Remove only the DevForge copy of an import; source files on the PC are separate.
   async function removeImportedProject(project: { id: string; name: string }) {
     const confirmed = await confirmModal(
       "Remove imported project",
@@ -413,6 +433,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Clear the DevForge repository link without deleting the GitHub remote.
   async function disconnectGitHubRepository() {
     if (
       !selected?.githubOwner ||
@@ -462,6 +483,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Start a new project generation or apply a request to the saved project files.
   async function generate(mode: "generate" | "modify" = "generate") {
     if (!selected || isBusy) return;
     if (!prompt.trim()) {
@@ -515,6 +537,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Run a background AI review against the currently saved code artifact.
   async function review() {
     if (!selected || isBusy || !generatedFiles.length) return;
 
@@ -542,6 +565,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Load a safe, relative directory listing from the paired Local Agent.
   async function loadWorkspaceDirectory(
     directory: string,
     token = localAgentToken,
@@ -560,6 +584,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Navigate to a workspace folder and keep the displayed location in sync.
   async function browseWorkspaceDirectory(directory: string) {
     if (
       workspaceEditorFile &&
@@ -577,6 +602,7 @@ function App({ user }: { user: User }) {
     await loadWorkspaceDirectory(directory);
   }
 
+  // Open an eligible text file and retain its timestamp for conflict-safe saving.
   async function openWorkspaceFile(entry: LocalWorkspaceEntry) {
     if (entry.type !== "file" || entry.editable === false) return;
     if (
@@ -606,6 +632,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Save editor content only if the on-disk file has not changed since it was read.
   async function saveWorkspaceFile() {
     if (!workspaceEditorFile || workspaceSaving) return;
     setWorkspaceSaving(true);
@@ -635,6 +662,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Verify the pairing token, persist it locally, then load the agent workspace.
   async function connectLocalAgent() {
     const token = localAgentToken.trim();
     if (!token) {
@@ -677,6 +705,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Import a bounded, secret-filtered snapshot from a selected local folder.
   async function importLocalProject() {
     const source = workspaceProjects.find(
       (project) => project.path === localImportPath,
@@ -729,6 +758,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Sync saved files to the PC and explicitly confirm before executing project scripts.
   async function runLocalAction(action: "build" | "test") {
     if (!selected || !localAgentInfo || !generatedFiles.length || localAction) {
       return;
@@ -806,6 +836,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Copy the current saved code artifact into the selected Local Agent workspace path.
   async function syncGeneratedFiles() {
     if (
       !selected ||
@@ -858,6 +889,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Read the active GitHub link in the shape expected by Local Agent requests.
   function linkedGitHubRepository() {
     if (!selected?.githubOwner || !selected?.githubRepository) return null;
     return {
@@ -867,6 +899,7 @@ function App({ user }: { user: User }) {
     };
   }
 
+  // Resolve the user-selected path, saved path, or default project workspace path.
   function currentGitHubPath() {
     return (
       githubLocalPath.trim() ||
@@ -875,6 +908,7 @@ function App({ user }: { user: User }) {
     );
   }
 
+  // Reload the selected project so persisted repository or sync state is reflected.
   async function refreshSelectedProject() {
     if (!selected) return;
     const [projectResponse, projectsResponse] = await Promise.all([
@@ -885,6 +919,7 @@ function App({ user }: { user: User }) {
     setProjects(projectsResponse.projects);
   }
 
+  // Connect the repository currently selected in the writable-repository list.
   async function connectSelectedGitHubRepository() {
     if (!selected || !githubRepositorySelection || githubBusy) return;
     const [ownerName, ...repositoryParts] = githubRepositorySelection.split("/");
@@ -917,6 +952,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Create a GitHub repository using the chosen name and visibility.
   async function createGitHubRepository() {
     if (!selected || !githubNewRepository.trim() || githubBusy) return;
     setGitHubBusy("create");
@@ -951,6 +987,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Clone the linked repository into a new Local Agent workspace folder.
   async function cloneGitHubRepository() {
     const repository = linkedGitHubRepository();
     const path = currentGitHubPath();
@@ -996,6 +1033,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Fast-forward the local branch only when there are no uncommitted changes.
   async function pullGitHubRepository() {
     const repository = linkedGitHubRepository();
     const path = currentGitHubPath();
@@ -1038,6 +1076,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Optionally configure Git, then stage, commit, and push reviewed workspace changes.
   async function pushGitHubRepository(initializeRepository = false) {
     const repository = linkedGitHubRepository();
     const path = currentGitHubPath();
@@ -1104,6 +1143,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Load a project and reset project-specific editor and operation state.
   async function selectProject(projectId: string) {
     try {
       const response = await api.project(projectId);
@@ -1119,6 +1159,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Send the recent conversation to the assistant without modifying project files.
   async function sendChatMessage() {
     const question = chatInput.trim();
     if (!selected || !question || chatBusy) return;
@@ -1149,6 +1190,7 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Derive the current saved code, plans, and review data for the workspace panels.
   const artifacts = Array.isArray(selected?.artifacts) ? selected.artifacts : [];
   const codeArtifact = artifacts.find((artifact: any) => artifact.type === "CODE");
   const codeContent = codeArtifact?.content;
@@ -1168,8 +1210,10 @@ function App({ user }: { user: User }) {
     ? reviewContent.findings
     : [];
 
+  // Render the project sidebar, artifact workspace, Local Agent, and GitHub panels.
   return (
     <div className="h-screen flex flex-col bg-slate-950">
+      {/* Global session status and sign-out controls. */}
       <header className="h-14 border-b border-slate-800 px-5 flex items-center justify-between">
         <div className="font-bold">DevForge <span className="text-indigo-400">AI</span></div>
         <div className="flex gap-4 items-center text-sm">
@@ -1180,6 +1224,7 @@ function App({ user }: { user: User }) {
       </header>
 
       <div className="flex-1 grid grid-cols-[250px_1fr_350px] min-h-0">
+        {/* Project navigation exposes distinct remove-import and permanent-delete actions. */}
         <aside className="border-r border-slate-800 p-4 overflow-auto">
           <button onClick={create} className="w-full bg-indigo-600 rounded-lg py-2 mb-5">+ New Project</button>
           <div className="text-xs uppercase text-slate-500 mb-2">Projects</div>
@@ -1231,6 +1276,7 @@ function App({ user }: { user: User }) {
           })}
         </aside>
 
+        {/* Selected project editor, saved artifacts, and local development tools. */}
         <main className="min-w-0 overflow-auto p-6">
           {!selected ? (
             <div className="h-full grid place-items-center text-slate-500">Create a project to begin.</div>
@@ -1248,6 +1294,7 @@ function App({ user }: { user: User }) {
                 </div>
               </div>
 
+              {/* Workspace files are browsed and edited through the loopback agent only. */}
               <section className="mt-5 glass overflow-hidden rounded-2xl" aria-label="Local workspace browser">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
                   <div>
@@ -1394,6 +1441,7 @@ function App({ user }: { user: User }) {
                 </div>
               )}
 
+              {/* Findings are tied to the code artifact reviewed by the latest run. */}
               {latestReview && (
                 <section className="mt-5 glass rounded-2xl p-4" aria-label="Latest AI code review">
                   <div className="flex items-center justify-between gap-3">
@@ -1428,6 +1476,7 @@ function App({ user }: { user: User }) {
                 </section>
               )}
 
+              {/* One prompt supports initial generation and later modification requests. */}
               <div className="mt-5 glass rounded-2xl p-4">
                 <div className="text-sm font-semibold mb-3">AI Project Builder</div>
                 <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={isBusy} className="w-full h-36 rounded-xl bg-slate-950 border border-slate-800 p-3 outline-none focus:border-indigo-500 disabled:opacity-60" placeholder={generatedFiles.length ? "Describe the software you want to build, or enter a modification request..." : "Describe the software you want to build..."} />
@@ -1517,6 +1566,7 @@ function App({ user }: { user: User }) {
                       </button>
                     </div>
                   )}
+                  {/* Git operations run on the PC; the server stores only remote metadata. */}
                   <section className="mt-5 rounded-xl border border-slate-800 bg-slate-900/50 p-4" aria-label="GitHub synchronization">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
@@ -1721,6 +1771,7 @@ function App({ user }: { user: User }) {
           )}
         </main>
 
+        {/* Project Q&A is separate from file modification and run activity. */}
         <aside className="border-l border-slate-800 flex min-h-0 flex-col">
           <div className="border-b border-slate-800 p-4">
             <div className="font-semibold">AI Assistant</div>
@@ -1809,6 +1860,7 @@ function App({ user }: { user: User }) {
         <span>IDE · Terminal · Build · Test · Review · Git · GitHub</span>
         <span>© {new Date().getFullYear()} Aung Ko Lin. All rights reserved.</span>
       </footer>
+      {/* All confirmation, status, warning, and error messages use this modal. */}
       {modal && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/75 p-4 backdrop-blur-sm">
           <section
@@ -1889,10 +1941,13 @@ function App({ user }: { user: User }) {
   );
 }
 
+// Resolve the current session before rendering either the login or project UI.
 function Root() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
+    // Resolve authentication once; the router sends expired sessions back to login.
+    // A failed session lookup is treated as signed out, while loading always completes.
     api.me().then((response) => setUser(response.user)).catch(() => {}).finally(() => setLoading(false));
   }, []);
   if (loading) return <div className="min-h-screen grid place-items-center">Loading DevForge...</div>;

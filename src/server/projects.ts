@@ -5,6 +5,7 @@ import { generate, SYSTEM, type Message, type Provider } from "./ai.js";
 const BACKGROUND_FUNCTION_PATH =
   "/.netlify/functions/generate-project-background";
 
+/** Return a project only when it belongs to the requesting user. */
 export async function owner(id: string, userId: string) {
   const project = await prisma.project.findUnique({
     where: { id },
@@ -21,6 +22,7 @@ export async function owner(id: string, userId: string) {
   return project;
 }
 
+/** Load a project and its complete artifact history after verifying ownership. */
 export async function detail(id: string, userId: string) {
   const project = await prisma.project.findUnique({
     where: { id },
@@ -42,11 +44,13 @@ export async function detail(id: string, userId: string) {
   return project;
 }
 
+/** List only the projects owned by the requesting user. */
 export const list = (userId: string) =>
   prisma.project.findMany({
     where: { userId },
   });
 
+/** Permanently remove an owned project and all records cascaded from it. */
 export async function remove(id: string, userId: string) {
   const project = await prisma.project.findUnique({
     where: { id },
@@ -64,6 +68,7 @@ export async function remove(id: string, userId: string) {
   await prisma.project.delete({ where: { id } });
 }
 
+/** Remove an imported snapshot while preserving its separate source on the user's PC. */
 export async function removeImportedProject(id: string, userId: string) {
   const project = await prisma.project.findUnique({
     where: { id },
@@ -88,6 +93,7 @@ export async function removeImportedProject(id: string, userId: string) {
   await prisma.project.delete({ where: { id } });
 }
 
+/** Create a project and its owner membership together in one transaction. */
 export async function create(
   userId: string,
   input: {
@@ -126,6 +132,7 @@ export async function create(
   return project;
 }
 
+/** Validate and store a bounded, sanitized snapshot imported from the Local Agent. */
 export async function importProject(
   userId: string,
   input: {
@@ -248,6 +255,7 @@ export async function importProject(
   return detail(project.id, userId);
 }
 
+/** Answer a project question with bounded chat history and current code context. */
 export async function chatWithProject(
   projectId: string,
   userId: string,
@@ -340,10 +348,8 @@ export async function chatWithProject(
 }
 
 /**
- * Start generation without waiting for the AI provider.
- *
- * Creates a ProjectRun and invokes the Netlify Background Function.
- * The API can return immediately instead of waiting for OpenRouter.
+ * Queue a generation or modification run and invoke its Netlify worker.
+ * Capturing existing files in a modification run keeps the worker's input stable.
  */
 export async function startGenerateProject(
   id: string,
@@ -499,6 +505,7 @@ export async function startGenerateProject(
   });
 
   try {
+    // Netlify invokes the worker asynchronously so the API request returns promptly.
     const response = await fetch(
       new URL(BACKGROUND_FUNCTION_PATH, baseUrl),
       {
@@ -563,10 +570,7 @@ export async function startGenerateProject(
   }
 }
 
-/**
- * Executes project generation inside the Background Function.
- * Persists generated artifacts and updates the run/project statuses.
- */
+/** Generate the requested project state, persist its artifacts, and finish the run. */
 export async function processGenerateProject(
   runId: string,
   projectId: string,
@@ -639,6 +643,7 @@ export async function processGenerateProject(
   const started = Date.now();
 
   try {
+    // The worker receives a fixed snapshot for modifications; generation starts from project metadata.
     const result = await generate(
       [
         {
@@ -696,6 +701,7 @@ export async function processGenerateProject(
       );
     }
 
+    // Reject partial plans instead of persisting success-shaped incomplete artifacts.
     const requiredSections = [
       plan.requirements,
       plan.architecture,
@@ -717,6 +723,7 @@ export async function processGenerateProject(
       );
     }
 
+    // Disallow absolute paths and traversal before accepting model-produced filenames.
     if (
       !Array.isArray(plan.files) ||
       plan.files.length === 0 ||
@@ -748,6 +755,7 @@ export async function processGenerateProject(
 
     const files = plan.files;
 
+    // Keep planning artifacts and generated source in one versioned run result.
     const artifacts = [
       {
         type: "REQUIREMENTS" as const,
@@ -800,6 +808,7 @@ export async function processGenerateProject(
         },
       });
 
+      // Insert the complete new artifact set within the same transaction as run completion.
       for (const artifact of artifacts) {
         await tx.artifact.create({
           data: {
@@ -861,6 +870,7 @@ export async function processGenerateProject(
   }
 }
 
+/** Queue a review of the latest saved code artifact in the background. */
 export async function startReviewProject(
   projectId: string,
   userId: string,
@@ -918,6 +928,7 @@ export async function startReviewProject(
       });
     }
 
+    // Review only the newest source snapshot so findings refer to current files.
     const codeArtifact = await tx.artifact.findFirst({
       where: { projectId, type: "CODE" },
       orderBy: { createdAt: "desc" },
@@ -956,6 +967,7 @@ export async function startReviewProject(
       });
     }
 
+    // Mark both records before enqueueing so the UI can immediately show progress.
     const newRun = await tx.projectRun.create({
       data: {
         projectId,
@@ -1029,6 +1041,7 @@ export async function startReviewProject(
   }
 }
 
+/** Review the latest saved code artifact and persist structured findings. */
 export async function processReviewProject(
   runId: string,
   projectId: string,
@@ -1063,6 +1076,7 @@ export async function processReviewProject(
       throw new Error("No generated code is available to review");
     }
 
+    // Normalize JSON values before serialization and reject malformed artifact entries.
     const code = files.map((file): { path: string; content: string } => {
       if (
         !file ||
@@ -1082,6 +1096,7 @@ export async function processReviewProject(
 
       return { path: record.path, content: record.content };
     });
+    // Keep prompts below provider/context limits rather than truncating source silently.
     const serializedCode = JSON.stringify(code);
 
     if (serializedCode.length > 150_000) {

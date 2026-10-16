@@ -1,8 +1,16 @@
 import crypto from "node:crypto";
+
+// Derive a stable encryption key from SESSION_SECRET; configure a strong value outside development.
 const secret = () => process.env.SESSION_SECRET || "development-only-change-me";
+
+/** Create a cryptographically random opaque token for sessions and pairing. */
 export const randomToken = () => crypto.randomBytes(32).toString("base64url");
+
+/** Hash a token before storing it so the database never contains its usable value. */
 export const sha256 = (value: string) =>
   crypto.createHash("sha256").update(value).digest("hex");
+
+/** Encrypt a value with AES-256-GCM and package the IV, tag, and ciphertext. */
 export const encrypt = (value: string) => {
   const iv = crypto.randomBytes(12);
   const key = crypto.createHash("sha256").update(secret()).digest();
@@ -14,6 +22,8 @@ export const encrypt = (value: string) => {
     enc.toString("base64url"),
   ].join(".");
 };
+
+/** Authenticate and decrypt a value written by encrypt(). */
 export const decrypt = (value: string) => {
   const [ivS, tagS, dataS] = value.split(".");
   if (!ivS || !tagS || !dataS) throw new Error("Invalid encrypted value");

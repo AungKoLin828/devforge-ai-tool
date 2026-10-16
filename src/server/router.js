@@ -5,10 +5,12 @@ import { randomToken } from "./crypto.js";
 import { prisma } from "./db.js";
 import { create, chatWithProject, detail, importProject, list, owner, remove, removeImportedProject, startGenerateProject, startReviewProject, } from "./projects.js";
 import { ensureAgent, registerAgent, queueJob, claimJob, } from "./agent.js";
+// Keep OAuth redirects as minimal responses with an explicit status.
 const redirect = (url, status = 302) => new Response(null, {
     status,
     headers: { Location: url },
 });
+// Normalize expected and unexpected errors before returning them to API clients.
 function getErrorInfo(caught) {
     let current = caught;
     let message = "";
@@ -27,10 +29,13 @@ function getErrorInfo(caught) {
     }
     return { message, code };
 }
+/** Dispatch one authenticated or public API request to its route handler. */
 export async function handleApi(req) {
     try {
+        // Normalize the API path once; route matching below uses the path without /api.
         const url = new URL(req.url);
         const path = url.pathname.replace(/^\/api\/?/, "");
+        // OAuth entry and callback are public routes; the callback validates state before exchange.
         if (path === "auth/github" && req.method === "GET") {
             let oauthConfig;
             try {
@@ -110,6 +115,7 @@ export async function handleApi(req) {
             return json({ success: true }, 200, { "set-cookie": clearSession() });
         }
         if (path === "auth/me" && req.method === "GET") {
+            // All project and repository data routes require a valid session.
             const user = await requireAuth(req);
             return json({ success: true, user });
         }
@@ -132,6 +138,7 @@ export async function handleApi(req) {
                 project: await create(user.id, await body(req)),
             }, 201);
         }
+        // Importing accepts only the bounded file snapshot validated by the project service.
         if (path === "projects/import" && req.method === "POST") {
             return json({
                 success: true,
@@ -140,8 +147,10 @@ export async function handleApi(req) {
         }
         const match = path.match(/^projects\/([^/]+)(?:\/(.+))?$/);
         if (match) {
+            // Project subroutes share an owner check before accessing private project data.
             const projectId = match[1];
             const action = match[2];
+            // GitHub routes update only DevForge's link metadata, never the remote itself.
             if (action === "github/connect" && req.method === "POST") {
                 await owner(projectId, user.id);
                 const requestBody = await body(req);
@@ -204,10 +213,12 @@ export async function handleApi(req) {
                 await disconnectGitHubRepository(projectId, user.id);
                 return json({ success: true });
             }
+            // This action is intentionally separate from permanent project deletion.
             if (action === "import/remove" && req.method === "POST") {
                 await removeImportedProject(projectId, user.id);
                 return json({ success: true });
             }
+            // Base project routes read details or perform the explicitly requested deletion.
             if (!action && req.method === "GET") {
                 return json({
                     success: true,
@@ -218,6 +229,7 @@ export async function handleApi(req) {
                 await remove(projectId, user.id);
                 return json({ success: true });
             }
+            // Long-running AI work is enqueued and reported through a pollable run ID.
             if ((action === "generate" || action === "modify") &&
                 req.method === "POST") {
                 const requestBody = await body(req);

@@ -1,4 +1,5 @@
 import { prisma } from "./db.js";
+/** Find the user's registered local agent, if one has been paired. */
 export async function ensureAgent(userId) {
     // Keep compatible with the current Prisma schema: LocalAgent does not
     // expose the createdAt field in the generated client used by this build.
@@ -6,6 +7,7 @@ export async function ensureAgent(userId) {
         where: { userId },
     });
 }
+/** Persist the identity, capabilities, and hashed pairing credential of an agent. */
 export async function registerAgent(userId, input) {
     const agent = await prisma.localAgent.create({
         data: {
@@ -23,6 +25,7 @@ export async function registerAgent(userId, input) {
     });
     return agent;
 }
+/** Queue a local operation only after checking project ownership and agent pairing. */
 export async function queueJob(userId, projectId, type, input) {
     const project = await prisma.project.findUnique({
         where: { id: projectId },
@@ -43,6 +46,7 @@ export async function queueJob(userId, projectId, type, input) {
         },
     });
 }
+/** Atomically move the next queued agent job into the running state. */
 export async function claimJob(agentId) {
     const job = await prisma.agentJob.findFirst({
         where: {

@@ -1,11 +1,13 @@
 import { prisma } from "./db.js";
 import { decrypt, encrypt } from "./crypto.js";
+// Require deployment variables at the point where the related flow is used.
 const required = (n) => {
     const v = process.env[n];
     if (!v)
         throw new Error(`${n} is required`);
     return v;
 };
+/** Choose the correct OAuth app and callback for the incoming app origin. */
 export function githubOAuthConfig(origin) {
     const callbackPath = "/api/auth/github/callback";
     const isLocal = origin.hostname === "localhost" ||
@@ -42,6 +44,7 @@ export function githubOAuthConfig(origin) {
         callbackUrl: callback.href,
     };
 }
+/** Build GitHub's authorization URL with a caller-generated CSRF state value. */
 export function githubLoginUrl(state, config) {
     const p = new URLSearchParams({
         client_id: config.clientId,
@@ -51,6 +54,7 @@ export function githubLoginUrl(state, config) {
     });
     return `https://github.com/login/oauth/authorize?${p}`;
 }
+/** Exchange a one-time OAuth code for a GitHub access token. */
 export async function exchange(code, config) {
     const r = await fetch("https://github.com/login/oauth/access_token", {
         method: "POST",
@@ -66,6 +70,7 @@ export async function exchange(code, config) {
         throw new Error("GitHub token exchange failed");
     return d.access_token;
 }
+/** Fetch the authenticated GitHub profile and primary verified email. */
 export async function githubUser(token) {
     const h = {
         Authorization: `Bearer ${token}`,
@@ -89,6 +94,7 @@ export async function githubUser(token) {
         avatarUrl: user.avatar_url,
     };
 }
+/** Create or update the local user record from a GitHub profile. */
 export async function upsertGithubUser(token, profile) {
     return prisma.user.upsert({
         where: { githubId: profile.id },
@@ -109,6 +115,7 @@ export async function upsertGithubUser(token, profile) {
         },
     });
 }
+// Centralize GitHub API headers and turn provider failures into actionable errors.
 async function githubApi(token, endpoint, init = {}) {
     const response = await fetch(`https://api.github.com${endpoint}`, {
         ...init,
@@ -126,6 +133,7 @@ async function githubApi(token, endpoint, init = {}) {
     }
     return result;
 }
+// Decrypt the OAuth token only for server-side GitHub API requests.
 async function githubTokenForUser(userId) {
     const user = await prisma.user.findUnique({
         where: { id: userId },
@@ -136,6 +144,7 @@ async function githubTokenForUser(userId) {
     }
     return decrypt(user.githubAccessTokenEnc);
 }
+// Reject malformed owner/name components before using them in GitHub API paths.
 function validateRepositoryName(owner, repository) {
     if (!/^[A-Za-z0-9_.-]{1,100}$/.test(owner) ||
         owner === "." ||
@@ -146,10 +155,12 @@ function validateRepositoryName(owner, repository) {
         throw new Error("Enter a valid GitHub owner and repository name");
     }
 }
+// Encode each repository path component independently for GitHub's REST API.
 function repositoryPath(owner, repository) {
     validateRepositoryName(owner, repository);
     return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`;
 }
+/** List repositories the user can write to, normalized for the project UI. */
 export async function listGitHubRepositories(userId) {
     const token = await githubTokenForUser(userId);
     const repositories = await githubApi(token, "/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member");
@@ -163,6 +174,7 @@ export async function listGitHubRepositories(userId) {
         defaultBranch: repository.default_branch,
     }));
 }
+// Persist both the project's active link and its repository history record.
 async function persistGitHubRepository(projectId, repository) {
     const [owner, name] = repository.full_name.split("/");
     if (!owner || !name || !repository.default_branch) {
@@ -211,6 +223,7 @@ async function persistGitHubRepository(projectId, repository) {
         private: repository.private,
     };
 }
+/** Verify write access before linking an existing GitHub repository. */
 export async function connectGitHubRepository(projectId, userId, owner, repository) {
     const token = await githubTokenForUser(userId);
     const details = await githubApi(token, repositoryPath(owner, repository));
@@ -219,6 +232,7 @@ export async function connectGitHubRepository(projectId, userId, owner, reposito
     }
     return persistGitHubRepository(projectId, details);
 }
+/** Create a GitHub repository with the requested visibility and link it to the project. */
 export async function createGitHubRepository(projectId, userId, name, description, isPrivate) {
     if (!/^[A-Za-z0-9_.-]{1,100}$/.test(name) || name === "." || name === "..") {
         throw new Error("Repository name must use 1-100 letters, numbers, dots, dashes or underscores");
@@ -236,6 +250,7 @@ export async function createGitHubRepository(projectId, userId, name, descriptio
     });
     return persistGitHubRepository(projectId, repository);
 }
+/** Record the local workspace path and the latest successful synchronization state. */
 export async function updateGitHubSync(projectId, userId, relativePath, status) {
     if (!relativePath ||
         relativePath.length > 512 ||
@@ -271,6 +286,7 @@ export async function updateGitHubSync(projectId, userId, relativePath, status) 
     ]);
     return { localPath: relativePath, gitSyncStatus: status, lastSyncedAt };
 }
+/** Remove the project link while retaining the remote and local repository data. */
 export async function disconnectGitHubRepository(projectId, userId) {
     const project = await prisma.project.findFirst({
         where: { id: projectId, userId },

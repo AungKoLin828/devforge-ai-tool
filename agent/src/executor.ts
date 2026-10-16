@@ -4,13 +4,16 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { validateCommand, safePath } from "./security.js";
 
+// Bound captured command output to prevent large logs from exhausting agent memory.
 const MAX_OUTPUT_BYTES = 128 * 1024;
 
+/** Relative path and UTF-8 text used when importing or syncing a project. */
 type GeneratedFile = {
   path: string;
   content: string;
 };
 
+// Keep dependencies, generated output, and common credential stores out of imports.
 const IMPORT_EXCLUDED_DIRECTORIES = new Set([
   ".aws",
   ".azure",
@@ -30,6 +33,7 @@ const IMPORT_EXCLUDED_DIRECTORIES = new Set([
   "target",
   "vendor",
 ]);
+// Permit only known, non-secret hidden project configuration during import.
 const IMPORT_ALLOWED_HIDDEN_FILES = new Set([
   ".babelrc",
   ".dockerignore",
@@ -43,6 +47,7 @@ const IMPORT_ALLOWED_HIDDEN_FILES = new Set([
   ".nvmrc",
   ".prettierignore",
 ]);
+// Explicit import and browser limits bound disk traversal and payload size.
 const IMPORT_MAX_FILES = 300;
 const IMPORT_MAX_BYTES = 2 * 1024 * 1024;
 const IMPORT_MAX_DIRECTORIES = 5000;
@@ -50,6 +55,7 @@ const IMPORT_MAX_DEPTH = 32;
 const WORKSPACE_MAX_PROJECTS = 500;
 const WORKSPACE_MAX_ENTRIES = 500;
 const WORKSPACE_MAX_FILE_BYTES = 1024 * 1024;
+// These harmless dotfiles may be browsed or edited; other hidden paths stay private.
 const WORKSPACE_EDITABLE_DOTFILES = new Set([
   ".babelrc",
   ".dockerignore",
@@ -60,6 +66,7 @@ const WORKSPACE_EDITABLE_DOTFILES = new Set([
   ".prettierignore",
 ]);
 
+// Validate browser-visible workspace paths and reject secrets before filesystem access.
 function validateWorkspacePath(relative: string, allowRoot: boolean) {
   if (relative === "" && allowRoot) return [];
   const segments = relative.split("/");
@@ -107,6 +114,7 @@ function validateWorkspacePath(relative: string, allowRoot: boolean) {
   return segments;
 }
 
+// Resolve each directory component without following symbolic links.
 async function resolveWorkspaceDirectory(root: string, relative: string) {
   const rootPath = await fs.realpath(root);
   const segments = validateWorkspacePath(relative, true);
@@ -122,6 +130,7 @@ async function resolveWorkspaceDirectory(root: string, relative: string) {
   return { rootPath, target: currentPath };
 }
 
+// Resolve an existing regular file inside the workspace, rejecting linked components.
 async function resolveWorkspaceFile(root: string, relative: string) {
   const rootPath = await fs.realpath(root);
   const segments = validateWorkspacePath(relative, false);
@@ -143,6 +152,7 @@ async function resolveWorkspaceFile(root: string, relative: string) {
   return { rootPath, target, stat };
 }
 
+/** List visible files and directories, sorted with folders first. */
 export async function listWorkspaceEntries(root: string, relativeDirectory = "") {
   const { rootPath, target } = await resolveWorkspaceDirectory(
     root,
@@ -229,6 +239,7 @@ export async function listWorkspaceEntries(root: string, relativeDirectory = "")
   };
 }
 
+/** Read a small UTF-8 file after excluding binary and sensitive files. */
 export async function readWorkspaceFile(root: string, relativeFilePath: string) {
   const { target, stat } = await resolveWorkspaceFile(root, relativeFilePath);
   if (stat.size > WORKSPACE_MAX_FILE_BYTES) {
@@ -250,6 +261,7 @@ export async function readWorkspaceFile(root: string, relativeFilePath: string) 
   return { path: relativeFilePath, content, modifiedAt: stat.mtimeMs };
 }
 
+/** Save an existing text file only when its recorded modification time still matches. */
 export async function writeWorkspaceFile(
   root: string,
   relativeFilePath: string,
@@ -293,6 +305,7 @@ export async function writeWorkspaceFile(
   }
 }
 
+// Map platform-specific wrappers and package managers to safe Node executable calls.
 async function resolveCommand(
   command: string,
   args: string[],
@@ -385,6 +398,7 @@ async function resolveCommand(
   );
 }
 
+/** Serializable output from a local build or test request. */
 type ProjectRunResult = {
   action: "build" | "test";
   stages: Array<{
@@ -398,6 +412,7 @@ type ProjectRunResult = {
   success: boolean;
 };
 
+// Create missing workspace directories while refusing symlinks and non-directories.
 async function ensureSafeDirectory(root: string, relative: string) {
   const rootPath = await fs.realpath(root);
   const target = safePath(rootPath, relative);
@@ -420,6 +435,7 @@ async function ensureSafeDirectory(root: string, relative: string) {
   return target;
 }
 
+// Ensure generated writes stay beneath the workspace and never replace links/directories.
 async function assertSafeFilePath(root: string, target: string) {
   const rootPath = await fs.realpath(root);
   const relativeTarget = path.relative(rootPath, target);
@@ -456,6 +472,7 @@ async function assertSafeFilePath(root: string, target: string) {
   }
 }
 
+/** Write a bounded set of generated files beneath a safe workspace project folder. */
 export async function writeProjectFiles(
   root: string,
   relativeProjectPath: string,
@@ -495,12 +512,14 @@ export async function writeProjectFiles(
   };
 }
 
+/** Captured process result used to report Git command failures accurately. */
 type GitCommandResult = {
   code: number | null;
   stdout: string;
   stderr: string;
 };
 
+// Run Git without a shell, disable credential prompts, and bound process output/time.
 async function runGit(
   cwd: string,
   args: string[],
@@ -560,6 +579,7 @@ async function runGit(
   });
 }
 
+// Apply Windows-safe path checks before any repository operation.
 function validateGitWorkspacePath(relativePath: string) {
   const segments = relativePath.split("/");
   if (
@@ -582,6 +602,7 @@ function validateGitWorkspacePath(relativePath: string) {
   }
 }
 
+// Validate repository identity and branch syntax before constructing Git arguments.
 function validateGitHubTarget(owner: string, repository: string, branch: string) {
   if (
     !/^[A-Za-z0-9_.-]{1,100}$/.test(owner) ||
@@ -608,6 +629,7 @@ function validateGitHubTarget(owner: string, repository: string, branch: string)
   }
 }
 
+// Refuse operations if the local origin points at a different GitHub repository.
 function assertGitHubRemote(remote: string, owner: string, repository: string) {
   let target: string[] | null = null;
   const https = remote.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/i);
@@ -623,6 +645,7 @@ function assertGitHubRemote(remote: string, owner: string, repository: string) {
   }
 }
 
+// Verify workspace containment, repository root, origin, and default branch together.
 async function resolveGitProject(
   root: string,
   relativePath: string,
@@ -661,6 +684,7 @@ async function resolveGitProject(
   return { targetPath, relativePath };
 }
 
+// Decode NUL-delimited Git status entries, including the second path for renames.
 function changedPaths(status: string) {
   const entries = status.split("\0").filter(Boolean);
   const paths: string[] = [];
@@ -676,6 +700,7 @@ function changedPaths(status: string) {
   return paths;
 }
 
+// Block common secret/key files before staging or publishing any repository changes.
 function assertNoSensitiveGitPaths(paths: string[]) {
   const excludedDirectories = new Set([
     ".aws",
@@ -708,6 +733,7 @@ function assertNoSensitiveGitPaths(paths: string[]) {
   }
 }
 
+/** Clone a validated GitHub repository into a new workspace directory. */
 export async function cloneGitHubRepository(
   root: string,
   input: {
@@ -764,6 +790,7 @@ export async function cloneGitHubRepository(
   };
 }
 
+/** Initialize a local repository or configure its matching GitHub origin and branch. */
 export async function initializeGitHubRepository(
   root: string,
   input: {
@@ -842,6 +869,7 @@ export async function initializeGitHubRepository(
   };
 }
 
+/** Fast-forward the connected branch only when the local worktree is clean. */
 export async function pullGitHubRepository(
   root: string,
   input: {
@@ -888,6 +916,7 @@ export async function pullGitHubRepository(
   };
 }
 
+/** Check for secrets, commit local changes, then push the selected branch. */
 export async function pushGitHubRepository(
   root: string,
   input: {
@@ -960,6 +989,7 @@ export async function pushGitHubRepository(
   };
 }
 
+/** Discover candidate project folders while excluding hidden and linked directories. */
 export async function listWorkspaceProjects(root: string) {
   const rootPath = await fs.realpath(root);
   const entries = await fs.readdir(rootPath, { withFileTypes: true });
@@ -1004,6 +1034,7 @@ export async function listWorkspaceProjects(root: string) {
   return projects.sort((left, right) => left.name.localeCompare(right.name));
 }
 
+/** Import a bounded UTF-8 source snapshot while skipping secrets and generated files. */
 export async function readLocalProject(root: string, relativeProjectPath: string) {
   const rootPath = await fs.realpath(root);
   const projectRoot = safePath(rootPath, relativeProjectPath);
@@ -1040,6 +1071,7 @@ export async function readLocalProject(root: string, relativeProjectPath: string
   let totalBytes = 0;
   let visitedDirectories = 0;
 
+  // Walk one directory at a time so depth, count, and byte limits apply during traversal.
   const visit = async (
     directory: string,
     relativeDirectory: string,
@@ -1141,6 +1173,7 @@ export async function readLocalProject(root: string, relativeProjectPath: string
   };
 }
 
+/** Execute one allowlisted command in the workspace and return bounded output. */
 export async function runCommand(
   root: string,
   command: string,
@@ -1167,6 +1200,7 @@ export async function runCommand(
       let outputBytes = 0;
       let truncated = false;
       let settled = false;
+      // Capture stdout and stderr under one shared limit to cap total memory use.
       const appendOutput = (target: "stdout" | "stderr", chunk: Buffer) => {
         const remaining = MAX_OUTPUT_BYTES - outputBytes;
         if (remaining <= 0) {
@@ -1208,6 +1242,7 @@ export async function runCommand(
   );
 }
 
+/** Detect and run a project's build or test scripts as explicit local stages. */
 export async function runProjectAction(
   root: string,
   relativeProjectPath: string,
@@ -1221,6 +1256,7 @@ export async function runProjectAction(
   );
   const manifestPath = path.join(safeProjectRoot, "package.json");
   const stages: ProjectRunResult["stages"] = [];
+  // Record each script independently so the UI can report which stage failed.
   const addStage = async (
     name: string,
     command: string,

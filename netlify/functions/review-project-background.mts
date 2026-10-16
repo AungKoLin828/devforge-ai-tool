@@ -2,12 +2,14 @@ import type { Context } from "@netlify/functions";
 import { prisma } from "../../src/server/db.js";
 import { processReviewProject } from "../../src/server/projects.js";
 
+// Identifiers passed by the trusted enqueue route, not accepted from the browser.
 type BackgroundPayload = {
   runId?: string;
   projectId?: string;
   userId?: string;
 };
 
+// Execute the queued review only when the internal worker secret matches.
 export default async (req: Request, _context: Context) => {
   if (req.method !== "POST") {
     return new Response("Method not allowed", {

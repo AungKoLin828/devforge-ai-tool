@@ -1,9 +1,12 @@
 param(
+  # Use a workspace owned by the current Windows user unless a custom path is supplied.
   [string]$WorkspacePath = (Join-Path $HOME "DevForge")
 )
 
+# Stop on download, validation, filesystem, and launcher-creation errors.
 $ErrorActionPreference = "Stop"
 
+# Validate the Node runtime before installing or starting the standalone agent.
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) {
   throw "Node.js 22 LTS or newer is required. Install Node.js, then run this installer again."
@@ -18,13 +21,15 @@ $workspace = [System.IO.Path]::GetFullPath($WorkspacePath)
 $installRoot = Join-Path $env:LOCALAPPDATA "DevForgeAgent"
 $sourceRoot = Join-Path $installRoot "src"
 $repository = "https://raw.githubusercontent.com/AungKoLin828/devforge-ai-tool/main/agent/src"
+# Pin expected content hashes so a partial or altered download is never installed.
 $expectedHashes = @{
-  "index.js" = "5AF3C06EA8AA0617CA577A7451B4ED1D9008FF57003999B7CDE6D46537D38E65"
-  "executor.js" = "FE8D085EEBEF4C62CF7A9706D90048C09CC2240C26F4BAC81E568C49D3B45564"
-  "security.js" = "A335E274EA76AEA851B85682F4087A444CD00DB422C816C2368C733B3166043A"
+  "index.js" = "7FC370E9DC90A06258C33E6CE01F4A9886EE0395B1BC103BF6BE9468C590912F"
+  "executor.js" = "AD649C86DADEBB658AD217E2906B0DC4E87F0A3AD817FC28B44462F6586CB1AF"
+  "security.js" = "109A76165151907E8433D4AE2F4B5F45C5FFE8750E0E10E94DC97F78F2BEA864"
 }
 
 New-Item -ItemType Directory -Path $sourceRoot -Force | Out-Null
+# Probe workspace permissions before reporting a successful install.
 try {
   New-Item -ItemType Directory -Path $workspace -Force | Out-Null
   $workspaceProbe = Join-Path $workspace (".devforge-write-check-" + [guid]::NewGuid().ToString("N"))
@@ -42,6 +47,7 @@ foreach ($file in @("index.js", "executor.js", "security.js")) {
   $destination = Join-Path $sourceRoot $file
   $temporaryFile = "$destination.download"
   try {
+    # Download to a temporary path and replace the active file only after verification.
     Invoke-WebRequest -Uri "$repository/$file" -OutFile $temporaryFile
     if (-not (Test-Path $temporaryFile) -or (Get-Item $temporaryFile).Length -eq 0) {
       throw "The downloaded Local Agent file '$file' is empty."
@@ -59,6 +65,7 @@ foreach ($file in @("index.js", "executor.js", "security.js")) {
   }
 }
 
+# Generate a launcher that binds the agent to this workspace without changing machine policy.
 $escapedWorkspace = $workspace.Replace("'", "''")
 $launcher = @"
 `$ErrorActionPreference = 'Stop'

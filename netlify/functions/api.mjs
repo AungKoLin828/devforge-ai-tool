@@ -1,4 +1,5 @@
 import { handleApi } from "../../src/server/router.js";
+// Route all API paths through the shared server handler and prevent cached responses.
 export default async (req, _context) => {
     const r = await handleApi(req);
     const h = new Headers(r.headers);
@@ -9,4 +10,5 @@ export default async (req, _context) => {
         headers: h,
     });
 };
+// Netlify must send every /api request to this function.
 export const config = { path: "/api/*" };

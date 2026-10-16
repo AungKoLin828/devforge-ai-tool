@@ -1,6 +1,7 @@
 import { prisma } from "./db.js";
 import { generate, SYSTEM } from "./ai.js";
 const BACKGROUND_FUNCTION_PATH = "/.netlify/functions/generate-project-background";
+/** Return a project only when it belongs to the requesting user. */
 export async function owner(id, userId) {
     const project = await prisma.project.findUnique({
         where: { id },
@@ -13,6 +14,7 @@ export async function owner(id, userId) {
     }
     return project;
 }
+/** Load a project and its complete artifact history after verifying ownership. */
 export async function detail(id, userId) {
     const project = await prisma.project.findUnique({
         where: { id },
@@ -30,9 +32,11 @@ export async function detail(id, userId) {
     }
     return project;
 }
+/** List only the projects owned by the requesting user. */
 export const list = (userId) => prisma.project.findMany({
     where: { userId },
 });
+/** Permanently remove an owned project and all records cascaded from it. */
 export async function remove(id, userId) {
     const project = await prisma.project.findUnique({
         where: { id },
@@ -46,6 +50,7 @@ export async function remove(id, userId) {
     }
     await prisma.project.delete({ where: { id } });
 }
+/** Remove an imported snapshot while preserving its separate source on the user's PC. */
 export async function removeImportedProject(id, userId) {
     const project = await prisma.project.findUnique({
         where: { id },
@@ -63,6 +68,7 @@ export async function removeImportedProject(id, userId) {
     }
     await prisma.project.delete({ where: { id } });
 }
+/** Create a project and its owner membership together in one transaction. */
 export async function create(userId, input) {
     const name = input.name?.trim();
     if (!name) {
@@ -88,6 +94,7 @@ export async function create(userId, input) {
     });
     return project;
 }
+/** Validate and store a bounded, sanitized snapshot imported from the Local Agent. */
 export async function importProject(userId, input) {
     const name = typeof input.name === "string" ? input.name.trim() : "";
     const sourcePath = typeof input.sourcePath === "string" ? input.sourcePath.trim() : "";
@@ -177,6 +184,7 @@ export async function importProject(userId, input) {
     });
     return detail(project.id, userId);
 }
+/** Answer a project question with bounded chat history and current code context. */
 export async function chatWithProject(projectId, userId, inputMessages) {
     await owner(projectId, userId);
     if (!Array.isArray(inputMessages) || inputMessages.length === 0 || inputMessages.length > 12) {
@@ -250,10 +258,8 @@ export async function chatWithProject(projectId, userId, inputMessages) {
     return { answer: response.text.trim() };
 }
 /**
- * Start generation without waiting for the AI provider.
- *
- * Creates a ProjectRun and invokes the Netlify Background Function.
- * The API can return immediately instead of waiting for OpenRouter.
+ * Queue a generation or modification run and invoke its Netlify worker.
+ * Capturing existing files in a modification run keeps the worker's input stable.
  */
 export async function startGenerateProject(id, userId, prompt, provider = "OPENROUTER", mode = "generate") {
     const cleanPrompt = prompt.trim();
@@ -378,6 +384,7 @@ export async function startGenerateProject(id, userId, prompt, provider = "OPENR
         return newRun;
     });
     try {
+        // Netlify invokes the worker asynchronously so the API request returns promptly.
         const response = await fetch(new URL(BACKGROUND_FUNCTION_PATH, baseUrl), {
             method: "POST",
             headers: {
@@ -429,10 +436,7 @@ export async function startGenerateProject(id, userId, prompt, provider = "OPENR
         throw new Error(`Could not enqueue generation: ${message}`);
     }
 }
-/**
- * Executes project generation inside the Background Function.
- * Persists generated artifacts and updates the run/project statuses.
- */
+/** Generate the requested project state, persist its artifacts, and finish the run. */
 export async function processGenerateProject(runId, projectId, userId) {
     const run = await prisma.projectRun.findUnique({
         where: { id: runId },
@@ -477,6 +481,7 @@ export async function processGenerateProject(runId, projectId, userId) {
     }
     const started = Date.now();
     try {
+        // The worker receives a fixed snapshot for modifications; generation starts from project metadata.
         const result = await generate([
             {
                 role: "system",
@@ -515,6 +520,7 @@ export async function processGenerateProject(runId, projectId, userId) {
         if (!plan || typeof plan !== "object" || Array.isArray(plan)) {
             throw new Error("The AI provider returned an invalid project structure");
         }
+        // Reject partial plans instead of persisting success-shaped incomplete artifacts.
         const requiredSections = [
             plan.requirements,
             plan.architecture,
@@ -534,6 +540,7 @@ export async function processGenerateProject(runId, projectId, userId) {
         if (!requiredSections.every(isNonEmptySection)) {
             throw new Error("The AI provider returned an incomplete project plan. Please retry generation.");
         }
+        // Disallow absolute paths and traversal before accepting model-produced filenames.
         if (!Array.isArray(plan.files) ||
             plan.files.length === 0 ||
             plan.files.some((file) => {
@@ -553,6 +560,7 @@ export async function processGenerateProject(runId, projectId, userId) {
             throw new Error("The AI provider did not return valid generated files. Please retry generation.");
         }
         const files = plan.files;
+        // Keep planning artifacts and generated source in one versioned run result.
         const artifacts = [
             {
                 type: "REQUIREMENTS",
@@ -603,6 +611,7 @@ export async function processGenerateProject(runId, projectId, userId) {
                     },
                 },
             });
+            // Insert the complete new artifact set within the same transaction as run completion.
             for (const artifact of artifacts) {
                 await tx.artifact.create({
                     data: {
@@ -658,6 +667,7 @@ export async function processGenerateProject(runId, projectId, userId) {
         throw error;
     }
 }
+/** Queue a review of the latest saved code artifact in the background. */
 export async function startReviewProject(projectId, userId) {
     const secret = process.env.DEVFORGE_BACKGROUND_SECRET;
     const baseUrl = process.env.URL ||
@@ -701,6 +711,7 @@ export async function startReviewProject(projectId, userId) {
                 },
             });
         }
+        // Review only the newest source snapshot so findings refer to current files.
         const codeArtifact = await tx.artifact.findFirst({
             where: { projectId, type: "CODE" },
             orderBy: { createdAt: "desc" },
@@ -732,6 +743,7 @@ export async function startReviewProject(projectId, userId) {
                 },
             });
         }
+        // Mark both records before enqueueing so the UI can immediately show progress.
         const newRun = await tx.projectRun.create({
             data: {
                 projectId,
@@ -790,6 +802,7 @@ export async function startReviewProject(projectId, userId) {
         throw new Error(`Could not enqueue review: ${message}`);
     }
 }
+/** Review the latest saved code artifact and persist structured findings. */
 export async function processReviewProject(runId, projectId, userId) {
     const run = await prisma.projectRun.findUnique({ where: { id: runId } });
     if (!run || run.projectId !== projectId || run.operation !== "REVIEW") {
@@ -816,6 +829,7 @@ export async function processReviewProject(runId, projectId, userId) {
         if (!codeArtifact || !Array.isArray(files) || files.length === 0) {
             throw new Error("No generated code is available to review");
         }
+        // Normalize JSON values before serialization and reject malformed artifact entries.
         const code = files.map((file) => {
             if (!file ||
                 typeof file !== "object" ||
@@ -829,6 +843,7 @@ export async function processReviewProject(runId, projectId, userId) {
             }
             return { path: record.path, content: record.content };
         });
+        // Keep prompts below provider/context limits rather than truncating source silently.
         const serializedCode = JSON.stringify(code);
         if (serializedCode.length > 150_000) {
             throw new Error("This project is too large for a single AI review. Reduce the generated code size and retry.");

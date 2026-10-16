@@ -1,3 +1,4 @@
+// Event names exchanged by the browser-facing app and a connected local agent.
 export type AgentEventType =
   | "agent.connected"
   | "agent.disconnected"
@@ -13,6 +14,8 @@ export type AgentEventType =
   | "git.changed"
   | "job.started"
   | "job.finished";
+
+// Common envelope for agent handshakes, requests, responses, and events.
 export type AgentMessage = {
   id: string;
   type: "hello" | "event" | "request" | "response";
@@ -20,6 +23,8 @@ export type AgentMessage = {
   payload?: unknown;
   requestId?: string;
 };
+
+// Optional tools and runtimes reported by the agent when it connects.
 export type AgentCapabilities = {
   node?: boolean;
   java?: boolean;

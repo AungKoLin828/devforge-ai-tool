@@ -4,6 +4,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { listWorkspaceProjects, listWorkspaceEntries, readLocalProject, readWorkspaceFile, cloneGitHubRepository, initializeGitHubRepository, pullGitHubRepository, pushGitHubRepository, runCommand, runProjectAction, writeWorkspaceFile, writeProjectFiles, } from "./executor.js";
+// Agent settings are local-only; by default it binds to loopback and a random token.
 const port = Number(process.env.DEVFORGE_AGENT_PORT || 45821);
 const token = process.env.DEVFORGE_AGENT_TOKEN || randomBytes(32).toString("hex");
 const root = process.env.DEVFORGE_WORKSPACE || path.join(os.homedir(), "DevForge");
@@ -17,7 +18,9 @@ const allowedOrigins = new Set([
         .filter(Boolean),
 ]);
 const maxRequestBytes = 6 * 1024 * 1024;
+// Create the configured workspace before accepting requests.
 await fs.mkdir(root, { recursive: true });
+// Send JSON consistently and grant browser access only to explicitly allowed origins.
 function respond(res, data, status = 200, origin) {
     const headers = {
         "content-type": "application/json",
@@ -32,6 +35,7 @@ function respond(res, data, status = 200, origin) {
     res.writeHead(status, headers);
     res.end(JSON.stringify(data));
 }
+// Buffer bounded request bodies before parsing JSON so oversized input is rejected.
 async function readBody(req) {
     let raw = "";
     let size = 0;
@@ -44,6 +48,7 @@ async function readBody(req) {
     }
     return JSON.parse(raw || "{}");
 }
+// Authenticate each request, enforce origin policy, and dispatch workspace operations.
 const server = http.createServer(async (req, res) => {
     const origin = req.headers.origin;
     if (req.method === "OPTIONS") {

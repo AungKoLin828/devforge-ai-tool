@@ -18,6 +18,7 @@ import {
   writeProjectFiles,
 } from "./executor.js";
 
+// Agent settings are local-only; by default it binds to loopback and a random token.
 const port = Number(process.env.DEVFORGE_AGENT_PORT || 45821);
 const token = process.env.DEVFORGE_AGENT_TOKEN || randomBytes(32).toString("hex");
 const root = process.env.DEVFORGE_WORKSPACE || path.join(os.homedir(), "DevForge");
@@ -32,8 +33,10 @@ const allowedOrigins = new Set([
 ]);
 const maxRequestBytes = 6 * 1024 * 1024;
 
+// Create the configured workspace before accepting requests.
 await fs.mkdir(root, { recursive: true });
 
+// Send JSON consistently and grant browser access only to explicitly allowed origins.
 function respond(
   res: http.ServerResponse,
   data: unknown,
@@ -56,6 +59,7 @@ function respond(
   res.end(JSON.stringify(data));
 }
 
+// Buffer bounded request bodies before parsing JSON so oversized input is rejected.
 async function readBody(req: http.IncomingMessage) {
   let raw = "";
   let size = 0;
@@ -69,6 +73,7 @@ async function readBody(req: http.IncomingMessage) {
   return JSON.parse(raw || "{}");
 }
 
+// Authenticate each request, enforce origin policy, and dispatch workspace operations.
 const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin;
 

@@ -1,10 +1,13 @@
 import { prisma } from "./db.js";
 import { randomToken, sha256 } from "./crypto.js";
+// Cookie and session policy shared by API authentication routes.
 const COOKIE = "devforge_session";
 const days = 30;
+// Store only the hash in PostgreSQL; the raw session token stays in the browser cookie.
 function cookie(token, maxAge) {
     return `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}; ${process.env.NODE_ENV === "production" ? "Secure;" : ""}`;
 }
+/** Create a persisted session and return its HTTP Set-Cookie value. */
 export async function createSession(user) {
     const raw = randomToken();
     await prisma.session.create({
@@ -16,9 +19,11 @@ export async function createSession(user) {
     });
     return cookie(raw, days * 86400);
 }
+/** Return a Set-Cookie value that immediately expires the current session cookie. */
 export function clearSession() {
     return `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; ${process.env.NODE_ENV === "production" ? "Secure;" : ""}`;
 }
+// Parse the session cookie without depending on a framework-specific cookie API.
 function get(req) {
     const c = req.headers.get("cookie") || "";
     const p = c
@@ -27,6 +32,7 @@ function get(req) {
         .find((x) => x.startsWith(COOKIE + "="));
     return p ? decodeURIComponent(p.slice(COOKIE.length + 1)) : null;
 }
+/** Validate the session, update its activity timestamp, and return its user. */
 export async function requireAuth(req) {
     const raw = get(req);
     if (!raw)
@@ -43,6 +49,7 @@ export async function requireAuth(req) {
     });
     return s.user;
 }
+/** HTTP-aware authentication failure that the router can serialize consistently. */
 export class AuthError extends Error {
     status;
     constructor(message, status = 401) {

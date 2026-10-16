@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+// UI lifecycle states for a queued background generation, modification, or review.
 export type GenerationStatus =
   | "IDLE"
   | "STARTING"
@@ -7,6 +8,7 @@ export type GenerationStatus =
   | "SUCCESS"
   | "FAILED";
 
+// Minimal run details needed to poll and report completion.
 interface GenerationRun {
   id: string;
   status: string;
@@ -14,6 +16,7 @@ interface GenerationRun {
   error?: string | null;
 }
 
+// Shared response shape for enqueue and status endpoints.
 interface ApiResponse {
   success?: boolean;
   message?: string;
@@ -25,6 +28,7 @@ interface ApiResponse {
   };
 }
 
+// Timing overrides and completion hooks for the generation workflow.
 interface Options {
   pollIntervalMs?: number;
   maxPollDurationMs?: number;
@@ -34,11 +38,13 @@ interface Options {
   onFailure?: (message: string) => void;
 }
 
+// Poll often enough to keep the UI responsive without overloading the API.
 const DEFAULT_POLL_INTERVAL = 2000;
 const DEFAULT_MAX_POLL_DURATION = 15 * 60 * 1000;
 const DEFAULT_REQUEST_TIMEOUT = 12 * 1000;
 const DEFAULT_MAX_CONSECUTIVE_POLL_ERRORS = 5;
 
+// Keep HTTP status available so transient responses can be retried selectively.
 class ApiError extends Error {
   constructor(
     message: string,
@@ -49,6 +55,7 @@ class ApiError extends Error {
   }
 }
 
+// Distinguish one slow status request from the overall polling deadline.
 class RequestTimeoutError extends Error {
   constructor() {
     super("The status request timed out.");
@@ -56,6 +63,7 @@ class RequestTimeoutError extends Error {
   }
 }
 
+// Report when the client stops polling even though the server may still be working.
 class PollingTimeoutError extends Error {
   constructor() {
     super(
@@ -65,6 +73,7 @@ class PollingTimeoutError extends Error {
   }
 }
 
+// Parse JSON and convert common session/conflict statuses into clearer messages.
 async function parseResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
   let body: Record<string, unknown> = {};
@@ -156,6 +165,7 @@ async function fetchWithTimeout(
   }
 }
 
+// Wait between status checks while still waking immediately on cancellation.
 function waitForNextPoll(
   delayMs: number,
   signal: AbortSignal,
@@ -181,6 +191,7 @@ function waitForNextPoll(
   });
 }
 
+// Retry only likely transient network or server failures, not validation errors.
 function isRetryablePollError(cause: unknown): boolean {
   if (cause instanceof RequestTimeoutError) return true;
   if (cause instanceof TypeError) return true; // Usually a temporary network failure.
@@ -190,12 +201,14 @@ function isRetryablePollError(cause: unknown): boolean {
   return false;
 }
 
+// Convert unknown caught values into a user-facing message without hiding errors.
 function errorMessage(cause: unknown): string {
   return cause instanceof Error
     ? cause.message
     : "An unexpected generation error occurred.";
 }
 
+/** Enqueue a project operation, poll its run, and expose cancellable UI state. */
 export function useProjectGeneration(options: Options = {}) {
   const {
     pollIntervalMs = DEFAULT_POLL_INTERVAL,

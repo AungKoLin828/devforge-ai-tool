@@ -1,5 +1,6 @@
 import { prisma } from "../../src/server/db.js";
 import { processReviewProject } from "../../src/server/projects.js";
+// Execute the queued review only when the internal worker secret matches.
 export default async (req, _context) => {
     if (req.method !== "POST") {
         return new Response("Method not allowed", {

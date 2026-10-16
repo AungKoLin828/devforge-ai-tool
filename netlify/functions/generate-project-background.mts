@@ -2,12 +2,14 @@ import type { Context } from "@netlify/functions";
 import { prisma } from "../../src/server/db.js";
 import { processGenerateProject } from "../../src/server/projects.js";
 
+// Identifiers passed by the trusted enqueue route, not accepted from the browser.
 type BackgroundPayload = {
   runId?: string;
   projectId?: string;
   userId?: string;
 };
 
+// Execute queued generation/modification work only when the shared secret matches.
 export default async (req: Request, _context: Context) => {
   if (req.method !== "POST") {
     return new Response("Method not allowed", {
@@ -52,9 +54,8 @@ export default async (req: Request, _context: Context) => {
       message,
     });
 
-    // Fallback for failures that occur before processGenerateProject enters
-    // its internal generation try/catch. updateMany avoids throwing if a
-    // record has already been removed or updated by another worker.
+    // Repair run/project state for failures that occur before the processor's
+    // own catch block; updateMany tolerates records already changed or removed.
     await prisma.projectRun
       .updateMany({
         where: {

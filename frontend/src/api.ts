@@ -1,3 +1,4 @@
+// API response types shared by the dashboard and Local Agent controls.
 export type User = {
   id: string;
   githubUsername: string | null;
@@ -6,17 +7,20 @@ export type User = {
   avatarUrl: string | null;
 };
 
+/** One turn in the short project-question conversation sent to the API. */
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
 };
 
+/** Basic health details returned when the browser pairs with a local agent. */
 export type LocalAgentInfo = {
   machine: string;
   platform: string;
   workspaceRoot: string;
 };
 
+/** Captured result of a command run by the Local Agent. */
 export type LocalCommandResult = {
   name: string;
   command: string;
@@ -26,17 +30,20 @@ export type LocalCommandResult = {
   truncated: boolean;
 };
 
+/** Result of the project's build or test stages on the local machine. */
 export type LocalProjectResult = {
   action: "build" | "test";
   stages: LocalCommandResult[];
   success: boolean;
 };
 
+/** UTF-8 project file exchanged with the Local Agent. */
 export type LocalProjectFile = {
   path: string;
   content: string;
 };
 
+/** GitHub repository available for linking from the project workspace. */
 export type GitHubRepository = {
   id: string;
   name: string;
@@ -45,6 +52,7 @@ export type GitHubRepository = {
   defaultBranch: string;
 };
 
+/** Repository identity and default branch currently linked to a project. */
 export type ConnectedGitHubRepository = {
   owner: string;
   repository: string;
@@ -53,6 +61,7 @@ export type ConnectedGitHubRepository = {
   private: boolean;
 };
 
+/** Summary of a local clone, pull, initialization, or push operation. */
 export type LocalGitResult = {
   success: true;
   path: string;
@@ -61,12 +70,14 @@ export type LocalGitResult = {
   commit?: string;
 };
 
+/** Sanitized local project snapshot returned for import into DevForge. */
 export type LocalProjectImport = {
   name: string;
   path: string;
   files: LocalProjectFile[];
 };
 
+/** A visible file or folder entry returned by the Local Agent browser. */
 export type LocalWorkspaceEntry = {
   name: string;
   path: string;
@@ -75,20 +86,24 @@ export type LocalWorkspaceEntry = {
   editable?: boolean;
 };
 
+/** Directory listing with a relative parent path for workspace navigation. */
 export type LocalWorkspaceListing = {
   path: string;
   parent: string | null;
   entries: LocalWorkspaceEntry[];
 };
 
+/** Editable text file plus its on-disk timestamp used for safe saves. */
 export type LocalWorkspaceFile = {
   path: string;
   content: string;
   modifiedAt: number;
 };
 
+// The agent binds to loopback so the browser can reach only this machine's service.
 const LOCAL_AGENT_URL = "http://127.0.0.1:45821";
 
+// Attach the pairing token, enforce a request deadline, and preserve agent errors.
 async function localAgentRequest<T>(
   token: string,
   path: string,
@@ -135,6 +150,7 @@ async function localAgentRequest<T>(
   }
 }
 
+// Send same-origin API requests with the signed-in session cookie.
 async function request<T>(url: string, init: RequestInit = {}) {
   const r = await fetch(url, {
     credentials: "include",
@@ -145,7 +161,10 @@ async function request<T>(url: string, init: RequestInit = {}) {
   if (!r.ok) throw new Error(d.message || "Request failed");
   return d as T;
 }
+
+// Browser-facing API surface grouped with the local-agent operations below.
 export const api = {
+  // Session and GitHub OAuth-backed repository operations.
   me: () => request<{ success: true; user: User }>("/api/auth/me"),
   login: () => {
     location.href = "/api/auth/github";
@@ -188,11 +207,13 @@ export const api = {
         body: JSON.stringify({ path, status }),
       },
     ),
+  // Detach a GitHub remote from the DevForge project without deleting it.
   disconnectGitHubRepository: (projectId: string) =>
     request<{ success: true }>(
       `/api/projects/${encodeURIComponent(projectId)}/github/disconnect`,
       { method: "POST" },
     ),
+  // Project records and long-running AI operations.
   projects: () => request<{ success: true; projects: any[] }>("/api/projects"),
   project: (id: string) =>
     request<{ success: true; project: any }>(`/api/projects/${id}`),
@@ -230,6 +251,7 @@ export const api = {
   history: (id: string) => request<any>(`/api/projects/${id}/history`),
   agent: () => request<any>("/api/agent"),
   providers: () => request<any>("/api/ai/providers"),
+  // Local Agent requests are authenticated directly with its browser-held pairing token.
   localAgent: {
     health: (token: string) =>
       localAgentRequest<{ ok: true } & LocalAgentInfo>(

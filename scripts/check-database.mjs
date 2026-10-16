@@ -2,6 +2,7 @@ import "dotenv/config";
 import { PrismaClient } from "../src/generated/prisma/client.js";
 import { PrismaPg } from "@prisma/adapter-pg";
 
+// Use the same URL as the application so this diagnostic checks the real target.
 const connectionString = process.env.DATABASE_URL;
 
 if (!connectionString) {
@@ -15,6 +16,7 @@ if (!connectionString) {
   });
 
   try {
+    // Report the connected database and schema without printing connection secrets.
     const [target] = await prisma.$queryRaw`
       SELECT
         current_database() AS database,
@@ -34,6 +36,7 @@ if (!connectionString) {
       );
       process.exitCode = 1;
     } else {
+      // Confirm the table shape expected by the login flow and Prisma user model.
       const columns = await prisma.$queryRaw`
         SELECT column_name
         FROM information_schema.columns
@@ -63,6 +66,8 @@ if (!connectionString) {
       }
     }
   } catch (error) {
+    // Adapter errors can wrap PostgreSQL details at different `cause` depths.
+    // Traverse known nested fields without printing credentials or full URLs.
     let current = error;
     let code = "";
     let message = "";
@@ -98,6 +103,7 @@ if (!connectionString) {
       }
     }
 
+    // Distinguish rejected credentials from network failures to give useful next steps.
     if (/authenticationfailed/i.test(adapterErrorName)) {
       console.error(
         "PostgreSQL is reachable, but it rejected the DATABASE_URL credentials. Reset the password for the configured database role, then update DATABASE_URL with that exact password.",
@@ -106,6 +112,7 @@ if (!connectionString) {
       console.error(`Database check failed${code ? ` (${code})` : ""}${message ? `: ${message}` : "."}`);
     }
     if (
+      // Only network-class failures benefit from the additional host/port hint.
       !/authenticationfailed/i.test(adapterErrorName) &&
       ["ETIMEDOUT", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "P1001"].includes(code)
     ) {
@@ -122,6 +129,7 @@ if (!connectionString) {
     }
     process.exitCode = 1;
   } finally {
+    // Close the pool on both success and failure so this one-shot check exits cleanly.
     await prisma.$disconnect();
   }
 }

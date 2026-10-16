@@ -1,4 +1,5 @@
 import path from "node:path";
+/** Resolve a workspace-relative path while rejecting absolute paths and traversal. */
 export function safePath(root, relative) {
     if (!relative ||
         path.isAbsolute(relative) ||
@@ -11,6 +12,7 @@ export function safePath(root, relative) {
         throw new Error("Path outside workspace is blocked");
     return target;
 }
+// Only executables in this allowlist can be launched by the agent command endpoint.
 export const ALLOWED_COMMANDS = [
     "npm",
     "pnpm",
@@ -30,6 +32,7 @@ export const ALLOWED_COMMANDS = [
     "git",
     "docker",
 ];
+/** Verify the first executable in a command string is approved before execution. */
 export function validateCommand(command) {
     const first = command
         .trim()

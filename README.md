@@ -2,6 +2,8 @@
 
 DevForge AI is an AI-assisted project workspace built around GitHub sign-in, PostgreSQL-backed project artifacts, and a separately run local agent. The web app generates and reviews projects with OpenRouter, sends generated Node.js projects to the local agent for build and test commands, and synchronizes local Git repositories with GitHub.
 
+The public user guide is available at `/guide` and can be read without signing in. Creating or managing projects and using connected services still requires GitHub authentication.
+
 ## Important architecture
 
 - Netlify hosts the browser and API functions.

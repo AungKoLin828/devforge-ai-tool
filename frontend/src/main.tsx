@@ -1,4 +1,9 @@
-import React, { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { createRoot } from "react-dom/client";
 import {
   api,
@@ -21,6 +26,112 @@ function BrandWordmark() {
       <span className="brand-wordmark-name">DevForge</span>
       <span className="brand-wordmark-ai">AI</span>
     </span>
+  );
+}
+
+// Public instructions remain available even when no user session exists.
+function UserGuide() {
+  const steps = [
+    {
+      number: "01",
+      title: "Sign in and create a project",
+      description:
+        "Reading this guide is public. To save project data or use workspace features, sign in with GitHub, then select New Project and describe what you want to build.",
+    },
+    {
+      number: "02",
+      title: "Generate and review the project",
+      description:
+        "Choose Generate to create the project plan and code. When you want to change saved code, use Request modification and describe the changes. Project chat answers questions but does not edit files. AI code review checks saved code and stores its findings.",
+    },
+    {
+      number: "03",
+      title: "Work with files on your PC",
+      description:
+        "Start the Local Agent on your PC, enter its pairing token in the signed-in workspace, and connect. Sync generated files to your workspace, or import an existing project. Build and test actions ask for confirmation before running project scripts.",
+    },
+    {
+      number: "04",
+      title: "Synchronize with GitHub",
+      description:
+        "From a project, connect an existing repository or create a new public or private repository. Use the Local Agent for clone, pull, and push operations. Git must be installed and authenticated on the PC running the agent.",
+    },
+    {
+      number: "05",
+      title: "Choose the right removal action",
+      description:
+        "Remove imported project removes its DevForge copy without deleting local PC files. Delete project permanently removes the DevForge project and its saved artifacts. Disconnect repository removes the GitHub link without deleting the remote repository.",
+    },
+  ];
+
+  return (
+    <main className="landing min-h-screen">
+      <header className="landing-nav mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
+        <a
+          href="/"
+          className="inline-flex items-center"
+          aria-label="DevForge AI home"
+        >
+          <BrandWordmark />
+        </a>
+        <a
+          href="/"
+          className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-indigo-400 hover:text-white"
+        >
+          Back to home
+        </a>
+      </header>
+
+      <section className="mx-auto max-w-4xl px-6 pb-20 pt-12">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">
+          Public user guide
+        </p>
+        <h1 className="mt-3 text-4xl font-bold tracking-tight text-white sm:text-5xl">
+          Get started with DevForge AI
+        </h1>
+        <p className="mt-5 max-w-3xl leading-7 text-slate-300">
+          GitHub sign-in is required only when you use the app to create or
+          manage projects, generate code, or access connected services.
+        </p>
+
+        <ol className="mt-10 space-y-4">
+          {steps.map((step) => (
+            <li key={step.number} className="glass rounded-2xl p-6 sm:p-7">
+              <div className="flex items-start gap-4">
+                <span className="rounded-lg border border-indigo-400/20 bg-indigo-400/10 px-2.5 py-1 font-mono text-sm font-semibold text-indigo-300">
+                  {step.number}
+                </span>
+                <div>
+                  <h2 className="text-lg font-semibold text-white">
+                    {step.title}
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    {step.description}
+                  </p>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ol>
+
+        <div className="mt-8 rounded-xl border border-slate-800 bg-slate-900/50 p-5">
+          <h2 className="font-semibold text-white">Keeping your work safe</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-400">
+            Keep credentials and secret files private. The Local Agent is a
+            separate program on your PC; review confirmations before running
+            project scripts. Disconnecting a repository does not revoke access
+            from GitHub or delete its remote contents.
+          </p>
+        </div>
+
+        <a
+          href="/"
+          className="mt-8 inline-flex rounded-xl bg-indigo-600 px-5 py-3 font-semibold text-white transition hover:bg-indigo-500"
+        >
+          Go to DevForge AI
+        </a>
+      </section>
+    </main>
   );
 }
 
@@ -67,18 +178,32 @@ function Login() {
   return (
     <main className="landing min-h-screen overflow-hidden">
       <header className="landing-nav mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
-        <a href="/" className="inline-flex items-center" aria-label="DevForge AI home">
+        <a
+          href="/"
+          className="inline-flex items-center"
+          aria-label="DevForge AI home"
+        >
           <BrandWordmark />
         </a>
-        <button
-          onClick={startGitHubLogin}
-          disabled={signingIn}
-          aria-busy={signingIn}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-indigo-400 hover:text-white disabled:cursor-wait disabled:opacity-75"
-        >
-          {signingIn && <span className="api-loading-spinner" aria-hidden="true" />}
-          {signingIn ? "Connecting to GitHub..." : "Sign in with GitHub"}
-        </button>
+        <nav className="flex items-center gap-3" aria-label="Public navigation">
+          <a
+            href="/guide"
+            className="px-2 py-2 text-sm font-medium text-slate-300 transition hover:text-white"
+          >
+            User guide
+          </a>
+          <button
+            onClick={startGitHubLogin}
+            disabled={signingIn}
+            aria-busy={signingIn}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-indigo-400 hover:text-white disabled:cursor-wait disabled:opacity-75"
+          >
+            {signingIn && (
+              <span className="api-loading-spinner" aria-hidden="true" />
+            )}
+            {signingIn ? "Connecting to GitHub..." : "Sign in with GitHub"}
+          </button>
+        </nav>
       </header>
 
       <section className="landing-hero mx-auto grid max-w-7xl items-center gap-14 px-6 py-16 lg:grid-cols-[1.1fr_0.9fr] lg:py-24">
@@ -89,12 +214,14 @@ function Login() {
           </div>
           <h1 className="max-w-3xl text-5xl font-bold leading-[1.08] tracking-tight text-white sm:text-6xl">
             Build with AI.
-            <span className="landing-gradient block">Keep control of the code.</span>
+            <span className="landing-gradient block">
+              Keep control of the code.
+            </span>
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
-            DevForge turns your project brief into a structured plan and generated code,
-            keeps the artifacts in PostgreSQL, and is designed to bring your local
-            development workflow into the loop.
+            DevForge turns your project brief into a structured plan and
+            generated code, keeps the artifacts in PostgreSQL, and is designed
+            to bring your local development workflow into the loop.
           </p>
           <div className="mt-9 flex flex-col gap-3 sm:flex-row">
             <button
@@ -109,25 +236,36 @@ function Login() {
                   Connecting to GitHub...
                 </>
               ) : (
-                <>Continue with GitHub <span aria-hidden="true">→</span></>
+                <>
+                  Continue with GitHub <span aria-hidden="true">→</span>
+                </>
               )}
             </button>
-            <a href="#how-it-works" className="rounded-xl border border-slate-700 px-6 py-3.5 text-center font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-900">
+            <a
+              href="#how-it-works"
+              className="rounded-xl border border-slate-700 px-6 py-3.5 text-center font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-900"
+            >
               Explore the workflow
             </a>
           </div>
           <p className="mt-4 text-xs leading-5 text-slate-500">
-            GitHub is used to sign in and optionally sync repositories. Your AI provider key stays on the server.
+            GitHub is used to sign in and optionally sync repositories. Your AI
+            provider key stays on the server.
           </p>
         </div>
 
-        <div className="glass landing-preview rounded-2xl p-5 shadow-2xl shadow-indigo-950/20 sm:p-6" aria-label="Example generated project workflow">
+        <div
+          className="glass landing-preview rounded-2xl p-5 shadow-2xl shadow-indigo-950/20 sm:p-6"
+          aria-label="Example generated project workflow"
+        >
           <div className="flex items-center justify-between border-b border-slate-800 pb-4">
             <div>
               <p className="text-xs text-slate-500">PROJECT WORKSPACE</p>
               <p className="mt-1 font-semibold text-slate-100">taskboard-app</p>
             </div>
-            <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-xs text-emerald-300">READY</span>
+            <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-1 text-xs text-emerald-300">
+              READY
+            </span>
           </div>
           <div className="mt-5 space-y-2">
             {[
@@ -137,49 +275,91 @@ function Login() {
               ["✓", "Implementation plan", "Saved"],
               ["✓", "Generated code", "Saved"],
             ].map(([icon, title, status]) => (
-              <div key={title} className="flex items-center gap-3 rounded-lg bg-slate-900/70 px-3 py-2.5">
-                <span className="text-emerald-400" aria-hidden="true">{icon}</span>
+              <div
+                key={title}
+                className="flex items-center gap-3 rounded-lg bg-slate-900/70 px-3 py-2.5"
+              >
+                <span className="text-emerald-400" aria-hidden="true">
+                  {icon}
+                </span>
                 <span className="flex-1 text-sm text-slate-200">{title}</span>
                 <span className="text-xs text-slate-500">{status}</span>
               </div>
             ))}
           </div>
           <div className="mt-5 rounded-lg border border-slate-800 bg-slate-950/70 p-3 font-mono text-xs leading-6 text-slate-400">
-            <div><span className="text-indigo-300">src/</span> components/TaskBoard.tsx</div>
-            <div><span className="text-indigo-300">src/</span> api/tasks.ts</div>
-            <div><span className="text-indigo-300">prisma/</span> schema.prisma</div>
+            <div>
+              <span className="text-indigo-300">src/</span>{" "}
+              components/TaskBoard.tsx
+            </div>
+            <div>
+              <span className="text-indigo-300">src/</span> api/tasks.ts
+            </div>
+            <div>
+              <span className="text-indigo-300">prisma/</span> schema.prisma
+            </div>
           </div>
-          <p className="mt-4 text-center text-xs text-slate-500">Example workflow preview</p>
+          <p className="mt-4 text-center text-xs text-slate-500">
+            Example workflow preview
+          </p>
         </div>
       </section>
 
-      <section id="how-it-works" className="mx-auto max-w-7xl scroll-mt-8 px-6 pb-20 pt-8">
+      <section
+        id="how-it-works"
+        className="mx-auto max-w-7xl scroll-mt-8 px-6 pb-20 pt-8"
+      >
         <div className="max-w-2xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">A transparent workflow</p>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-white">One workspace, from brief to build.</h2>
-          <p className="mt-3 leading-7 text-slate-400">See what DevForge does today and what is being connected next.</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">
+            A transparent workflow
+          </p>
+          <h2 className="mt-3 text-3xl font-bold tracking-tight text-white">
+            One workspace, from brief to build.
+          </h2>
+          <p className="mt-3 leading-7 text-slate-400">
+            See what DevForge does today and what is being connected next.
+          </p>
         </div>
         <div className="mt-9 grid gap-4 md:grid-cols-3">
           {capabilities.map((item) => (
             <article key={item.number} className="glass rounded-2xl p-6">
-              <span className="text-sm font-semibold text-indigo-300">{item.number}</span>
-              <h3 className="mt-4 text-lg font-semibold text-white">{item.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-slate-400">{item.description}</p>
+              <span className="text-sm font-semibold text-indigo-300">
+                {item.number}
+              </span>
+              <h3 className="mt-4 text-lg font-semibold text-white">
+                {item.title}
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                {item.description}
+              </p>
             </article>
           ))}
         </div>
         <div className="mt-16 grid gap-10 lg:grid-cols-[0.8fr_1.2fr]">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Product roadmap</p>
-            <h2 className="mt-3 text-2xl font-bold text-white">Built in practical steps.</h2>
-            <p className="mt-3 text-sm leading-6 text-slate-400">The roadmap is explicit so you can distinguish working features from what is still being developed.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">
+              Product roadmap
+            </p>
+            <h2 className="mt-3 text-2xl font-bold text-white">
+              Built in practical steps.
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-slate-400">
+              The roadmap is explicit so you can distinguish working features
+              from what is still being developed.
+            </p>
           </div>
           <ol className="divide-y divide-slate-800 rounded-2xl border border-slate-800 bg-slate-900/40 px-5">
             {roadmap.map(([number, title, status]) => (
               <li key={number} className="flex items-center gap-4 py-4">
-                <span className="font-mono text-xs text-slate-500">{number}</span>
+                <span className="font-mono text-xs text-slate-500">
+                  {number}
+                </span>
                 <span className="flex-1 text-sm text-slate-200">{title}</span>
-                <span className={`rounded-full px-2.5 py-1 text-xs ${status === "Available" ? "bg-emerald-400/10 text-emerald-300" : status === "In progress" ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-400"}`}>{status}</span>
+                <span
+                  className={`rounded-full px-2.5 py-1 text-xs ${status === "Available" ? "bg-emerald-400/10 text-emerald-300" : status === "In progress" ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-400"}`}
+                >
+                  {status}
+                </span>
               </li>
             ))}
           </ol>
@@ -188,8 +368,18 @@ function Login() {
 
       <footer className="border-t border-slate-800/80">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-6 py-6 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-          <span>DevForge AI · Your projects stay yours.</span>
-          <span>© {new Date().getFullYear()} Aung Ko Lin. All rights reserved.</span>
+          <span>
+            DevForge AI · Your projects stay yours.{" "}
+            <a
+              href="/guide"
+              className="ml-2 text-indigo-300 hover:text-indigo-200"
+            >
+              User guide
+            </a>
+          </span>
+          <span>
+            © {new Date().getFullYear()} Aung Ko Lin. All rights reserved.
+          </span>
         </div>
       </footer>
     </main>
@@ -242,17 +432,23 @@ function App({ user }: { user: User }) {
   const [workspaceListing, setWorkspaceListing] =
     useState<LocalWorkspaceListing | null>(null);
   const [workspaceEntriesLoading, setWorkspaceEntriesLoading] = useState(false);
-  const [workspaceBrowserError, setWorkspaceBrowserError] = useState<string | null>(null);
+  const [workspaceBrowserError, setWorkspaceBrowserError] = useState<
+    string | null
+  >(null);
   const [workspaceEditorFile, setWorkspaceEditorFile] =
     useState<LocalWorkspaceFile | null>(null);
   const [workspaceEditorDraft, setWorkspaceEditorDraft] = useState("");
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [syncingGeneratedFiles, setSyncingGeneratedFiles] = useState(false);
   // GitHub selection, workspace path, and mutually exclusive repository operations.
-  const [githubRepositories, setGitHubRepositories] = useState<GitHubRepository[]>([]);
-  const [githubRepositorySelection, setGitHubRepositorySelection] = useState("");
+  const [githubRepositories, setGitHubRepositories] = useState<
+    GitHubRepository[]
+  >([]);
+  const [githubRepositorySelection, setGitHubRepositorySelection] =
+    useState("");
   const [githubNewRepository, setGitHubNewRepository] = useState("");
-  const [githubNewRepositoryPrivate, setGitHubNewRepositoryPrivate] = useState(true);
+  const [githubNewRepositoryPrivate, setGitHubNewRepositoryPrivate] =
+    useState(true);
   const [githubLocalPath, setGitHubLocalPath] = useState("");
   const [githubCommitMessage, setGitHubCommitMessage] = useState("");
   const [githubBusy, setGitHubBusy] = useState<
@@ -268,11 +464,26 @@ function App({ user }: { user: User }) {
   const [githubError, setGitHubError] = useState<string | null>(null);
   // Local action state controls build/test output panels independently of AI runs.
   const [localAction, setLocalAction] = useState<"build" | "test" | null>(null);
-  const [localResult, setLocalResult] = useState<LocalProjectResult | null>(null);
-  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
-  const [removingImportedProjectId, setRemovingImportedProjectId] = useState<string | null>(null);
+  const [localResult, setLocalResult] = useState<LocalProjectResult | null>(
+    null,
+  );
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(
+    null,
+  );
+  const [removingImportedProjectId, setRemovingImportedProjectId] = useState<
+    string | null
+  >(null);
   // Background run state is kept in a hook so polling and cancellation survive UI rerenders.
-  const { status: generationStatus, operation: activeOperation, runId, error: generationError, isBusy, generate: runGeneration, review: runReview, reset: resetGeneration } = useProjectGeneration();
+  const {
+    status: generationStatus,
+    operation: activeOperation,
+    runId,
+    error: generationError,
+    isBusy,
+    generate: runGeneration,
+    review: runReview,
+    reset: resetGeneration,
+  } = useProjectGeneration();
 
   // Resolve any pending confirmation before closing the shared message modal.
   function closeModal(confirmed = false) {
@@ -314,7 +525,8 @@ function App({ user }: { user: User }) {
   }, [workspaceBrowserError]);
 
   useEffect(() => {
-    if (localAgentError) showModal("error", "Local Agent error", localAgentError);
+    if (localAgentError)
+      showModal("error", "Local Agent error", localAgentError);
   }, [localAgentError]);
 
   useEffect(() => {
@@ -357,7 +569,9 @@ function App({ user }: { user: User }) {
       const response = await api.githubRepositories();
       setGitHubRepositories(response.repositories);
       setGitHubRepositorySelection((current) =>
-        response.repositories.some((repository) => repository.fullName === current)
+        response.repositories.some(
+          (repository) => repository.fullName === current,
+        )
           ? current
           : response.repositories[0]?.fullName || "",
       );
@@ -385,9 +599,14 @@ function App({ user }: { user: User }) {
       setPrompt("");
       setChatMessages([]);
       resetGeneration();
-      showModal("success", "Project created", `Created "${response.project.name}".`);
+      showModal(
+        "success",
+        "Project created",
+        `Created "${response.project.name}".`,
+      );
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Could not create project.";
+      const message =
+        cause instanceof Error ? cause.message : "Could not create project.";
       setLogs((current) => [...current, `ERROR: ${message}`]);
       showModal("error", "Could not create project", message);
     }
@@ -420,14 +639,15 @@ function App({ user }: { user: User }) {
         ...current,
         `Deleted project "${project.name}" and its saved data.`,
       ]);
-      showModal("success", "Project deleted", `Deleted "${project.name}" and its saved data.`);
+      showModal(
+        "success",
+        "Project deleted",
+        `Deleted "${project.name}" and its saved data.`,
+      );
     } catch (cause) {
       const message =
         cause instanceof Error ? cause.message : "Could not delete project.";
-      setLogs((current) => [
-        ...current,
-        `ERROR: ${message}`,
-      ]);
+      setLogs((current) => [...current, `ERROR: ${message}`]);
       showModal("error", "Could not delete project", message);
     } finally {
       setDeletingProjectId(null);
@@ -446,7 +666,9 @@ function App({ user }: { user: User }) {
     setRemovingImportedProjectId(project.id);
     try {
       await api.removeImportedProject(project.id);
-      setProjects((current) => current.filter((item) => item.id !== project.id));
+      setProjects((current) =>
+        current.filter((item) => item.id !== project.id),
+      );
 
       if (selected?.id === project.id) {
         setSelected(undefined);
@@ -466,7 +688,9 @@ function App({ user }: { user: User }) {
       );
     } catch (cause) {
       const message =
-        cause instanceof Error ? cause.message : "Could not remove the imported project.";
+        cause instanceof Error
+          ? cause.message
+          : "Could not remove the imported project.";
       setLogs((current) => [...current, `ERROR: ${message}`]);
       showModal("error", "Could not remove imported project", message);
     } finally {
@@ -476,11 +700,7 @@ function App({ user }: { user: User }) {
 
   // Clear the DevForge repository link without deleting the GitHub remote.
   async function disconnectGitHubRepository() {
-    if (
-      !selected?.githubOwner ||
-      !selected.githubRepository ||
-      githubBusy
-    ) {
+    if (!selected?.githubOwner || !selected.githubRepository || githubBusy) {
       return;
     }
 
@@ -535,13 +755,16 @@ function App({ user }: { user: User }) {
       setLogs((current) => [...current, message]);
       showModal(
         "warning",
-        mode === "modify" ? "Modification request required" : "Project description required",
+        mode === "modify"
+          ? "Modification request required"
+          : "Project description required",
         message,
       );
       return;
     }
 
-    const operationLabel = mode === "modify" ? "modification" : "project generation";
+    const operationLabel =
+      mode === "modify" ? "modification" : "project generation";
     setLogs((current) => [...current, `Starting AI ${operationLabel}...`]);
     try {
       const completedRun = await runGeneration(
@@ -552,7 +775,10 @@ function App({ user }: { user: User }) {
       );
       if (!completedRun) return;
       setPrompt("");
-      setLogs((current) => [...current, `${mode === "modify" ? "Modification" : "Generation"} completed.`]);
+      setLogs((current) => [
+        ...current,
+        `${mode === "modify" ? "Modification" : "Generation"} completed.`,
+      ]);
       showModal(
         "success",
         mode === "modify" ? "Modification complete" : "Generation complete",
@@ -567,7 +793,8 @@ function App({ user }: { user: User }) {
       setSelected(projectResponse.project);
       setProjects(projectsResponse.projects);
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Generation failed.";
+      const message =
+        cause instanceof Error ? cause.message : "Generation failed.";
       setLogs((current) => [...current, `ERROR: ${message}`]);
       showModal(
         "error",
@@ -594,14 +821,17 @@ function App({ user }: { user: User }) {
       setSelected(projectResponse.project);
       setProjects(projectsResponse.projects);
       setLogs((current) => [...current, "Code review completed and saved."]);
-      showModal("success", "Review complete", "The AI code review has been saved.");
+      showModal(
+        "success",
+        "Review complete",
+        "The AI code review has been saved.",
+      );
     } catch (cause) {
       const message =
-        cause instanceof Error ? cause.message : "Could not load review results.";
-      setLogs((current) => [
-        ...current,
-        `ERROR: ${message}`,
-      ]);
+        cause instanceof Error
+          ? cause.message
+          : "Could not load review results.";
+      setLogs((current) => [...current, `ERROR: ${message}`]);
       showModal("error", "Could not load review", message);
     }
   }
@@ -618,7 +848,9 @@ function App({ user }: { user: User }) {
       setWorkspaceListing(listing);
     } catch (cause) {
       setWorkspaceBrowserError(
-        cause instanceof Error ? cause.message : "Could not load this workspace folder.",
+        cause instanceof Error
+          ? cause.message
+          : "Could not load this workspace folder.",
       );
     } finally {
       setWorkspaceEntriesLoading(false);
@@ -693,7 +925,11 @@ function App({ user }: { user: User }) {
         ...current,
         `Saved ${workspaceEditorFile.path} to your local workspace.`,
       ]);
-      showModal("success", "File saved", `Saved ${workspaceEditorFile.path} to your PC.`);
+      showModal(
+        "success",
+        "File saved",
+        `Saved ${workspaceEditorFile.path} to your PC.`,
+      );
     } catch (cause) {
       setWorkspaceBrowserError(
         cause instanceof Error ? cause.message : "Could not save this file.",
@@ -707,7 +943,9 @@ function App({ user }: { user: User }) {
   async function connectLocalAgent() {
     const token = localAgentToken.trim();
     if (!token) {
-      setLocalAgentError("Enter the pairing token printed by your local agent.");
+      setLocalAgentError(
+        "Enter the pairing token printed by your local agent.",
+      );
       return;
     }
 
@@ -741,7 +979,9 @@ function App({ user }: { user: User }) {
       setWorkspaceEditorFile(null);
       setWorkspaceEditorDraft("");
       setLocalAgentError(
-        cause instanceof Error ? cause.message : "Could not connect to the local agent.",
+        cause instanceof Error
+          ? cause.message
+          : "Could not connect to the local agent.",
       );
     }
   }
@@ -791,7 +1031,9 @@ function App({ user }: { user: User }) {
       );
     } catch (cause) {
       const message =
-        cause instanceof Error ? cause.message : "Could not import the local project.";
+        cause instanceof Error
+          ? cause.message
+          : "Could not import the local project.";
       setLocalAgentError(message);
       setLogs((current) => [...current, `ERROR: ${message}`]);
     } finally {
@@ -922,7 +1164,9 @@ function App({ user }: { user: User }) {
       );
     } catch (cause) {
       const message =
-        cause instanceof Error ? cause.message : "Could not copy generated files to your PC.";
+        cause instanceof Error
+          ? cause.message
+          : "Could not copy generated files to your PC.";
       setLocalAgentError(message);
       setLogs((current) => [...current, `ERROR: ${message}`]);
     } finally {
@@ -963,7 +1207,8 @@ function App({ user }: { user: User }) {
   // Connect the repository currently selected in the writable-repository list.
   async function connectSelectedGitHubRepository() {
     if (!selected || !githubRepositorySelection || githubBusy) return;
-    const [ownerName, ...repositoryParts] = githubRepositorySelection.split("/");
+    const [ownerName, ...repositoryParts] =
+      githubRepositorySelection.split("/");
     const repository = repositoryParts.join("/");
     if (!ownerName || !repository) return;
 
@@ -986,7 +1231,9 @@ function App({ user }: { user: User }) {
       );
     } catch (cause) {
       setGitHubError(
-        cause instanceof Error ? cause.message : "Could not connect this repository.",
+        cause instanceof Error
+          ? cause.message
+          : "Could not connect this repository.",
       );
     } finally {
       setGitHubBusy(null);
@@ -1021,7 +1268,9 @@ function App({ user }: { user: User }) {
       );
     } catch (cause) {
       setGitHubError(
-        cause instanceof Error ? cause.message : "Could not create a GitHub repository.",
+        cause instanceof Error
+          ? cause.message
+          : "Could not create a GitHub repository.",
       );
     } finally {
       setGitHubBusy(null);
@@ -1032,7 +1281,8 @@ function App({ user }: { user: User }) {
   async function cloneGitHubRepository() {
     const repository = linkedGitHubRepository();
     const path = currentGitHubPath();
-    if (!selected || !repository || !localAgentInfo || !path || githubBusy) return;
+    if (!selected || !repository || !localAgentInfo || !path || githubBusy)
+      return;
     if (
       !(await confirmModal(
         "Clone GitHub repository",
@@ -1046,10 +1296,13 @@ function App({ user }: { user: User }) {
     setGitHubBusy("clone");
     setGitHubError(null);
     try {
-      const result = await api.localAgent.cloneGitHubRepository(localAgentToken, {
-        ...repository,
-        path,
-      });
+      const result = await api.localAgent.cloneGitHubRepository(
+        localAgentToken,
+        {
+          ...repository,
+          path,
+        },
+      );
       await api.updateGitHubSync(selected.id, result.path, "CONNECTED");
       setGitHubLocalPath(result.path);
       setWorkspaceEditorFile(null);
@@ -1058,7 +1311,10 @@ function App({ user }: { user: User }) {
         loadWorkspaceDirectory(result.path),
         refreshSelectedProject(),
       ]);
-      setLogs((current) => [...current, `Cloned ${repository.owner}/${repository.repository} to ${result.path}.`]);
+      setLogs((current) => [
+        ...current,
+        `Cloned ${repository.owner}/${repository.repository} to ${result.path}.`,
+      ]);
       showModal(
         "success",
         "Repository cloned",
@@ -1066,7 +1322,9 @@ function App({ user }: { user: User }) {
       );
     } catch (cause) {
       const message =
-        cause instanceof Error ? cause.message : "Could not clone the GitHub repository.";
+        cause instanceof Error
+          ? cause.message
+          : "Could not clone the GitHub repository.";
       setGitHubError(message);
       setLogs((current) => [...current, `ERROR: ${message}`]);
     } finally {
@@ -1078,7 +1336,8 @@ function App({ user }: { user: User }) {
   async function pullGitHubRepository() {
     const repository = linkedGitHubRepository();
     const path = currentGitHubPath();
-    if (!selected || !repository || !localAgentInfo || !path || githubBusy) return;
+    if (!selected || !repository || !localAgentInfo || !path || githubBusy)
+      return;
     if (
       !(await confirmModal(
         "Pull from GitHub",
@@ -1092,16 +1351,22 @@ function App({ user }: { user: User }) {
     setGitHubBusy("pull");
     setGitHubError(null);
     try {
-      const result = await api.localAgent.pullGitHubRepository(localAgentToken, {
-        ...repository,
-        path,
-      });
+      const result = await api.localAgent.pullGitHubRepository(
+        localAgentToken,
+        {
+          ...repository,
+          path,
+        },
+      );
       await api.updateGitHubSync(selected.id, result.path, "CLEAN");
       await Promise.all([
         loadWorkspaceDirectory(result.path),
         refreshSelectedProject(),
       ]);
-      setLogs((current) => [...current, `Pulled ${repository.owner}/${repository.repository}: ${result.output}`]);
+      setLogs((current) => [
+        ...current,
+        `Pulled ${repository.owner}/${repository.repository}: ${result.output}`,
+      ]);
       showModal(
         "success",
         "Pull complete",
@@ -1121,10 +1386,13 @@ function App({ user }: { user: User }) {
   async function pushGitHubRepository(initializeRepository = false) {
     const repository = linkedGitHubRepository();
     const path = currentGitHubPath();
-    if (!selected || !repository || !localAgentInfo || !path || githubBusy) return;
+    if (!selected || !repository || !localAgentInfo || !path || githubBusy)
+      return;
     if (
       !(await confirmModal(
-        initializeRepository ? "Initialize and push to GitHub" : "Commit and push to GitHub",
+        initializeRepository
+          ? "Initialize and push to GitHub"
+          : "Commit and push to GitHub",
         `${initializeRepository ? `Configure or initialize Git in ${path}, then ` : ""}${generatedFiles.length ? `copy ${generatedFiles.length} saved DevForge files into ${path} (matching files will be overwritten), then ` : ""}stage and commit all changes in ${path} and push them to ${repository.owner}/${repository.repository} (${repository.branch})? Secret environment files and common private keys are blocked. Review your project before publishing.`,
         initializeRepository ? "Initialize & push" : "Commit & push",
       ))
@@ -1136,17 +1404,13 @@ function App({ user }: { user: User }) {
     setGitHubError(null);
     try {
       if (generatedFiles.length) {
-        await api.localAgent.syncProject(
-          localAgentToken,
-          path,
-          generatedFiles,
-        );
+        await api.localAgent.syncProject(localAgentToken, path, generatedFiles);
       }
       if (initializeRepository) {
-        await api.localAgent.initializeGitHubRepository(
-          localAgentToken,
-          { ...repository, path },
-        );
+        await api.localAgent.initializeGitHubRepository(localAgentToken, {
+          ...repository,
+          path,
+        });
       }
       const result = await api.localAgent.pushGitHubRepository(
         localAgentToken,
@@ -1154,8 +1418,7 @@ function App({ user }: { user: User }) {
           ...repository,
           path,
           message:
-            githubCommitMessage.trim() ||
-            `Sync ${selected.name} from DevForge`,
+            githubCommitMessage.trim() || `Sync ${selected.name} from DevForge`,
         },
       );
       await api.updateGitHubSync(selected.id, result.path, "CLEAN");
@@ -1168,7 +1431,9 @@ function App({ user }: { user: User }) {
       showModal(
         "success",
         "Push complete",
-        result.commit || result.output || `Pushed ${repository.owner}/${repository.repository}.`,
+        result.commit ||
+          result.output ||
+          `Pushed ${repository.owner}/${repository.repository}.`,
       );
       setLogs((current) => [
         ...current,
@@ -1194,7 +1459,8 @@ function App({ user }: { user: User }) {
       setChatMessages([]);
       resetGeneration();
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Could not open project.";
+      const message =
+        cause instanceof Error ? cause.message : "Could not open project.";
       setLogs((current) => [...current, `ERROR: ${message}`]);
       showModal("error", "Could not open project", message);
     }
@@ -1220,7 +1486,9 @@ function App({ user }: { user: User }) {
       ]);
     } catch (cause) {
       const message =
-        cause instanceof Error ? cause.message : "Could not get an AI response.";
+        cause instanceof Error
+          ? cause.message
+          : "Could not get an AI response.";
       setChatMessages((current) => [
         ...current,
         { role: "assistant", content: `Sorry, I couldn't answer: ${message}` },
@@ -1232,13 +1500,16 @@ function App({ user }: { user: User }) {
   }
 
   // Derive the current saved code, plans, and review data for the workspace panels.
-  const artifacts = Array.isArray(selected?.artifacts) ? selected.artifacts : [];
-  const codeArtifact = artifacts.find((artifact: any) => artifact.type === "CODE");
+  const artifacts = Array.isArray(selected?.artifacts)
+    ? selected.artifacts
+    : [];
+  const codeArtifact = artifacts.find(
+    (artifact: any) => artifact.type === "CODE",
+  );
   const codeContent = codeArtifact?.content;
   const generatedFiles = Array.isArray(codeContent) ? codeContent : [];
   const planArtifacts = artifacts.filter(
-    (artifact: any) =>
-      artifact.type !== "CODE" && artifact.type !== "REVIEW",
+    (artifact: any) => artifact.type !== "CODE" && artifact.type !== "REVIEW",
   );
   const reviewArtifacts = artifacts.filter(
     (artifact: any) =>
@@ -1258,9 +1529,26 @@ function App({ user }: { user: User }) {
       <header className="h-14 border-b border-slate-800 px-5 flex items-center justify-between">
         <BrandWordmark />
         <div className="flex gap-4 items-center text-sm">
-          <span className={localAgentInfo ? "text-emerald-400" : "text-amber-400"}>● Local Agent {localAgentInfo ? "Connected" : "Not connected"}</span>
-          <span className="text-slate-400">{user.githubUsername || user.email}</span>
-          <button onClick={() => api.logout().then(() => location.reload())} className="text-slate-400 hover:text-white">Logout</button>
+          <a
+            href="/guide"
+            className="text-slate-300 transition hover:text-white"
+          >
+            User guide
+          </a>
+          <span
+            className={localAgentInfo ? "text-emerald-400" : "text-amber-400"}
+          >
+            ● Local Agent {localAgentInfo ? "Connected" : "Not connected"}
+          </span>
+          <span className="text-slate-400">
+            {user.githubUsername || user.email}
+          </span>
+          <button
+            onClick={() => api.logout().then(() => location.reload())}
+            className="text-slate-400 hover:text-white"
+          >
+            Logout
+          </button>
         </div>
       </header>
       {activeApiRequests > 0 && (
@@ -1278,7 +1566,12 @@ function App({ user }: { user: User }) {
       <div className="flex-1 grid grid-cols-[250px_1fr_350px] min-h-0">
         {/* Project navigation exposes distinct remove-import and permanent-delete actions. */}
         <aside className="border-r border-slate-800 p-4 overflow-auto">
-          <button onClick={create} className="w-full bg-indigo-600 rounded-lg py-2 mb-5">+ New Project</button>
+          <button
+            onClick={create}
+            className="w-full bg-indigo-600 rounded-lg py-2 mb-5"
+          >
+            + New Project
+          </button>
           <div className="text-xs uppercase text-slate-500 mb-2">Projects</div>
           {projects.map((project) => {
             const isImportedProject =
@@ -1297,7 +1590,9 @@ function App({ user }: { user: User }) {
                   className="block w-full rounded-t-lg p-3 text-left"
                 >
                   <div>{project.name}</div>
-                  <div className="mt-1 text-xs text-slate-500">{project.status}</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {project.status}
+                  </div>
                 </button>
                 {isImportedProject && (
                   <button
@@ -1331,23 +1626,48 @@ function App({ user }: { user: User }) {
         {/* Selected project editor, saved artifacts, and local development tools. */}
         <main className="min-w-0 overflow-auto p-6">
           {!selected ? (
-            <div className="h-full grid place-items-center text-slate-500">Create a project to begin.</div>
+            <div className="h-full grid place-items-center text-slate-500">
+              Create a project to begin.
+            </div>
           ) : (
             <>
               <div className="flex justify-between gap-4">
-                <div><h2 className="text-2xl font-bold">{selected.name}</h2><p className="text-slate-400 mt-1">{selected.description}</p></div>
-                <span className="h-fit rounded-full bg-slate-800 px-3 py-1 text-xs">{selected.status}</span>
+                <div>
+                  <h2 className="text-2xl font-bold">{selected.name}</h2>
+                  <p className="text-slate-400 mt-1">{selected.description}</p>
+                </div>
+                <span className="h-fit rounded-full bg-slate-800 px-3 py-1 text-xs">
+                  {selected.status}
+                </span>
               </div>
 
               <div className="mt-6 glass rounded-2xl overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-800 font-semibold">Explorer</div>
+                <div className="px-4 py-3 border-b border-slate-800 font-semibold">
+                  Explorer
+                </div>
                 <div className="p-4 font-mono text-sm">
-                  {generatedFiles.length ? generatedFiles.map((file: any, index: number) => <div key={file.path || index} className="py-1 text-slate-300">{file.path}</div>) : <div className="text-slate-500">No generated files saved yet.</div>}
+                  {generatedFiles.length ? (
+                    generatedFiles.map((file: any, index: number) => (
+                      <div
+                        key={file.path || index}
+                        className="py-1 text-slate-300"
+                      >
+                        {file.path}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-slate-500">
+                      No generated files saved yet.
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* Workspace files are browsed and edited through the loopback agent only. */}
-              <section className="mt-5 glass overflow-hidden rounded-2xl" aria-label="Local workspace browser">
+              <section
+                className="mt-5 glass overflow-hidden rounded-2xl"
+                aria-label="Local workspace browser"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
                   <div>
                     <h3 className="font-semibold">Local workspace files</h3>
@@ -1362,7 +1682,11 @@ function App({ user }: { user: User }) {
                       workspaceListing?.parent !== undefined && (
                         <button
                           type="button"
-                          onClick={() => void browseWorkspaceDirectory(workspaceListing.parent!)}
+                          onClick={() =>
+                            void browseWorkspaceDirectory(
+                              workspaceListing.parent!,
+                            )
+                          }
                           disabled={workspaceEntriesLoading}
                           className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-indigo-400 disabled:opacity-50"
                         >
@@ -1371,7 +1695,11 @@ function App({ user }: { user: User }) {
                       )}
                     <button
                       type="button"
-                      onClick={() => void loadWorkspaceDirectory(workspaceListing?.path || "")}
+                      onClick={() =>
+                        void loadWorkspaceDirectory(
+                          workspaceListing?.path || "",
+                        )
+                      }
                       disabled={!localAgentInfo || workspaceEntriesLoading}
                       className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-indigo-400 disabled:opacity-50"
                     >
@@ -1394,11 +1722,17 @@ function App({ user }: { user: User }) {
                 <div className="grid min-h-[360px] lg:grid-cols-[minmax(220px,0.7fr)_minmax(0,1.3fr)]">
                   <div className="max-h-[480px] overflow-auto border-b border-slate-800 p-3 lg:border-b-0 lg:border-r">
                     {!localAgentInfo ? (
-                      <p className="p-2 text-sm text-slate-500">Connect the Local Agent to view your workspace.</p>
+                      <p className="p-2 text-sm text-slate-500">
+                        Connect the Local Agent to view your workspace.
+                      </p>
                     ) : workspaceEntriesLoading && !workspaceListing ? (
-                      <p className="p-2 text-sm text-slate-500">Loading workspace files...</p>
+                      <p className="p-2 text-sm text-slate-500">
+                        Loading workspace files...
+                      </p>
                     ) : !workspaceListing?.entries.length ? (
-                      <p className="p-2 text-sm text-slate-500">This folder is empty.</p>
+                      <p className="p-2 text-sm text-slate-500">
+                        This folder is empty.
+                      </p>
                     ) : (
                       <div className="space-y-1 font-mono text-xs">
                         {workspaceListing.entries.map((entry) => (
@@ -1412,7 +1746,8 @@ function App({ user }: { user: User }) {
                             }
                             disabled={
                               workspaceEntriesLoading ||
-                              (entry.type === "file" && entry.editable === false)
+                              (entry.type === "file" &&
+                                entry.editable === false)
                             }
                             title={
                               entry.type === "file" && entry.editable === false
@@ -1427,7 +1762,10 @@ function App({ user }: { user: User }) {
                                   : "text-slate-300 hover:bg-slate-800"
                             }`}
                           >
-                            <span className="mr-2 text-slate-500" aria-hidden="true">
+                            <span
+                              className="mr-2 text-slate-500"
+                              aria-hidden="true"
+                            >
                               {entry.type === "directory" ? "▸" : "·"}
                             </span>
                             {entry.name}
@@ -1447,16 +1785,23 @@ function App({ user }: { user: User }) {
                     {workspaceEditorFile ? (
                       <>
                         <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-3 py-2 text-xs">
-                          <span className="truncate font-mono text-slate-300">{workspaceEditorFile.path}</span>
-                          {workspaceEditorDraft !== workspaceEditorFile.content && (
-                            <span className="shrink-0 text-amber-300">Unsaved changes</span>
+                          <span className="truncate font-mono text-slate-300">
+                            {workspaceEditorFile.path}
+                          </span>
+                          {workspaceEditorDraft !==
+                            workspaceEditorFile.content && (
+                            <span className="shrink-0 text-amber-300">
+                              Unsaved changes
+                            </span>
                           )}
                         </div>
                         <textarea
                           aria-label={`Edit ${workspaceEditorFile.path}`}
                           spellCheck={false}
                           value={workspaceEditorDraft}
-                          onChange={(event) => setWorkspaceEditorDraft(event.target.value)}
+                          onChange={(event) =>
+                            setWorkspaceEditorDraft(event.target.value)
+                          }
                           className="min-h-[320px] flex-1 resize-y bg-slate-950/70 p-4 font-mono text-xs leading-5 text-slate-200 outline-none focus:ring-1 focus:ring-inset focus:ring-indigo-500"
                         />
                       </>
@@ -1469,7 +1814,10 @@ function App({ user }: { user: User }) {
                 </div>
                 <div className="border-t border-slate-800 px-4 py-3">
                   <p className="text-xs leading-5 text-slate-500">
-                    Saving writes directly to the selected local file. Hidden/secret files, dependency folders, symlinks, binary files, and files over 1 MB are not editable here. Review your changes before saving.
+                    Saving writes directly to the selected local file.
+                    Hidden/secret files, dependency folders, symlinks, binary
+                    files, and files over 1 MB are not editable here. Review
+                    your changes before saving.
                   </p>
                 </div>
               </section>
@@ -1477,16 +1825,25 @@ function App({ user }: { user: User }) {
               {planArtifacts.length > 0 && (
                 <div className="mt-5 glass rounded-2xl p-4">
                   <div className="mb-3 flex items-center justify-between">
-                    <div className="text-sm font-semibold">Saved project artifacts</div>
-                    <span className="text-xs text-slate-500">Stored in PostgreSQL</span>
+                    <div className="text-sm font-semibold">
+                      Saved project artifacts
+                    </div>
+                    <span className="text-xs text-slate-500">
+                      Stored in PostgreSQL
+                    </span>
                   </div>
                   <div className="space-y-2">
                     {planArtifacts.map((artifact: any) => (
-                      <details key={artifact.id} className="rounded-lg border border-slate-800 bg-slate-950/60">
+                      <details
+                        key={artifact.id}
+                        className="rounded-lg border border-slate-800 bg-slate-950/60"
+                      >
                         <summary className="cursor-pointer px-3 py-2.5 text-sm text-slate-300">
                           {artifact.name}
                         </summary>
-                        <pre className="max-h-72 overflow-auto border-t border-slate-800 p-3 text-xs leading-5 text-slate-400">{JSON.stringify(artifact.content, null, 2)}</pre>
+                        <pre className="max-h-72 overflow-auto border-t border-slate-800 p-3 text-xs leading-5 text-slate-400">
+                          {JSON.stringify(artifact.content, null, 2)}
+                        </pre>
                       </details>
                     ))}
                   </div>
@@ -1495,34 +1852,61 @@ function App({ user }: { user: User }) {
 
               {/* Findings are tied to the code artifact reviewed by the latest run. */}
               {latestReview && (
-                <section className="mt-5 glass rounded-2xl p-4" aria-label="Latest AI code review">
+                <section
+                  className="mt-5 glass rounded-2xl p-4"
+                  aria-label="Latest AI code review"
+                >
                   <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-semibold">Latest AI code review</div>
+                    <div className="text-sm font-semibold">
+                      Latest AI code review
+                    </div>
                     <span className="text-xs text-slate-500">
-                      {reviewFindings.length} finding{reviewFindings.length === 1 ? "" : "s"} · saved
+                      {reviewFindings.length} finding
+                      {reviewFindings.length === 1 ? "" : "s"} · saved
                     </span>
                   </div>
                   {typeof reviewContent?.summary === "string" && (
-                    <p className="mt-3 text-sm leading-6 text-slate-300">{reviewContent.summary}</p>
+                    <p className="mt-3 text-sm leading-6 text-slate-300">
+                      {reviewContent.summary}
+                    </p>
                   )}
                   <div className="mt-3 space-y-2">
-                    {reviewFindings.length ? reviewFindings.map((finding: any, index: number) => (
-                      <details key={`${finding.filePath}-${finding.title}-${index}`} className="rounded-lg border border-slate-800 bg-slate-950/60">
-                        <summary className="cursor-pointer px-3 py-2.5 text-sm text-slate-200">
-                          <span className={`mr-2 text-xs font-semibold ${finding.severity === "CRITICAL" || finding.severity === "HIGH" ? "text-red-300" : finding.severity === "MEDIUM" ? "text-amber-300" : "text-slate-400"}`}>{finding.severity}</span>
-                          {finding.title}
-                          <span className="ml-2 text-xs text-slate-500">{finding.filePath}</span>
-                        </summary>
-                        <div className="space-y-3 border-t border-slate-800 p-3 text-sm">
-                          <p className="leading-6 text-slate-400">{finding.description}</p>
-                          <div>
-                            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-indigo-300">Suggested fix</p>
-                            <p className="leading-6 text-slate-300">{finding.suggestedFix}</p>
+                    {reviewFindings.length ? (
+                      reviewFindings.map((finding: any, index: number) => (
+                        <details
+                          key={`${finding.filePath}-${finding.title}-${index}`}
+                          className="rounded-lg border border-slate-800 bg-slate-950/60"
+                        >
+                          <summary className="cursor-pointer px-3 py-2.5 text-sm text-slate-200">
+                            <span
+                              className={`mr-2 text-xs font-semibold ${finding.severity === "CRITICAL" || finding.severity === "HIGH" ? "text-red-300" : finding.severity === "MEDIUM" ? "text-amber-300" : "text-slate-400"}`}
+                            >
+                              {finding.severity}
+                            </span>
+                            {finding.title}
+                            <span className="ml-2 text-xs text-slate-500">
+                              {finding.filePath}
+                            </span>
+                          </summary>
+                          <div className="space-y-3 border-t border-slate-800 p-3 text-sm">
+                            <p className="leading-6 text-slate-400">
+                              {finding.description}
+                            </p>
+                            <div>
+                              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-indigo-300">
+                                Suggested fix
+                              </p>
+                              <p className="leading-6 text-slate-300">
+                                {finding.suggestedFix}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      </details>
-                    )) : (
-                      <p className="rounded-lg bg-slate-950/60 p-3 text-sm text-emerald-300">No actionable findings.</p>
+                        </details>
+                      ))
+                    ) : (
+                      <p className="rounded-lg bg-slate-950/60 p-3 text-sm text-emerald-300">
+                        No actionable findings.
+                      </p>
                     )}
                   </div>
                 </section>
@@ -1530,10 +1914,34 @@ function App({ user }: { user: User }) {
 
               {/* One prompt supports initial generation and later modification requests. */}
               <div className="mt-5 glass rounded-2xl p-4">
-                <div className="text-sm font-semibold mb-3">AI Project Builder</div>
-                <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={isBusy} className="w-full h-36 rounded-xl bg-slate-950 border border-slate-800 p-3 outline-none focus:border-indigo-500 disabled:opacity-60" placeholder={generatedFiles.length ? "Describe the software you want to build, or enter a modification request..." : "Describe the software you want to build..."} />
+                <div className="text-sm font-semibold mb-3">
+                  AI Project Builder
+                </div>
+                <textarea
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  disabled={isBusy}
+                  className="w-full h-36 rounded-xl bg-slate-950 border border-slate-800 p-3 outline-none focus:border-indigo-500 disabled:opacity-60"
+                  placeholder={
+                    generatedFiles.length
+                      ? "Describe the software you want to build, or enter a modification request..."
+                      : "Describe the software you want to build..."
+                  }
+                />
                 <div className="flex gap-2 mt-3">
-                  <button disabled={isBusy} onClick={() => void generate()} className="bg-indigo-600 disabled:opacity-50 rounded-lg px-4 py-2">{activeOperation === "generate" && generationStatus === "STARTING" ? "Starting..." : activeOperation === "generate" && generationStatus === "RUNNING" ? "Generating..." : "Generate"}</button>
+                  <button
+                    disabled={isBusy}
+                    onClick={() => void generate()}
+                    className="bg-indigo-600 disabled:opacity-50 rounded-lg px-4 py-2"
+                  >
+                    {activeOperation === "generate" &&
+                    generationStatus === "STARTING"
+                      ? "Starting..."
+                      : activeOperation === "generate" &&
+                          generationStatus === "RUNNING"
+                        ? "Generating..."
+                        : "Generate"}
+                  </button>
                   {generatedFiles.length > 0 && (
                     <button
                       type="button"
@@ -1541,25 +1949,66 @@ function App({ user }: { user: User }) {
                       onClick={() => void generate("modify")}
                       className="rounded-lg border border-indigo-500/50 px-4 py-2 text-indigo-200 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {activeOperation === "modify" && generationStatus === "STARTING"
+                      {activeOperation === "modify" &&
+                      generationStatus === "STARTING"
                         ? "Starting..."
-                        : activeOperation === "modify" && generationStatus === "RUNNING"
+                        : activeOperation === "modify" &&
+                            generationStatus === "RUNNING"
                           ? "Applying changes..."
                           : "Request modification"}
                     </button>
                   )}
                   <button
                     type="button"
-                    disabled={!localAgentInfo || !generatedFiles.length || syncingGeneratedFiles || Boolean(localAction)}
+                    disabled={
+                      !localAgentInfo ||
+                      !generatedFiles.length ||
+                      syncingGeneratedFiles ||
+                      Boolean(localAction)
+                    }
                     onClick={() => void syncGeneratedFiles()}
                     className="rounded-lg border border-indigo-500/50 px-4 py-2 text-indigo-200 disabled:cursor-not-allowed disabled:opacity-50"
-                    title={!localAgentInfo ? "Start and connect the Local Agent first." : "Copy the saved generated files into the Local Agent workspace."}
+                    title={
+                      !localAgentInfo
+                        ? "Start and connect the Local Agent first."
+                        : "Copy the saved generated files into the Local Agent workspace."
+                    }
                   >
-                    {syncingGeneratedFiles ? "Syncing to PC..." : "Sync files to PC"}
+                    {syncingGeneratedFiles
+                      ? "Syncing to PC..."
+                      : "Sync files to PC"}
                   </button>
-                  <button disabled={Boolean(localAction) || !localAgentInfo || !generatedFiles.length} onClick={() => void runLocalAction("build")} className="rounded-lg bg-slate-800 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50">{localAction === "build" ? "Building..." : "Build locally"}</button>
-                  <button disabled={Boolean(localAction) || !localAgentInfo || !generatedFiles.length} onClick={() => void runLocalAction("test")} className="rounded-lg bg-slate-800 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50">{localAction === "test" ? "Testing..." : "Test locally"}</button>
-                  <button disabled={isBusy || !generatedFiles.length} onClick={() => void review()} className="rounded-lg bg-slate-800 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50">{activeOperation === "review" && isBusy ? "Reviewing..." : "AI Review"}</button>
+                  <button
+                    disabled={
+                      Boolean(localAction) ||
+                      !localAgentInfo ||
+                      !generatedFiles.length
+                    }
+                    onClick={() => void runLocalAction("build")}
+                    className="rounded-lg bg-slate-800 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {localAction === "build" ? "Building..." : "Build locally"}
+                  </button>
+                  <button
+                    disabled={
+                      Boolean(localAction) ||
+                      !localAgentInfo ||
+                      !generatedFiles.length
+                    }
+                    onClick={() => void runLocalAction("test")}
+                    className="rounded-lg bg-slate-800 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {localAction === "test" ? "Testing..." : "Test locally"}
+                  </button>
+                  <button
+                    disabled={isBusy || !generatedFiles.length}
+                    onClick={() => void review()}
+                    className="rounded-lg bg-slate-800 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {activeOperation === "review" && isBusy
+                      ? "Reviewing..."
+                      : "AI Review"}
+                  </button>
                 </div>
                 <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -1583,13 +2032,20 @@ function App({ user }: { user: User }) {
                         className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
                       />
                     </label>
-                    <button onClick={() => void connectLocalAgent()} className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-indigo-400">
-                      {localAgentInfo ? "Reconnect agent" : "Connect local agent"}
+                    <button
+                      onClick={() => void connectLocalAgent()}
+                      className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-indigo-400"
+                    >
+                      {localAgentInfo
+                        ? "Reconnect agent"
+                        : "Connect local agent"}
                     </button>
                   </div>
                   {localAgentInfo && (
                     <p className="mt-3 text-xs text-emerald-300">
-                      Connected to {localAgentInfo.machine} ({localAgentInfo.platform}). Workspace: {localAgentInfo.workspaceRoot}
+                      Connected to {localAgentInfo.machine} (
+                      {localAgentInfo.platform}). Workspace:{" "}
+                      {localAgentInfo.workspaceRoot}
                     </p>
                   )}
                   {localAgentInfo && (
@@ -1598,13 +2054,21 @@ function App({ user }: { user: User }) {
                         Import a folder from this workspace
                         <select
                           value={localImportPath}
-                          onChange={(event) => setLocalImportPath(event.target.value)}
-                          disabled={!workspaceProjects.length || importingProject}
+                          onChange={(event) =>
+                            setLocalImportPath(event.target.value)
+                          }
+                          disabled={
+                            !workspaceProjects.length || importingProject
+                          }
                           className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-60"
                         >
-                          {!workspaceProjects.length && <option value="">No project folders found</option>}
+                          {!workspaceProjects.length && (
+                            <option value="">No project folders found</option>
+                          )}
                           {workspaceProjects.map((project) => (
-                            <option key={project.path} value={project.path}>{project.name}</option>
+                            <option key={project.path} value={project.path}>
+                              {project.name}
+                            </option>
                           ))}
                         </select>
                       </label>
@@ -1614,17 +2078,25 @@ function App({ user }: { user: User }) {
                         disabled={!localImportPath || importingProject}
                         className="rounded-lg border border-indigo-500/50 px-4 py-2 text-sm text-indigo-200 hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {importingProject ? "Importing..." : "Import local project"}
+                        {importingProject
+                          ? "Importing..."
+                          : "Import local project"}
                       </button>
                     </div>
                   )}
                   {/* Git operations run on the PC; the server stores only remote metadata. */}
-                  <section className="mt-5 rounded-xl border border-slate-800 bg-slate-900/50 p-4" aria-label="GitHub synchronization">
+                  <section
+                    className="mt-5 rounded-xl border border-slate-800 bg-slate-900/50 p-4"
+                    aria-label="GitHub synchronization"
+                  >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <h3 className="text-sm font-semibold text-slate-100">GitHub synchronization</h3>
+                        <h3 className="text-sm font-semibold text-slate-100">
+                          GitHub synchronization
+                        </h3>
                         <p className="mt-1 text-xs leading-5 text-slate-400">
-                          Connect a repository, clone or pull it to this PC, then commit and push local changes.
+                          Connect a repository, clone or pull it to this PC,
+                          then commit and push local changes.
                         </p>
                       </div>
                       <span className="rounded-full bg-slate-800 px-2.5 py-1 text-xs text-slate-300">
@@ -1648,17 +2120,30 @@ function App({ user }: { user: User }) {
                     {selected.githubOwner && selected.githubRepository ? (
                       <>
                         <p className="mt-3 text-xs text-slate-400">
-                          Branch: <span className="text-slate-200">{selected.githubBranch}</span>
+                          Branch:{" "}
+                          <span className="text-slate-200">
+                            {selected.githubBranch}
+                          </span>
                           {selected.lastSyncedAt && (
-                            <> · Last synced: {new Date(selected.lastSyncedAt).toLocaleString()}</>
+                            <>
+                              {" "}
+                              · Last synced:{" "}
+                              {new Date(selected.lastSyncedAt).toLocaleString()}
+                            </>
                           )}
                         </p>
                         <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                           <label className="text-xs text-slate-400">
                             Local workspace folder
                             <input
-                              value={githubLocalPath || selected.localPath || `projects/${selected.id}-github`}
-                              onChange={(event) => setGitHubLocalPath(event.target.value)}
+                              value={
+                                githubLocalPath ||
+                                selected.localPath ||
+                                `projects/${selected.id}-github`
+                              }
+                              onChange={(event) =>
+                                setGitHubLocalPath(event.target.value)
+                              }
                               disabled={!localAgentInfo || Boolean(githubBusy)}
                               placeholder={`projects/${selected.id}-github`}
                               className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-60"
@@ -1668,7 +2153,9 @@ function App({ user }: { user: User }) {
                             Commit message
                             <input
                               value={githubCommitMessage}
-                              onChange={(event) => setGitHubCommitMessage(event.target.value)}
+                              onChange={(event) =>
+                                setGitHubCommitMessage(event.target.value)
+                              }
                               disabled={Boolean(githubBusy)}
                               placeholder={`Sync ${selected.name} from DevForge`}
                               maxLength={200}
@@ -1683,7 +2170,9 @@ function App({ user }: { user: User }) {
                             disabled={!localAgentInfo || Boolean(githubBusy)}
                             className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {githubBusy === "clone" ? "Cloning..." : "Clone to PC"}
+                            {githubBusy === "clone"
+                              ? "Cloning..."
+                              : "Clone to PC"}
                           </button>
                           <button
                             type="button"
@@ -1691,7 +2180,9 @@ function App({ user }: { user: User }) {
                             disabled={!localAgentInfo || Boolean(githubBusy)}
                             className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {githubBusy === "pull" ? "Pulling..." : "Pull latest"}
+                            {githubBusy === "pull"
+                              ? "Pulling..."
+                              : "Pull latest"}
                           </button>
                           <button
                             type="button"
@@ -1699,7 +2190,9 @@ function App({ user }: { user: User }) {
                             disabled={!localAgentInfo || Boolean(githubBusy)}
                             className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {githubBusy === "push" ? "Pushing..." : "Commit & push"}
+                            {githubBusy === "push"
+                              ? "Pushing..."
+                              : "Commit & push"}
                           </button>
                           <button
                             type="button"
@@ -1708,7 +2201,9 @@ function App({ user }: { user: User }) {
                             className="rounded-lg border border-indigo-500/50 px-3 py-2 text-xs text-indigo-200 hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
                             title="Initialize Git in this folder or attach the connected GitHub repository as its origin, then commit and push."
                           >
-                            {githubBusy === "push" ? "Pushing..." : "Initialize & push"}
+                            {githubBusy === "push"
+                              ? "Pushing..."
+                              : "Initialize & push"}
                           </button>
                         </div>
                       </>
@@ -1719,16 +2214,24 @@ function App({ user }: { user: User }) {
                             Existing repository with write access
                             <select
                               value={githubRepositorySelection}
-                              onChange={(event) => setGitHubRepositorySelection(event.target.value)}
+                              onChange={(event) =>
+                                setGitHubRepositorySelection(event.target.value)
+                              }
                               disabled={Boolean(githubBusy)}
                               className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-60"
                             >
                               {!githubRepositories.length && (
-                                <option value="">No writable repositories found</option>
+                                <option value="">
+                                  No writable repositories found
+                                </option>
                               )}
                               {githubRepositories.map((repository) => (
-                                <option key={repository.id} value={repository.fullName}>
-                                  {repository.fullName}{repository.private ? " (private)" : ""}
+                                <option
+                                  key={repository.id}
+                                  value={repository.fullName}
+                                >
+                                  {repository.fullName}
+                                  {repository.private ? " (private)" : ""}
                                 </option>
                               ))}
                             </select>
@@ -1739,15 +2242,23 @@ function App({ user }: { user: User }) {
                             disabled={Boolean(githubBusy)}
                             className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-indigo-400 disabled:opacity-50"
                           >
-                            {githubBusy === "repositories" ? "Loading..." : "Refresh"}
+                            {githubBusy === "repositories"
+                              ? "Loading..."
+                              : "Refresh"}
                           </button>
                           <button
                             type="button"
-                            onClick={() => void connectSelectedGitHubRepository()}
-                            disabled={!githubRepositorySelection || Boolean(githubBusy)}
+                            onClick={() =>
+                              void connectSelectedGitHubRepository()
+                            }
+                            disabled={
+                              !githubRepositorySelection || Boolean(githubBusy)
+                            }
                             className="rounded-lg border border-indigo-500/50 px-3 py-2 text-xs text-indigo-200 hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {githubBusy === "connect" ? "Connecting..." : "Connect existing"}
+                            {githubBusy === "connect"
+                              ? "Connecting..."
+                              : "Connect existing"}
                           </button>
                         </div>
                         <div className="mt-4 flex flex-col gap-2 border-t border-slate-800 pt-4 sm:flex-row sm:items-end">
@@ -1755,7 +2266,9 @@ function App({ user }: { user: User }) {
                             Create a new repository
                             <input
                               value={githubNewRepository}
-                              onChange={(event) => setGitHubNewRepository(event.target.value)}
+                              onChange={(event) =>
+                                setGitHubNewRepository(event.target.value)
+                              }
                               disabled={Boolean(githubBusy)}
                               placeholder="repository-name"
                               maxLength={100}
@@ -1765,9 +2278,15 @@ function App({ user }: { user: User }) {
                           <label className="text-xs text-slate-400">
                             Visibility
                             <select
-                              value={githubNewRepositoryPrivate ? "private" : "public"}
+                              value={
+                                githubNewRepositoryPrivate
+                                  ? "private"
+                                  : "public"
+                              }
                               onChange={(event) =>
-                                setGitHubNewRepositoryPrivate(event.target.value === "private")
+                                setGitHubNewRepositoryPrivate(
+                                  event.target.value === "private",
+                                )
                               }
                               disabled={Boolean(githubBusy)}
                               className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-60"
@@ -1779,7 +2298,9 @@ function App({ user }: { user: User }) {
                           <button
                             type="button"
                             onClick={() => void createGitHubRepository()}
-                            disabled={!githubNewRepository.trim() || Boolean(githubBusy)}
+                            disabled={
+                              !githubNewRepository.trim() || Boolean(githubBusy)
+                            }
                             className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {githubBusy === "create"
@@ -1791,33 +2312,71 @@ function App({ user }: { user: User }) {
                     )}
                     {!localAgentInfo && (
                       <p className="mt-3 text-xs leading-5 text-amber-300">
-                        Connect the Local Agent to clone, pull, or push. Install Git on this PC and sign in through its Git Credential Manager for private repository access; the GitHub token is never sent to the agent.
+                        Connect the Local Agent to clone, pull, or push. Install
+                        Git on this PC and sign in through its Git Credential
+                        Manager for private repository access; the GitHub token
+                        is never sent to the agent.
                       </p>
                     )}
                   </section>
                   {!localAgentInfo && (
                     <p className="mt-3 text-xs leading-5 text-amber-300">
-                      To start the Local Agent, open a terminal in the DevForge project folder on your PC and run <code>npm run agent:dev</code>. Keep that terminal open, copy the pairing token printed there, paste it above, then select <strong>Connect local agent</strong>.
+                      To start the Local Agent, open a terminal in the DevForge
+                      project folder on your PC and run{" "}
+                      <code>npm run agent:dev</code>. Keep that terminal open,
+                      copy the pairing token printed there, paste it above, then
+                      select <strong>Connect local agent</strong>.
                     </p>
                   )}
                   <p className="mt-3 text-xs leading-5 text-slate-500">
-                    Generated files are saved in your DevForge account first. Use <strong>Sync files to PC</strong> to copy them into <code>projects/{selected.id}</code>, or choose Build/Test to sync and execute them. Import uploads up to 300 text files and 2 MB; dependency/build folders and secret environment files are skipped. Build and test scripts run on your PC; only run projects you trust.
+                    Generated files are saved in your DevForge account first.
+                    Use <strong>Sync files to PC</strong> to copy them into{" "}
+                    <code>projects/{selected.id}</code>, or choose Build/Test to
+                    sync and execute them. Import uploads up to 300 text files
+                    and 2 MB; dependency/build folders and secret environment
+                    files are skipped. Build and test scripts run on your PC;
+                    only run projects you trust.
                   </p>
                 </div>
                 {localResult && (
                   <div className="mt-4 space-y-3">
                     {localResult.stages.map((stage, index) => (
-                      <details key={`${stage.name}-${index}`} open={stage.code !== 0} className="rounded-lg border border-slate-800 bg-slate-950/70">
-                        <summary className={`cursor-pointer px-3 py-2.5 text-sm ${stage.code === 0 ? "text-emerald-300" : "text-red-300"}`}>
-                          {stage.name} · {stage.command} · exit {stage.code ?? "unknown"}
+                      <details
+                        key={`${stage.name}-${index}`}
+                        open={stage.code !== 0}
+                        className="rounded-lg border border-slate-800 bg-slate-950/70"
+                      >
+                        <summary
+                          className={`cursor-pointer px-3 py-2.5 text-sm ${stage.code === 0 ? "text-emerald-300" : "text-red-300"}`}
+                        >
+                          {stage.name} · {stage.command} · exit{" "}
+                          {stage.code ?? "unknown"}
                         </summary>
-                        <pre className="max-h-80 overflow-auto whitespace-pre-wrap border-t border-slate-800 p-3 text-xs leading-5 text-slate-300">{[stage.stdout, stage.stderr && `STDERR:\n${stage.stderr}`, stage.truncated && "[Output truncated at 128 KB]"].filter(Boolean).join("\n\n") || "No command output."}</pre>
+                        <pre className="max-h-80 overflow-auto whitespace-pre-wrap border-t border-slate-800 p-3 text-xs leading-5 text-slate-300">
+                          {[
+                            stage.stdout,
+                            stage.stderr && `STDERR:\n${stage.stderr}`,
+                            stage.truncated && "[Output truncated at 128 KB]",
+                          ]
+                            .filter(Boolean)
+                            .join("\n\n") || "No command output."}
+                        </pre>
                       </details>
                     ))}
                   </div>
                 )}
-                {isBusy && <p className="mt-3 text-sm text-amber-300">{activeOperation === "review" ? "AI review is in progress. You can keep this page open; please avoid submitting another operation for this project." : "Generation is in progress. You can keep this page open; please avoid submitting another operation for this project."}</p>}
-                {runId && <p className="mt-2 text-xs text-slate-500">Project run: {runId}</p>}
+                {isBusy && (
+                  <p className="mt-3 text-sm text-amber-300">
+                    {activeOperation === "review"
+                      ? "AI review is in progress. You can keep this page open; please avoid submitting another operation for this project."
+                      : "Generation is in progress. You can keep this page open; please avoid submitting another operation for this project."}
+                  </p>
+                )}
+                {runId && (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Project run: {runId}
+                  </p>
+                )}
               </div>
             </>
           )}
@@ -1851,11 +2410,15 @@ function App({ user }: { user: User }) {
                 <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                   {message.role === "user" ? "You" : "DevForge AI"}
                 </div>
-                <p className="whitespace-pre-wrap leading-6">{message.content}</p>
+                <p className="whitespace-pre-wrap leading-6">
+                  {message.content}
+                </p>
               </div>
             ))}
             {chatBusy && (
-              <p className="text-xs text-amber-300">Thinking about your question...</p>
+              <p className="text-xs text-amber-300">
+                Thinking about your question...
+              </p>
             )}
           </div>
           <form
@@ -1877,7 +2440,11 @@ function App({ user }: { user: User }) {
               disabled={!selected || chatBusy}
               maxLength={4000}
               rows={3}
-              placeholder={selected ? "Ask a question... (Ctrl+Enter to send)" : "Select a project first"}
+              placeholder={
+                selected
+                  ? "Ask a question... (Ctrl+Enter to send)"
+                  : "Select a project first"
+              }
               className="w-full resize-y rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-50"
             />
             <div className="mt-2 flex items-center justify-between">
@@ -1910,7 +2477,9 @@ function App({ user }: { user: User }) {
 
       <footer className="min-h-9 border-t border-slate-800 px-4 py-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-slate-500">
         <span>IDE · Terminal · Build · Test · Review · Git · GitHub</span>
-        <span>© {new Date().getFullYear()} Aung Ko Lin. All rights reserved.</span>
+        <span>
+          © {new Date().getFullYear()} Aung Ko Lin. All rights reserved.
+        </span>
       </footer>
       {/* All confirmation, status, warning, and error messages use this modal. */}
       {modal && (
@@ -1950,7 +2519,10 @@ function App({ user }: { user: User }) {
                       : "i"}
               </span>
               <div className="min-w-0 flex-1">
-                <h2 id="message-modal-title" className="text-lg font-semibold text-white">
+                <h2
+                  id="message-modal-title"
+                  className="text-lg font-semibold text-white"
+                >
                   {modal.title}
                 </h2>
                 <p
@@ -1995,17 +2567,29 @@ function App({ user }: { user: User }) {
 
 // Resolve the current session before rendering either the login or project UI.
 function Root() {
+  const isPublicGuide =
+    window.location.pathname.replace(/\/+$/, "") === "/guide";
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
+    if (isPublicGuide) return;
     // Resolve authentication once; the router sends expired sessions back to login.
     // A failed session lookup is treated as signed out, while loading always completes.
-    api.me().then((response) => setUser(response.user)).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+    api
+      .me()
+      .then((response) => setUser(response.user))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [isPublicGuide]);
+  if (isPublicGuide) return <UserGuide />;
   if (loading) {
     return (
       <div className="min-h-screen grid place-items-center bg-slate-950 text-slate-200">
-        <div className="flex items-center gap-3" role="status" aria-live="polite">
+        <div
+          className="flex items-center gap-3"
+          role="status"
+          aria-live="polite"
+        >
           <span className="api-loading-spinner" aria-hidden="true" />
           <span>Loading DevForge...</span>
         </div>

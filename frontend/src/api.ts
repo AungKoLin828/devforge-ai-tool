@@ -37,6 +37,27 @@ export type LocalProjectResult = {
   success: boolean;
 };
 
+/** Incremental events emitted while a Local Agent build or test is running. */
+export type LocalProjectStreamEvent =
+  | { type: "notice"; message: string }
+  | { type: "stage-start"; name: string; command: string }
+  | { type: "output"; stream: "stdout" | "stderr"; text: string }
+  | { type: "stage-complete"; stage: LocalCommandResult }
+  | { type: "complete"; result: LocalProjectResult };
+
+function isLocalCommandResult(value: unknown): value is LocalCommandResult {
+  if (!value || typeof value !== "object") return false;
+  const stage = value as Record<string, unknown>;
+  return (
+    typeof stage.name === "string" &&
+    typeof stage.command === "string" &&
+    (typeof stage.code === "number" || stage.code === null) &&
+    typeof stage.stdout === "string" &&
+    typeof stage.stderr === "string" &&
+    typeof stage.truncated === "boolean"
+  );
+}
+
 /** UTF-8 project file exchanged with the Local Agent. */
 export type LocalProjectFile = {
   path: string;
@@ -167,6 +188,226 @@ async function localAgentRequest<T>(
       throw new Error(
         "The Local Agent request timed out. Check the agent terminal and retry when it is ready.",
       );
+    }
+    if (cause instanceof TypeError) {
+      throw new Error(
+        "Could not reach the local agent. Start it on your PC and check its pairing token.",
+      );
+    }
+    throw cause;
+  } finally {
+    window.clearTimeout(timeout);
+    finishActivity();
+  }
+}
+
+// Read newline-delimited build/test events so command output appears immediately.
+async function localAgentProjectStream(
+  token: string,
+  action: "build" | "test",
+  path: string,
+  onEvent: (event: LocalProjectStreamEvent) => void,
+) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 25 * 60 * 1000);
+  const finishActivity = beginApiActivity();
+
+  try {
+    const response = await fetch(
+      `${LOCAL_AGENT_URL}/project/${action}/stream`,
+      {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ path }),
+      },
+    );
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      if (response.status === 404) {
+        onEvent({
+          type: "notice",
+          message:
+            "This Local Agent version does not support live output. Running with compatibility mode; output will appear after the command finishes. Update the agent for live streaming.",
+        });
+        const fallbackResponse = await fetch(
+          `${LOCAL_AGENT_URL}/project/${action}`,
+          {
+            method: "POST",
+            signal: controller.signal,
+            headers: {
+              authorization: `Bearer ${token}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({ path }),
+          },
+        );
+        const fallbackBody: unknown = await fallbackResponse
+          .json()
+          .catch(() => null);
+        if (!fallbackResponse.ok) {
+          const error =
+            fallbackBody &&
+            typeof fallbackBody === "object" &&
+            "error" in fallbackBody &&
+            typeof fallbackBody.error === "string"
+              ? fallbackBody.error
+              : `Local agent request failed (${fallbackResponse.status})`;
+          if (
+            /no package\.json; only node\.js projects are supported for now/i.test(
+              error,
+            )
+          ) {
+            throw new Error(
+              "The connected Local Agent is outdated and only supports Node.js projects. Stop the running agent, start the updated agent from the DevForge repository with `npm.cmd run agent:dev`, then reconnect using the new pairing token. The current agent supports additional project types and streamed output.",
+            );
+          }
+          throw new Error(error);
+        }
+        if (!fallbackBody || typeof fallbackBody !== "object" || !("result" in fallbackBody)) {
+          throw new Error("The Local Agent returned an invalid build/test result.");
+        }
+        const resultValue: unknown = fallbackBody.result;
+        if (
+          !resultValue ||
+          typeof resultValue !== "object" ||
+          !("action" in resultValue) ||
+          !("stages" in resultValue) ||
+          !("success" in resultValue)
+        ) {
+          throw new Error("The Local Agent returned an invalid build/test result.");
+        }
+        const result = resultValue as Record<string, unknown>;
+        if (
+          result.action !== action ||
+          !Array.isArray(result.stages) ||
+          typeof result.success !== "boolean" ||
+          !result.stages.every(isLocalCommandResult)
+        ) {
+          throw new Error("The Local Agent returned an invalid build/test result.");
+        }
+
+        const compatibleResult: LocalProjectResult = {
+          action,
+          stages: result.stages,
+          success: result.success,
+        };
+        for (const stage of compatibleResult.stages) {
+          onEvent({
+            type: "stage-start",
+            name: stage.name,
+            command: stage.command,
+          });
+          if (stage.stdout) {
+            onEvent({ type: "output", stream: "stdout", text: stage.stdout });
+          }
+          if (stage.stderr) {
+            onEvent({ type: "output", stream: "stderr", text: stage.stderr });
+          }
+          onEvent({ type: "stage-complete", stage });
+        }
+        onEvent({ type: "complete", result: compatibleResult });
+        return compatibleResult;
+      }
+      throw new Error(body.error || `Local agent request failed (${response.status})`);
+    }
+    if (!response.body) {
+      throw new Error("The Local Agent did not provide a streaming response.");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalResult: LocalProjectResult | null = null;
+
+    const handleLine = (line: string): LocalProjectResult | null => {
+      if (!line.trim()) return null;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        throw new Error("The Local Agent returned invalid build/test output.");
+      }
+      if (!parsed || typeof parsed !== "object" || !("type" in parsed)) {
+        throw new Error("The Local Agent returned an invalid build/test event.");
+      }
+      const data = parsed as Record<string, unknown>;
+
+      if (
+        data.type === "stage-start" &&
+        typeof data.name === "string" &&
+        typeof data.command === "string"
+      ) {
+        onEvent({
+          type: "stage-start",
+          name: data.name,
+          command: data.command,
+        });
+      } else if (
+        data.type === "output" &&
+        (data.stream === "stdout" || data.stream === "stderr") &&
+        typeof data.text === "string"
+      ) {
+        onEvent({ type: "output", stream: data.stream, text: data.text });
+      } else if (
+        data.type === "stage-complete" &&
+        isLocalCommandResult(data.stage)
+      ) {
+        onEvent({ type: "stage-complete", stage: data.stage });
+      } else if (
+        data.type === "complete" &&
+        data.result &&
+        typeof data.result === "object"
+      ) {
+        const result = data.result as Record<string, unknown>;
+        if (
+          result.action !== action ||
+          !Array.isArray(result.stages) ||
+          typeof result.success !== "boolean" ||
+          !result.stages.every(isLocalCommandResult)
+        ) {
+          throw new Error("The Local Agent returned an invalid build/test result.");
+        }
+        const resultValue: LocalProjectResult = {
+          action,
+          stages: result.stages,
+          success: result.success,
+        };
+        onEvent({
+          type: "complete",
+          result: resultValue,
+        });
+        return resultValue;
+      } else if (data.type === "error" && typeof data.error === "string") {
+        throw new Error(data.error);
+      } else {
+        throw new Error("The Local Agent returned an unknown build/test event.");
+      }
+      return null;
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        finalResult = handleLine(line) || finalResult;
+      }
+      if (done) break;
+    }
+    if (buffer.trim()) finalResult = handleLine(buffer) || finalResult;
+    if (!finalResult) {
+      throw new Error("The Local Agent ended the stream before the action completed.");
+    }
+    return finalResult;
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === "AbortError") {
+      throw new Error("The local build/test request timed out.");
     }
     if (cause instanceof TypeError) {
       throw new Error(
@@ -402,5 +643,6 @@ export const api = {
         },
         25 * 60 * 1000,
       ),
+    runProjectStreaming: localAgentProjectStream,
   },
 };

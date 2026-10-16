@@ -6,6 +6,20 @@ import { validateCommand, safePath } from "./security.js";
 
 // Bound captured command output to prevent large logs from exhausting agent memory.
 const MAX_OUTPUT_BYTES = 128 * 1024;
+const BUILD_SCAN_EXCLUDED_DIRECTORIES = new Set([
+  ".git",
+  ".next",
+  ".nuxt",
+  ".turbo",
+  ".venv",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+  "target",
+  "vendor",
+]);
 
 /** Relative path and UTF-8 text used when importing or syncing a project. */
 type GeneratedFile = {
@@ -411,6 +425,105 @@ type ProjectRunResult = {
   }>;
   success: boolean;
 };
+
+const BUILD_CONFIGURATION_FILES = new Set([
+  "package.json",
+  "go.mod",
+  "Cargo.toml",
+  "pom.xml",
+  "build.gradle",
+  "build.gradle.kts",
+  "pyproject.toml",
+  "setup.py",
+  "requirements.txt",
+  "index.html",
+]);
+
+// Find nested application roots without following links or scanning dependency/output trees.
+async function findNestedBuildRoots(projectRoot: string, action: "build" | "test") {
+  const roots: string[] = [];
+  let scannedDirectories = 0;
+
+  const scan = async (directory: string, depth: number): Promise<void> => {
+    if (depth > 8) return;
+    scannedDirectories += 1;
+    if (scannedDirectories > 2000) {
+      throw new Error(
+        "Project contains too many directories to safely search for build configuration.",
+      );
+    }
+
+    const entries = await fs.readdir(directory, { withFileTypes: true });
+    const names = new Set(
+      entries.filter((entry) => entry.isFile()).map((entry) => entry.name),
+    );
+    const hasPythonFiles = entries.some(
+      (entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".py"),
+    );
+    if (names.has("package.json")) {
+      let packageJson: {
+        scripts?: Record<string, unknown>;
+      };
+      try {
+        packageJson = JSON.parse(
+          await fs.readFile(path.join(directory, "package.json"), "utf8"),
+        );
+      } catch (cause) {
+        if (cause instanceof SyntaxError) {
+          throw new Error(`Invalid package.json in ${directory}`);
+        }
+        throw cause;
+      }
+      const scripts = packageJson.scripts ?? {};
+      const hasActionScript =
+        action === "build"
+          ? typeof scripts.build === "string" && Boolean(scripts.build.trim())
+          : ["test", "test:unit"].some(
+              (name) =>
+                typeof scripts[name] === "string" &&
+                Boolean((scripts[name] as string).trim()),
+            );
+      if (hasActionScript) {
+        roots.push(directory);
+        return;
+      }
+    } else {
+      const hasConfiguration =
+        [...BUILD_CONFIGURATION_FILES]
+          .filter((name) => name !== "package.json")
+          .some((name) => names.has(name)) || hasPythonFiles;
+      if (hasConfiguration) {
+        roots.push(directory);
+        return;
+      }
+    }
+
+    for (const entry of entries) {
+      if (
+        !entry.isDirectory() ||
+        BUILD_SCAN_EXCLUDED_DIRECTORIES.has(entry.name.toLowerCase()) ||
+        entry.name.startsWith(".")
+      ) {
+        continue;
+      }
+      await scan(path.join(directory, entry.name), depth + 1);
+    }
+  };
+
+  const entries = await fs.readdir(projectRoot, { withFileTypes: true });
+  for (const entry of entries) {
+    if (
+      !entry.isDirectory() ||
+      BUILD_SCAN_EXCLUDED_DIRECTORIES.has(entry.name.toLowerCase()) ||
+      entry.name.startsWith(".")
+    ) {
+      continue;
+    }
+    await scan(path.join(projectRoot, entry.name), 1);
+  }
+
+  return roots;
+}
 
 // Create missing workspace directories while refusing symlinks and non-directories.
 async function ensureSafeDirectory(root: string, relative: string) {
@@ -1178,6 +1291,7 @@ export async function runCommand(
   root: string,
   command: string,
   timeoutMs = 120000,
+  onOutput?: (stream: "stdout" | "stderr", text: string) => void,
 ): Promise<{
   code: number | null;
   stdout: string;
@@ -1213,6 +1327,7 @@ export async function runCommand(
         if (captured.length < chunk.length) truncated = true;
         if (target === "stdout") stdout += captured;
         else stderr += captured;
+        onOutput?.(target, captured);
       };
 
       const t = setTimeout(() => {
@@ -1247,6 +1362,11 @@ export async function runProjectAction(
   root: string,
   relativeProjectPath: string,
   action: "build" | "test",
+  onEvent?: (event:
+    | { type: "stage-start"; name: string; command: string }
+    | { type: "output"; stream: "stdout" | "stderr"; text: string }
+    | { type: "stage-complete"; stage: ProjectRunResult["stages"][number] }
+  ) => void,
 ): Promise<ProjectRunResult> {
   const projectRoot = safePath(root, relativeProjectPath);
   const rootRealPath = await fs.realpath(root);
@@ -1263,23 +1383,60 @@ export async function runProjectAction(
     timeoutMs = 12 * 60 * 1000,
   ) => {
     try {
-      const result = await runCommand(safeProjectRoot, command, timeoutMs);
-      stages.push({ name, command, ...result });
+      onEvent?.({ type: "stage-start", name, command });
+      const result = await runCommand(
+        safeProjectRoot,
+        command,
+        timeoutMs,
+        (stream, text) => onEvent?.({ type: "output", stream, text }),
+      );
+      const stage = { name, command, ...result };
+      stages.push(stage);
+      onEvent?.({ type: "stage-complete", stage });
       return result.code === 0;
     } catch (cause) {
-      stages.push({
+      const stage = {
         name,
         command,
         code: null,
         stdout: "",
         stderr: cause instanceof Error ? cause.message : "Command failed",
         truncated: false,
-      });
+      };
+      stages.push(stage);
+      onEvent?.({ type: "stage-complete", stage });
       return false;
     }
   };
 
-  let manifest: { scripts?: Record<string, unknown>; packageManager?: string } | null = null;
+  const runNestedBuilds = async (): Promise<ProjectRunResult | null> => {
+    const nestedBuildRoots = await findNestedBuildRoots(safeProjectRoot, action);
+    if (nestedBuildRoots.length === 0) return null;
+
+    const nestedResults: ProjectRunResult[] = [];
+    for (const buildRoot of nestedBuildRoots) {
+      const relativeBuildRoot = path
+        .relative(rootRealPath, buildRoot)
+        .split(path.sep)
+        .join("/");
+      nestedResults.push(
+        await runProjectAction(root, relativeBuildRoot, action, onEvent),
+      );
+    }
+    return {
+      action,
+      stages: nestedResults.flatMap((result) => result.stages),
+      success: nestedResults.every((result) => result.success),
+    };
+  };
+
+  let manifest: {
+    name?: string;
+    scripts?: Record<string, unknown>;
+    dependencies?: Record<string, unknown>;
+    devDependencies?: Record<string, unknown>;
+    packageManager?: string;
+  } | null = null;
   try {
     manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
   } catch (cause) {
@@ -1310,6 +1467,138 @@ export async function runProjectAction(
         ? "yarn"
         : "npm";
   if (manifest) {
+    const hasRequestedScript =
+      action === "build"
+        ? hasScript("build")
+        : hasScript("test") || hasScript("test:unit");
+    if (!hasRequestedScript) {
+      const nestedResult = await runNestedBuilds();
+      if (nestedResult) return nestedResult;
+    }
+
+    const declaresVite =
+      Object.hasOwn(manifest.dependencies ?? {}, "vite") ||
+      Object.hasOwn(manifest.devDependencies ?? {}, "vite") ||
+      Object.values(scripts).some(
+        (script) => typeof script === "string" && /\bvite(?:\s|$)/.test(script),
+      );
+    if (action === "build" && hasScript("build") && declaresVite) {
+      const rootEntries = await fs.readdir(safeProjectRoot, {
+        withFileTypes: true,
+      });
+      const rootNames = new Set(rootEntries.map((entry) => entry.name));
+      const hasViteConfig = [...rootNames].some((name) =>
+        /^vite\.config\.[cm]?[jt]sx?$/.test(name),
+      );
+
+      if (!rootNames.has("index.html") && !hasViteConfig) {
+        const entryCandidates = [
+          "src/main.tsx",
+          "src/main.jsx",
+          "src/main.ts",
+          "src/main.js",
+          "src/index.tsx",
+          "src/index.jsx",
+          "src/index.ts",
+          "src/index.js",
+          "main.tsx",
+          "main.jsx",
+          "main.ts",
+          "main.js",
+        ];
+        let entryPoint: string | null = null;
+        for (const candidate of entryCandidates) {
+          try {
+            const entryStat = await fs.lstat(
+              safePath(safeProjectRoot, candidate),
+            );
+            if (entryStat.isFile() && !entryStat.isSymbolicLink()) {
+              entryPoint = candidate;
+              break;
+            }
+          } catch (cause) {
+            if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+          }
+        }
+
+        const stageName = "Prepare Vite entry";
+        const command = "Create index.html";
+        onEvent?.({ type: "stage-start", name: stageName, command });
+        if (!entryPoint) {
+          const stage = {
+            name: stageName,
+            command,
+            code: null,
+            stdout: "",
+            stderr:
+              "This Vite project has no index.html or conventional main/index source entry. Add an index.html entry file or a vite.config.* with a custom build entry.",
+            truncated: false,
+          };
+          stages.push(stage);
+          onEvent?.({ type: "stage-complete", stage });
+          return { action, stages, success: false };
+        }
+
+        const escapedTitle = (manifest.name || "Vite App")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+        const html = [
+          "<!doctype html>",
+          '<html lang="en">',
+          "  <head>",
+          '    <meta charset="UTF-8" />',
+          '    <meta name="viewport" content="width=device-width, initial-scale=1.0" />',
+          `    <title>${escapedTitle}</title>`,
+          "  </head>",
+          "  <body>",
+          '    <div id="root"></div>',
+          `    <script type="module" src="/${entryPoint.replaceAll("\\", "/")}"></script>`,
+          "  </body>",
+          "</html>",
+          "",
+        ].join("\n");
+
+        try {
+          await fs.writeFile(path.join(safeProjectRoot, "index.html"), html, {
+            encoding: "utf8",
+            flag: "wx",
+          });
+        } catch (cause) {
+          if ((cause as NodeJS.ErrnoException).code !== "EEXIST") {
+            const stage = {
+              name: stageName,
+              command,
+              code: null,
+              stdout: "",
+              stderr:
+                cause instanceof Error
+                  ? cause.message
+                  : "Could not create the Vite index.html entry.",
+              truncated: false,
+            };
+            stages.push(stage);
+            onEvent?.({ type: "stage-complete", stage });
+            return { action, stages, success: false };
+          }
+        }
+
+        const stage = {
+          name: stageName,
+          command,
+          code: 0,
+          stdout: `Created index.html for ${entryPoint} because this Vite project did not have an HTML entry point.\n`,
+          stderr: "",
+          truncated: false,
+        };
+        stages.push(stage);
+        onEvent?.({ type: "output", stream: "stdout", text: stage.stdout });
+        onEvent?.({ type: "stage-complete", stage });
+      }
+    }
+
     try {
       await fs.access(path.join(safeProjectRoot, "node_modules"));
     } catch {
@@ -1451,13 +1740,16 @@ export async function runProjectAction(
     }
   }
 
+  const nestedResult = await runNestedBuilds();
+  if (nestedResult) return nestedResult;
+
   stages.push({
     name: action === "build" ? "Build configuration" : "Test configuration",
     command: "Not run",
     code: null,
     stdout: "",
     stderr:
-      "No supported build/test configuration was found. Add a package.json script, Python project files, go.mod, Cargo.toml, pom.xml, or Gradle build file. You can ask the AI Assistant to help create the missing configuration.",
+      "No supported build/test configuration was found in the project root or its application subfolders. Add a package.json script, Python project files, go.mod, Cargo.toml, pom.xml, or Gradle build file.",
     truncated: false,
   });
   return { action, stages, success: false };

@@ -5,6 +5,20 @@ import path from "node:path";
 import { validateCommand, safePath } from "./security.js";
 // Bound captured command output to prevent large logs from exhausting agent memory.
 const MAX_OUTPUT_BYTES = 128 * 1024;
+const BUILD_SCAN_EXCLUDED_DIRECTORIES = new Set([
+    ".git",
+    ".next",
+    ".nuxt",
+    ".turbo",
+    ".venv",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "out",
+    "target",
+    "vendor",
+]);
 // Keep dependencies, generated output, and common credential stores out of imports.
 const IMPORT_EXCLUDED_DIRECTORIES = new Set([
     ".aws",
@@ -322,6 +336,82 @@ async function resolveCommand(command, args, workingDirectory) {
         }
     }
     throw new Error(`Could not find the ${command} JavaScript CLI. Install Node.js and ${command}, then restart the local agent.`);
+}
+const BUILD_CONFIGURATION_FILES = new Set([
+    "package.json",
+    "go.mod",
+    "Cargo.toml",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "pyproject.toml",
+    "setup.py",
+    "requirements.txt",
+    "index.html",
+]);
+// Find nested application roots without following links or scanning dependency/output trees.
+async function findNestedBuildRoots(projectRoot, action) {
+    const roots = [];
+    let scannedDirectories = 0;
+    const scan = async (directory, depth) => {
+        if (depth > 8)
+            return;
+        scannedDirectories += 1;
+        if (scannedDirectories > 2000) {
+            throw new Error("Project contains too many directories to safely search for build configuration.");
+        }
+        const entries = await fs.readdir(directory, { withFileTypes: true });
+        const names = new Set(entries.filter((entry) => entry.isFile()).map((entry) => entry.name));
+        const hasPythonFiles = entries.some((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".py"));
+        if (names.has("package.json")) {
+            let packageJson;
+            try {
+                packageJson = JSON.parse(await fs.readFile(path.join(directory, "package.json"), "utf8"));
+            }
+            catch (cause) {
+                if (cause instanceof SyntaxError) {
+                    throw new Error(`Invalid package.json in ${directory}`);
+                }
+                throw cause;
+            }
+            const scripts = packageJson.scripts ?? {};
+            const hasActionScript = action === "build"
+                ? typeof scripts.build === "string" && Boolean(scripts.build.trim())
+                : ["test", "test:unit"].some((name) => typeof scripts[name] === "string" &&
+                    Boolean(scripts[name].trim()));
+            if (hasActionScript) {
+                roots.push(directory);
+                return;
+            }
+        }
+        else {
+            const hasConfiguration = [...BUILD_CONFIGURATION_FILES]
+                .filter((name) => name !== "package.json")
+                .some((name) => names.has(name)) || hasPythonFiles;
+            if (hasConfiguration) {
+                roots.push(directory);
+                return;
+            }
+        }
+        for (const entry of entries) {
+            if (!entry.isDirectory() ||
+                BUILD_SCAN_EXCLUDED_DIRECTORIES.has(entry.name.toLowerCase()) ||
+                entry.name.startsWith(".")) {
+                continue;
+            }
+            await scan(path.join(directory, entry.name), depth + 1);
+        }
+    };
+    const entries = await fs.readdir(projectRoot, { withFileTypes: true });
+    for (const entry of entries) {
+        if (!entry.isDirectory() ||
+            BUILD_SCAN_EXCLUDED_DIRECTORIES.has(entry.name.toLowerCase()) ||
+            entry.name.startsWith(".")) {
+            continue;
+        }
+        await scan(path.join(projectRoot, entry.name), 1);
+    }
+    return roots;
 }
 // Create missing workspace directories while refusing symlinks and non-directories.
 async function ensureSafeDirectory(root, relative) {
@@ -941,7 +1031,7 @@ export async function readLocalProject(root, relativeProjectPath) {
     };
 }
 /** Execute one allowlisted command in the workspace and return bounded output. */
-export async function runCommand(root, command, timeoutMs = 120000) {
+export async function runCommand(root, command, timeoutMs = 120000, onOutput) {
     validateCommand(command);
     const [bin, ...args] = command.trim().split(/\s+/);
     const workingDirectory = safePath(root, ".");
@@ -972,6 +1062,7 @@ export async function runCommand(root, command, timeoutMs = 120000) {
                 stdout += captured;
             else
                 stderr += captured;
+            onOutput?.(target, captured);
         };
         const t = setTimeout(() => {
             p.kill();
@@ -999,7 +1090,7 @@ export async function runCommand(root, command, timeoutMs = 120000) {
     });
 }
 /** Detect and run a project's build or test scripts as explicit local stages. */
-export async function runProjectAction(root, relativeProjectPath, action) {
+export async function runProjectAction(root, relativeProjectPath, action, onEvent) {
     const projectRoot = safePath(root, relativeProjectPath);
     const rootRealPath = await fs.realpath(root);
     const safeProjectRoot = await ensureSafeDirectory(rootRealPath, path.relative(rootRealPath, projectRoot));
@@ -1008,21 +1099,44 @@ export async function runProjectAction(root, relativeProjectPath, action) {
     // Record each script independently so the UI can report which stage failed.
     const addStage = async (name, command, timeoutMs = 12 * 60 * 1000) => {
         try {
-            const result = await runCommand(safeProjectRoot, command, timeoutMs);
-            stages.push({ name, command, ...result });
+            onEvent?.({ type: "stage-start", name, command });
+            const result = await runCommand(safeProjectRoot, command, timeoutMs, (stream, text) => onEvent?.({ type: "output", stream, text }));
+            const stage = { name, command, ...result };
+            stages.push(stage);
+            onEvent?.({ type: "stage-complete", stage });
             return result.code === 0;
         }
         catch (cause) {
-            stages.push({
+            const stage = {
                 name,
                 command,
                 code: null,
                 stdout: "",
                 stderr: cause instanceof Error ? cause.message : "Command failed",
                 truncated: false,
-            });
+            };
+            stages.push(stage);
+            onEvent?.({ type: "stage-complete", stage });
             return false;
         }
+    };
+    const runNestedBuilds = async () => {
+        const nestedBuildRoots = await findNestedBuildRoots(safeProjectRoot, action);
+        if (nestedBuildRoots.length === 0)
+            return null;
+        const nestedResults = [];
+        for (const buildRoot of nestedBuildRoots) {
+            const relativeBuildRoot = path
+                .relative(rootRealPath, buildRoot)
+                .split(path.sep)
+                .join("/");
+            nestedResults.push(await runProjectAction(root, relativeBuildRoot, action, onEvent));
+        }
+        return {
+            action,
+            stages: nestedResults.flatMap((result) => result.stages),
+            success: nestedResults.every((result) => result.success),
+        };
     };
     let manifest = null;
     try {
@@ -1053,6 +1167,125 @@ export async function runProjectAction(root, relativeProjectPath, action) {
             ? "yarn"
             : "npm";
     if (manifest) {
+        const hasRequestedScript = action === "build"
+            ? hasScript("build")
+            : hasScript("test") || hasScript("test:unit");
+        if (!hasRequestedScript) {
+            const nestedResult = await runNestedBuilds();
+            if (nestedResult)
+                return nestedResult;
+        }
+        const declaresVite = Object.hasOwn(manifest.dependencies ?? {}, "vite") ||
+            Object.hasOwn(manifest.devDependencies ?? {}, "vite") ||
+            Object.values(scripts).some((script) => typeof script === "string" && /\bvite(?:\s|$)/.test(script));
+        if (action === "build" && hasScript("build") && declaresVite) {
+            const rootEntries = await fs.readdir(safeProjectRoot, {
+                withFileTypes: true,
+            });
+            const rootNames = new Set(rootEntries.map((entry) => entry.name));
+            const hasViteConfig = [...rootNames].some((name) => /^vite\.config\.[cm]?[jt]sx?$/.test(name));
+            if (!rootNames.has("index.html") && !hasViteConfig) {
+                const entryCandidates = [
+                    "src/main.tsx",
+                    "src/main.jsx",
+                    "src/main.ts",
+                    "src/main.js",
+                    "src/index.tsx",
+                    "src/index.jsx",
+                    "src/index.ts",
+                    "src/index.js",
+                    "main.tsx",
+                    "main.jsx",
+                    "main.ts",
+                    "main.js",
+                ];
+                let entryPoint = null;
+                for (const candidate of entryCandidates) {
+                    try {
+                        const entryStat = await fs.lstat(safePath(safeProjectRoot, candidate));
+                        if (entryStat.isFile() && !entryStat.isSymbolicLink()) {
+                            entryPoint = candidate;
+                            break;
+                        }
+                    }
+                    catch (cause) {
+                        if (cause.code !== "ENOENT")
+                            throw cause;
+                    }
+                }
+                const stageName = "Prepare Vite entry";
+                const command = "Create index.html";
+                onEvent?.({ type: "stage-start", name: stageName, command });
+                if (!entryPoint) {
+                    const stage = {
+                        name: stageName,
+                        command,
+                        code: null,
+                        stdout: "",
+                        stderr: "This Vite project has no index.html or conventional main/index source entry. Add an index.html entry file or a vite.config.* with a custom build entry.",
+                        truncated: false,
+                    };
+                    stages.push(stage);
+                    onEvent?.({ type: "stage-complete", stage });
+                    return { action, stages, success: false };
+                }
+                const escapedTitle = (manifest.name || "Vite App")
+                    .replaceAll("&", "&amp;")
+                    .replaceAll("<", "&lt;")
+                    .replaceAll(">", "&gt;")
+                    .replaceAll('"', "&quot;")
+                    .replaceAll("'", "&#39;");
+                const html = [
+                    "<!doctype html>",
+                    '<html lang="en">',
+                    "  <head>",
+                    '    <meta charset="UTF-8" />',
+                    '    <meta name="viewport" content="width=device-width, initial-scale=1.0" />',
+                    `    <title>${escapedTitle}</title>`,
+                    "  </head>",
+                    "  <body>",
+                    '    <div id="root"></div>',
+                    `    <script type="module" src="/${entryPoint.replaceAll("\\", "/")}"></script>`,
+                    "  </body>",
+                    "</html>",
+                    "",
+                ].join("\n");
+                try {
+                    await fs.writeFile(path.join(safeProjectRoot, "index.html"), html, {
+                        encoding: "utf8",
+                        flag: "wx",
+                    });
+                }
+                catch (cause) {
+                    if (cause.code !== "EEXIST") {
+                        const stage = {
+                            name: stageName,
+                            command,
+                            code: null,
+                            stdout: "",
+                            stderr: cause instanceof Error
+                                ? cause.message
+                                : "Could not create the Vite index.html entry.",
+                            truncated: false,
+                        };
+                        stages.push(stage);
+                        onEvent?.({ type: "stage-complete", stage });
+                        return { action, stages, success: false };
+                    }
+                }
+                const stage = {
+                    name: stageName,
+                    command,
+                    code: 0,
+                    stdout: `Created index.html for ${entryPoint} because this Vite project did not have an HTML entry point.\n`,
+                    stderr: "",
+                    truncated: false,
+                };
+                stages.push(stage);
+                onEvent?.({ type: "output", stream: "stdout", text: stage.stdout });
+                onEvent?.({ type: "stage-complete", stage });
+            }
+        }
         try {
             await fs.access(path.join(safeProjectRoot, "node_modules"));
         }
@@ -1172,12 +1405,15 @@ export async function runProjectAction(root, relativeProjectPath, action) {
             return { action, stages, success: true };
         }
     }
+    const nestedResult = await runNestedBuilds();
+    if (nestedResult)
+        return nestedResult;
     stages.push({
         name: action === "build" ? "Build configuration" : "Test configuration",
         command: "Not run",
         code: null,
         stdout: "",
-        stderr: "No supported build/test configuration was found. Add a package.json script, Python project files, go.mod, Cargo.toml, pom.xml, or Gradle build file. You can ask the AI Assistant to help create the missing configuration.",
+        stderr: "No supported build/test configuration was found in the project root or its application subfolders. Add a package.json script, Python project files, go.mod, Cargo.toml, pom.xml, or Gradle build file.",
         truncated: false,
     });
     return { action, stages, success: false };

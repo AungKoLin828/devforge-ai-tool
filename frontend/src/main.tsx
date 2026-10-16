@@ -14,6 +14,7 @@ import {
   type LocalWorkspaceEntry,
   type LocalWorkspaceFile,
   type LocalWorkspaceListing,
+  type LocalProjectStreamEvent,
   type GitHubRepository,
   type User,
 } from "./api";
@@ -54,7 +55,7 @@ function UserGuide() {
       number: "04",
       title: "Build and test safely",
       description:
-        "DevForge's Build locally and Test locally actions ask before running scripts, but first copy the saved generated files onto the PC and may overwrite matching local edits. After editing in VS Code, run checks in its terminal if you need to preserve those edits. Local edits are not automatically saved back to DevForge.",
+        "DevForge's Build locally and Test locally actions ask before running scripts, stream live stdout/stderr into the Local terminal output panel, and first copy saved generated files onto the PC, which may overwrite matching local edits. After editing in VS Code, run checks in its terminal if you need to preserve those edits. Local edits are not automatically saved back to DevForge.",
     },
     {
       number: "05",
@@ -470,6 +471,11 @@ function App({ user }: { user: User }) {
   const [githubError, setGitHubError] = useState<string | null>(null);
   // Local action state controls build/test output panels independently of AI runs.
   const [localAction, setLocalAction] = useState<"build" | "test" | null>(null);
+  const [localConsoleOutput, setLocalConsoleOutput] = useState("");
+  const [localConsoleStatus, setLocalConsoleStatus] = useState<
+    "idle" | "running" | "success" | "failed"
+  >("idle");
+  const localConsoleRef = useRef<HTMLPreElement>(null);
   const [localResult, setLocalResult] = useState<LocalProjectResult | null>(
     null,
   );
@@ -490,6 +496,22 @@ function App({ user }: { user: User }) {
     review: runReview,
     reset: resetGeneration,
   } = useProjectGeneration();
+
+  useEffect(() => {
+    if (localConsoleRef.current) {
+      localConsoleRef.current.scrollTop = localConsoleRef.current.scrollHeight;
+    }
+  }, [localConsoleOutput]);
+
+  function appendLocalConsole(text: string) {
+    setLocalConsoleOutput((current) => {
+      const next = current + text;
+      const maxLength = 100_000;
+      return next.length > maxLength
+        ? `[Earlier output omitted]\n${next.slice(-maxLength)}`
+        : next;
+    });
+  }
 
   // Resolve any pending confirmation before closing the shared message modal.
   function closeModal(confirmed = false) {
@@ -1066,6 +1088,9 @@ function App({ user }: { user: User }) {
 
     setLocalAction(action);
     setLocalResult(null);
+    setLocalConsoleOutput("");
+    setLocalConsoleStatus("running");
+    appendLocalConsole(`$ Preparing local ${label}...\n`);
     const localPath = `projects/${selected.id}`;
 
     try {
@@ -1079,26 +1104,59 @@ function App({ user }: { user: User }) {
         `Copied ${synced.files} generated files to ${synced.path} on ${localAgentInfo.machine}.`,
       ]);
 
-      const response = await api.localAgent.runProject(
+      appendLocalConsole(
+        `Copied ${synced.files} generated files to ${synced.path}\n`,
+      );
+      const responseResult = await api.localAgent.runProjectStreaming(
         localAgentToken,
         action,
         synced.path,
+        (event: LocalProjectStreamEvent) => {
+          if (event.type === "notice") {
+            appendLocalConsole(`\n[notice] ${event.message}\n\n`);
+          } else if (event.type === "stage-start") {
+            appendLocalConsole(`\n> ${event.name}: ${event.command}\n`);
+          } else if (event.type === "output") {
+            appendLocalConsole(
+              `${event.stream === "stderr" ? "[stderr] " : ""}${event.text}`,
+            );
+          } else if (event.type === "stage-complete") {
+            appendLocalConsole(
+              `\n[exit ${event.stage.code ?? "unknown"}]\n`,
+            );
+            if (
+              /No supported build\/test configuration was found/i.test(
+                event.stage.stderr,
+              )
+            ) {
+              appendLocalConsole(
+                "[notice] Restart the Local Agent from the updated DevForge source so it can detect build configurations inside application subfolders. If this remains afterward, the generated project needs a supported build configuration.\n",
+              );
+            }
+            if (event.stage.truncated) {
+              appendLocalConsole("[Output truncated at 128 KB]\n");
+            }
+          } else if (event.type === "complete") {
+            setLocalResult(event.result);
+            setLocalConsoleStatus(event.result.success ? "success" : "failed");
+          }
+        },
       );
-      setLocalResult(response.result);
-      for (const stage of response.result.stages) {
+      for (const stage of responseResult.stages) {
         const state = stage.code === 0 ? "passed" : "failed";
         setLogs((current) => [
           ...current,
           `${stage.name} ${state} (${stage.command}, exit ${stage.code ?? "unknown"}).`,
         ]);
       }
-      if (!response.result.stages.length) {
+      if (!responseResult.stages.length) {
         setLogs((current) => [
           ...current,
           `The local agent did not run a ${label} command.`,
         ]);
       }
-      if (!response.result.success) {
+      if (!responseResult.success) {
+        setLocalConsoleStatus("failed");
         setLogs((current) => [
           ...current,
           `Local ${label} failed. See the command output below.`,
@@ -1118,6 +1176,8 @@ function App({ user }: { user: User }) {
     } catch (cause) {
       const message =
         cause instanceof Error ? cause.message : `Local ${label} failed.`;
+      setLocalConsoleStatus("failed");
+      appendLocalConsole(`\nERROR: ${message}\n`);
       setLocalAgentError(message);
       setLogs((current) => [...current, `ERROR: ${message}`]);
     } finally {
@@ -2344,6 +2404,43 @@ function App({ user }: { user: User }) {
                     only run projects you trust.
                   </p>
                 </div>
+                {localConsoleOutput && (
+                  <section
+                    className="mt-4 overflow-hidden rounded-xl border border-slate-800 bg-[#05070b]"
+                    aria-label="Local build and test console"
+                  >
+                    <div className="flex items-center justify-between border-b border-slate-800 px-4 py-2.5">
+                      <div className="flex items-center gap-2 text-xs font-medium text-slate-300">
+                        <span className="font-mono text-indigo-300">&gt;_</span>
+                        Local terminal output
+                      </div>
+                      <span
+                        className={`text-[11px] font-semibold uppercase tracking-wide ${
+                          localConsoleStatus === "running"
+                            ? "text-amber-300"
+                            : localConsoleStatus === "success"
+                              ? "text-emerald-300"
+                              : localConsoleStatus === "failed"
+                                ? "text-red-300"
+                                : "text-slate-400"
+                        }`}
+                      >
+                        {localAction
+                          ? `${localAction} running`
+                          : localConsoleStatus}
+                      </span>
+                    </div>
+                    <pre
+                      ref={localConsoleRef}
+                      role="log"
+                      aria-live="polite"
+                      aria-relevant="additions"
+                      className="max-h-96 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-5 text-slate-200"
+                    >
+                      {localConsoleOutput}
+                    </pre>
+                  </section>
+                )}
                 {localResult && (
                   <div className="mt-4 space-y-3">
                     {localResult.stages.map((stage, index) => (

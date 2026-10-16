@@ -14,7 +14,7 @@ There is no dedicated DevForge VS Code extension at this time. You can use VS Co
 4. Open that folder in VS Code using **File → Open Folder**, or from PowerShell run `code "<DEVFORGE_WORKSPACE>\projects\<project-id>"`. Use the workspace root reported by the Local Agent for `<DEVFORGE_WORKSPACE>`.
 5. Edit the files in VS Code. Those local edits do not automatically update the code artifact stored in DevForge.
 
-**Important:** DevForge's **Sync files to PC**, **Build locally**, **Test locally**, and GitHub push workflows copy the saved generated files onto the PC and can overwrite matching edits in the project folder. After editing files locally, run build/test commands in the VS Code terminal and use Git in VS Code (or its terminal) to commit and push those changes if you want to preserve them. Do not run a DevForge operation that syncs generated files until you are ready for the saved DevForge version to overwrite matching local files.
+**Important:** DevForge's **Sync files to PC**, **Build locally**, **Test locally**, and GitHub push workflows copy the saved generated files onto the PC and can overwrite matching edits in the project folder. Build/test stream live stdout and stderr into the **Local terminal output** panel in DevForge; commands execute on your PC through the Local Agent, not in the VS Code integrated terminal. After editing files locally, run build/test commands in the VS Code terminal and use Git in VS Code (or its terminal) to commit and push those changes if you want to preserve them. Do not run a DevForge operation that syncs generated files until you are ready for the saved DevForge version to overwrite matching local files.
 
 ## Important architecture
 
@@ -43,6 +43,8 @@ There is no dedicated DevForge VS Code extension at this time. You can use VS Co
 12. To bring in an existing local project, connect the Local Agent and choose a folder under its workspace in **Import a folder from this workspace**. Folders directly under the workspace and project folders under its `projects/` directory are listed. Review the confirmation before uploading: import skips dependency/build output directories, environment secret files, and common private-key files; it accepts up to 300 text files and 2 MB. Imported files are stored as a `CODE` artifact in PostgreSQL and can be AI-reviewed or copied to an isolated DevForge workspace folder for local build/test.
 13. Use **Local workspace files** to browse and edit text files under the agent workspace. **Save to PC** writes to the selected existing file. Hidden/secret files, dependency folders, symlinks, binary files and files larger than 1 MB are not available in the browser editor; edits are local and are not automatically uploaded into a DevForge project artifact.
 14. Generated artifacts stay in your DevForge account until copied to your computer. Select **Sync files to PC** to copy them under `<DEVFORGE_WORKSPACE>/projects/<project-id>` and open that folder in **Local workspace files**. **Build locally** and **Test locally** also sync the files before running project scripts.
+
+When a Vite project has a conventional `main` or `index` source entry but is missing its root `index.html`, the updated Local Agent creates the standard HTML entry before building and reports that step in **Local terminal output**. It does not replace existing HTML files or projects with a custom `vite.config.*`. Vite packages are selected for builds only when they define a build script, so unrelated nested packages without build scripts are skipped.
 
 ## Create and start the Local Agent on Windows
 
@@ -86,6 +88,8 @@ You do **not** need to clone or download the DevForge application repository, an
 
 The agent listens on `127.0.0.1` only and should be started on the same PC and browser you use to connect. If the app cannot connect, check that the agent terminal is still running, the token matches, and port `45821` is available. The source of the standalone installer is [agent/install.ps1](./agent/install.ps1); it fetches only the agent runtime files from this repository.
 
+If Build/Test reports that only Node.js projects are supported or says the agent cannot stream output, the connected Local Agent is older than the web app. Stop that agent and start the updated source from the DevForge repository with `npm.cmd run agent:dev`, then reconnect using the new pairing token. For the standalone installation, rerun its installer after the updated runtime is available in the repository's published branch.
+
 ## Prisma setup
 
 This starter is pinned to Prisma ORM **7.10.0**. `prisma`, `@prisma/client`, and `@prisma/adapter-pg` are intentionally kept on the same exact version. The generated Prisma Client is not committed; `npm run prisma:generate` creates it under `src/generated/prisma/`.
@@ -96,12 +100,12 @@ If you previously installed a broken Prisma package, remove `node_modules` and `
 
 ## Production notes
 
-Use a managed Postgres database (including Netlify Database if available for the site), set production environment variables in Netlify, and never expose secrets through `VITE_*`. The included Local Agent binds to loopback only and uses a random pairing token unless explicitly configured. By default, it accepts browser requests only from localhost development and the production site; set `DEVFORGE_ALLOWED_ORIGINS` to a comma-separated allowlist for other trusted origins. Build/test supports Node.js `package.json` scripts, Python syntax/unit-test commands, Go modules, Rust Cargo projects, Maven and Gradle projects. Static projects containing `index.html` need no build step; unsupported/missing build configurations now return an actionable result instead of an HTTP error. Local builds/tests can run for up to 12 minutes per command; the browser allows up to 25 minutes for a multi-stage operation. The authenticated AI Assistant chat accepts follow-up project questions using the latest saved project context. Before public release, add a signed native installer, OS credential storage, CSP/security headers, centralized rate limiting, error tracking and automated CI security scans.
+Use a managed Postgres database (including Netlify Database if available for the site), set production environment variables in Netlify, and never expose secrets through `VITE_*`. The included Local Agent binds to loopback only and uses a random pairing token unless explicitly configured. By default, it accepts browser requests only from localhost development and the production site; set `DEVFORGE_ALLOWED_ORIGINS` to a comma-separated allowlist for other trusted origins. Build/test supports Node.js `package.json` scripts, Python syntax/unit-test commands, Go modules, Rust Cargo projects, Maven and Gradle projects in the project root or nested application folders. Static projects containing `index.html` need no build step; unsupported/missing build configurations return an actionable result instead of an HTTP error. Local builds/tests can run for up to 12 minutes per command; the browser allows up to 25 minutes for a multi-stage operation. The authenticated AI Assistant chat accepts follow-up project questions using the latest saved project context. Before public release, add a signed native installer, OS credential storage, CSP/security headers, centralized rate limiting, error tracking and automated CI security scans.
 
 ## Phases
 
 1. Foundation: React/Vite/Netlify/Prisma/GitHub OAuth.
-2. Local Agent: workspace-restricted project import, generated-file sync and Node.js build/test execution.
+2. Local Agent: workspace-restricted project import, generated-file sync and build/test execution for Node.js, Python, Go, Rust, Maven and Gradle projects.
 3. Browser IDE foundation: explorer/editor-oriented shell and project workspace.
 4. AI: provider abstraction, OpenRouter/OpenAI adapters and project generation.
 5. Autonomous workflow: project runs, artifacts and agent jobs.

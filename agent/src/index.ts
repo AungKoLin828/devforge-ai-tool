@@ -269,6 +269,47 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (
+      (req.url === "/project/build/stream" ||
+        req.url === "/project/test/stream") &&
+      req.method === "POST"
+    ) {
+      const body = await readBody(req);
+      const action = req.url === "/project/build/stream" ? "build" : "test";
+      const headers: Record<string, string> = {
+        "content-type": "application/x-ndjson; charset=utf-8",
+        "cache-control": "no-store, no-transform",
+        "x-accel-buffering": "no",
+        vary: "Origin",
+      };
+      if (origin) {
+        headers["access-control-allow-origin"] = origin;
+        headers["access-control-allow-headers"] = "authorization,content-type";
+        headers["access-control-allow-methods"] = "GET,POST,OPTIONS";
+      }
+      res.writeHead(200, headers);
+      res.flushHeaders();
+      const sendEvent = (event: unknown) => {
+        if (!res.destroyed) res.write(`${JSON.stringify(event)}\n`);
+      };
+
+      try {
+        const result = await runProjectAction(
+          root,
+          String(body.path || ""),
+          action,
+          sendEvent,
+        );
+        sendEvent({ type: "complete", result });
+      } catch (cause) {
+        sendEvent({
+          type: "error",
+          error: cause instanceof Error ? cause.message : "Project action failed",
+        });
+      }
+      return res.end();
+    }
+
+    if (
       (req.url === "/project/build" || req.url === "/project/test") &&
       req.method === "POST"
     ) {

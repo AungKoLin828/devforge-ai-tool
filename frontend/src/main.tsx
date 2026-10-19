@@ -5,6 +5,7 @@ import React, {
   useSyncExternalStore,
 } from "react";
 import { createRoot } from "react-dom/client";
+import { strToU8, zipSync } from "fflate";
 import {
   api,
   getApiActivitySnapshot,
@@ -19,6 +20,99 @@ import {
   type User,
 } from "./api";
 import { useProjectGeneration } from "./hooks/useProjectGeneration";
+
+type EditorDiagnostic = {
+  file: string | null;
+  line: number | null;
+  column: number | null;
+  message: string;
+  severity: "error" | "warning";
+};
+
+const DIAGNOSTIC_SOURCE_EXTENSIONS =
+  "(?:tsx?|jsx?|mjs|cjs|vue|svelte|py|go|rs|java|c|cc|cpp|h|hpp|css|json|html)";
+
+function normalizeDiagnosticPath(value: string) {
+  return value.replaceAll("\\", "/").replace(/^\.?\//, "").toLowerCase();
+}
+
+function parseBuildDiagnostics(result: LocalProjectResult | null) {
+  if (!result) return [];
+  const diagnostics: EditorDiagnostic[] = [];
+  const seen = new Set<string>();
+  const patterns = [
+    new RegExp(
+      `^(.+?\\.${DIAGNOSTIC_SOURCE_EXTENSIONS})\\((\\d+),(\\d+)\\):\\s*(error|warning)(?:\\s+TS\\d+)?:\\s*(.+)$`,
+      "i",
+    ),
+    new RegExp(
+      `^(.+?\\.${DIAGNOSTIC_SOURCE_EXTENSIONS}):(\\d+):(\\d+):\\s*(error|warning):\\s*(.+)$`,
+      "i",
+    ),
+    new RegExp(
+      `^(.+?\\.${DIAGNOSTIC_SOURCE_EXTENSIONS}):(\\d+):\\s*(error|warning):\\s*(.+)$`,
+      "i",
+    ),
+    new RegExp(
+      `^(.+?\\.${DIAGNOSTIC_SOURCE_EXTENSIONS})\\s+(\\d+):(\\d+)\\s+(error|warning)\\s+(.+)$`,
+      "i",
+    ),
+  ];
+
+  for (const stage of result.stages) {
+    if (stage.code === 0) continue;
+    const output = `${stage.stdout}\n${stage.stderr}`.replace(
+      /\u001b\[[0-9;]*m/g,
+      "",
+    );
+    for (const rawLine of output.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      let diagnostic: EditorDiagnostic | null = null;
+      const unresolvedImport = line.match(
+        /Could not resolve import ["']([^"']+)["'] from ["']([^"']+)["']/i,
+      );
+      if (unresolvedImport) {
+        diagnostic = {
+          file: unresolvedImport[2],
+          line: null,
+          column: null,
+          message: `Cannot resolve import "${unresolvedImport[1]}".`,
+          severity: "error",
+        };
+      } else {
+        for (const pattern of patterns) {
+          const match = line.match(pattern);
+          if (!match) continue;
+          const hasColumn = pattern !== patterns[2];
+          const severityGroup = hasColumn ? 4 : 3;
+          diagnostic = {
+            file: match[1],
+            line: Number(match[2]),
+            column: hasColumn ? Number(match[3]) : null,
+            severity: match[severityGroup].toLowerCase() as "error" | "warning",
+            message: match[severityGroup + 1],
+          };
+          break;
+        }
+      }
+      if (!diagnostic && /\b(error|failed to compile|build failed)\b/i.test(line)) {
+        diagnostic = {
+          file: null,
+          line: null,
+          column: null,
+          severity: "error",
+          message: line.slice(0, 500),
+        };
+      }
+      if (!diagnostic) continue;
+      const key = `${diagnostic.file ?? ""}:${diagnostic.line ?? ""}:${diagnostic.message}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      diagnostics.push(diagnostic);
+    }
+  }
+  return diagnostics.slice(0, 100);
+}
 
 // Text-only brand lockup shared by the landing page and dashboard headers.
 function BrandWordmark() {
@@ -49,13 +143,13 @@ function UserGuide() {
       number: "03",
       title: "Open and edit the project in VS Code",
       description:
-        "Start the Local Agent on your PC, enter its pairing token in the signed-in workspace, and connect. Sync generated files, then open <workspace>\\projects\\<project-id> in VS Code (File → Open Folder, or run code \"<folder-path>\" in PowerShell). You can also open an imported project folder. DevForge does not currently provide a dedicated VS Code extension.",
+        "For a simple download, choose Download ZIP in the project workspace; no Local Agent or pairing token is needed. Extract the downloaded archive and open the project folder in VS Code. To sync directly into the DevForge workspace, or use local build/test and GitHub operations, start the Local Agent and connect with its pairing token. DevForge does not currently provide a dedicated VS Code extension.",
     },
     {
       number: "04",
       title: "Build and test safely",
       description:
-        "DevForge's Build locally and Test locally actions ask before running scripts, stream live stdout/stderr into the Local terminal output panel, and first copy saved generated files onto the PC, which may overwrite matching local edits. After editing in VS Code, run checks in its terminal if you need to preserve those edits. Local edits are not automatically saved back to DevForge.",
+        "Build locally and Test locally ask before running scripts and stream output to the local terminal panel. Use Build edited files after changing a synced project in the Code Editor to keep those edits; the standard Build locally and Test locally actions sync saved generated files first and can overwrite local edits.",
     },
     {
       number: "05",
@@ -413,6 +507,16 @@ function App({ user }: { user: User }) {
     getApiActivitySnapshot,
     () => 0,
   );
+  const hasApiActivity = activeApiRequests > 0;
+  const [showApiLoading, setShowApiLoading] = useState(false);
+  useEffect(() => {
+    if (!hasApiActivity) {
+      setShowApiLoading(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => setShowApiLoading(true), 250);
+    return () => window.clearTimeout(timeout);
+  }, [hasApiActivity]);
   const [modal, setModal] = useState<ModalState | null>(null);
   const modalResolver = useRef<((confirmed: boolean) => void) | null>(null);
   const [selected, setSelected] = useState<any>();
@@ -446,7 +550,20 @@ function App({ user }: { user: User }) {
     useState<LocalWorkspaceFile | null>(null);
   const [workspaceEditorDraft, setWorkspaceEditorDraft] = useState("");
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
+  const [generatedExplorerExpanded, setGeneratedExplorerExpanded] =
+    useState(true);
+  const [generatedExplorerHeight, setGeneratedExplorerHeight] = useState<
+    "min" | "max"
+  >("min");
+  const [editorJump, setEditorJump] = useState<{
+    line: number;
+    column: number | null;
+  } | null>(null);
+  const [editorCursor, setEditorCursor] = useState({ line: 1, column: 1 });
+  const workspaceEditorRef = useRef<HTMLTextAreaElement>(null);
+  const editorGutterRef = useRef<HTMLDivElement>(null);
   const [syncingGeneratedFiles, setSyncingGeneratedFiles] = useState(false);
+  const [downloadingProjectZip, setDownloadingProjectZip] = useState(false);
   // GitHub selection, workspace path, and mutually exclusive repository operations.
   const [githubRepositories, setGitHubRepositories] = useState<
     GitHubRepository[]
@@ -502,6 +619,32 @@ function App({ user }: { user: User }) {
       localConsoleRef.current.scrollTop = localConsoleRef.current.scrollHeight;
     }
   }, [localConsoleOutput]);
+
+  useEffect(() => {
+    if (!editorJump || !workspaceEditorFile || !workspaceEditorRef.current) {
+      return;
+    }
+    const editor = workspaceEditorRef.current;
+    const lineStarts = [0];
+    for (let index = 0; index < workspaceEditorDraft.length; index += 1) {
+      if (workspaceEditorDraft[index] === "\n") lineStarts.push(index + 1);
+    }
+    const start = lineStarts[Math.max(0, editorJump.line - 1)] ?? 0;
+    const position = Math.min(
+      start + Math.max(0, (editorJump.column ?? 1) - 1),
+      workspaceEditorDraft.length,
+    );
+    editor.focus();
+    editor.setSelectionRange(position, position);
+    editor.scrollTop = Math.max(0, (editorJump.line - 1) * 24);
+    setEditorJump(null);
+  }, [editorJump, workspaceEditorDraft, workspaceEditorFile]);
+
+  function updateEditorCursor(textarea: HTMLTextAreaElement) {
+    const beforeCursor = textarea.value.slice(0, textarea.selectionStart);
+    const lines = beforeCursor.split("\n");
+    setEditorCursor({ line: lines.length, column: lines.at(-1)!.length + 1 });
+  }
 
   function appendLocalConsole(text: string) {
     setLocalConsoleOutput((current) => {
@@ -926,6 +1069,8 @@ function App({ user }: { user: User }) {
       );
       setWorkspaceEditorFile(response.file);
       setWorkspaceEditorDraft(response.file.content);
+      setEditorCursor({ line: 1, column: 1 });
+      setEditorJump(null);
     } catch (cause) {
       setWorkspaceBrowserError(
         cause instanceof Error ? cause.message : "Could not open this file.",
@@ -934,8 +1079,8 @@ function App({ user }: { user: User }) {
   }
 
   // Save editor content only if the on-disk file has not changed since it was read.
-  async function saveWorkspaceFile() {
-    if (!workspaceEditorFile || workspaceSaving) return;
+  async function saveWorkspaceFile(): Promise<boolean> {
+    if (!workspaceEditorFile || workspaceSaving) return false;
     setWorkspaceSaving(true);
     setWorkspaceBrowserError(null);
     try {
@@ -958,12 +1103,80 @@ function App({ user }: { user: User }) {
         "File saved",
         `Saved ${workspaceEditorFile.path} to your PC.`,
       );
+      return true;
     } catch (cause) {
       setWorkspaceBrowserError(
         cause instanceof Error ? cause.message : "Could not save this file.",
       );
+      return false;
     } finally {
       setWorkspaceSaving(false);
+    }
+  }
+
+  // Open a build diagnostic in the matching generated file and select its reported line.
+  async function openBuildDiagnostic(diagnostic: EditorDiagnostic) {
+    if (!diagnostic.file || !selected || !localAgentToken) return;
+    if (
+      workspaceEditorFile &&
+      workspaceEditorDraft !== workspaceEditorFile.content &&
+      !(await confirmModal(
+        "Discard unsaved changes?",
+        "Opening the build error source will replace the current editor contents. Save your changes first or discard them to continue.",
+        "Discard changes",
+      ))
+    ) {
+      return;
+    }
+    const diagnosticPath = normalizeDiagnosticPath(diagnostic.file);
+    const generatedFile = generatedFiles.find((file: any) => {
+      if (typeof file?.path !== "string") return false;
+      const candidate = normalizeDiagnosticPath(file.path);
+      return (
+        diagnosticPath === candidate ||
+        diagnosticPath.endsWith(`/${candidate}`) ||
+        candidate.endsWith(`/${diagnosticPath}`)
+      );
+    });
+    if (!generatedFile || typeof generatedFile.path !== "string") {
+      setWorkspaceBrowserError(
+        `Could not match ${diagnostic.file} to a generated project file.`,
+      );
+      return;
+    }
+
+    const projectPath = `projects/${selected.id}`;
+    const relativePath = `${projectPath}/${generatedFile.path.replaceAll("\\", "/")}`;
+    setWorkspaceBrowserError(null);
+    try {
+      const response = await api.localAgent.readWorkspaceFile(
+        localAgentToken,
+        relativePath,
+      );
+      setWorkspaceEditorFile(response.file);
+      setWorkspaceEditorDraft(response.file.content);
+      setEditorCursor({
+        line: diagnostic.line ?? 1,
+        column: diagnostic.column ?? 1,
+      });
+      setEditorJump(
+        diagnostic.line
+          ? { line: diagnostic.line, column: diagnostic.column }
+          : null,
+      );
+      if (workspaceListing?.path !== projectPath) {
+        await loadWorkspaceDirectory(projectPath);
+      }
+      document.getElementById("local-workspace-editor")?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    } catch (cause) {
+      setWorkspaceBrowserError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not open the source file for this build error.",
+      );
     }
   }
 
@@ -1069,19 +1282,38 @@ function App({ user }: { user: User }) {
     }
   }
 
-  // Sync saved files to the PC and explicitly confirm before executing project scripts.
-  async function runLocalAction(action: "build" | "test") {
+  // Optionally sync saved files first, then explicitly confirm before running scripts.
+  async function runLocalAction(
+    action: "build" | "test",
+    syncBeforeRun = true,
+  ) {
     if (!selected || !localAgentInfo || !generatedFiles.length || localAction) {
       return;
     }
+    const localPath = `projects/${selected.id}`;
+    const workspaceMatchesProject =
+      workspaceListing?.path === localPath ||
+      workspaceListing?.path.startsWith(`${localPath}/`);
+    if (!syncBeforeRun && !workspaceMatchesProject) return;
 
     const label = action === "build" ? "build" : "test";
     if (
       !(await confirmModal(
-        `Run local ${label}`,
-        `This will copy the generated files to your PC (overwriting matching files in this DevForge project folder) and run the project's ${label} scripts locally. Project scripts may execute arbitrary code. Continue only if you trust this generated project.`,
+        syncBeforeRun ? `Run local ${label}` : `Run ${label} on local edits`,
+        syncBeforeRun
+          ? `This will copy the generated files to your PC (overwriting matching files in this DevForge project folder) and run the project's ${label} scripts locally. Project scripts may execute arbitrary code. Continue only if you trust this generated project.`
+          : `This will run the ${label} scripts against the existing local project files without syncing or overwriting them. Project scripts may execute arbitrary code. Continue only if you trust this project.`,
         `Run ${label}`,
       ))
+    ) {
+      return;
+    }
+
+    if (
+      !syncBeforeRun &&
+      workspaceEditorFile &&
+      workspaceEditorDraft !== workspaceEditorFile.content &&
+      !(await saveWorkspaceFile())
     ) {
       return;
     }
@@ -1091,26 +1323,33 @@ function App({ user }: { user: User }) {
     setLocalConsoleOutput("");
     setLocalConsoleStatus("running");
     appendLocalConsole(`$ Preparing local ${label}...\n`);
-    const localPath = `projects/${selected.id}`;
 
     try {
-      const synced = await api.localAgent.syncProject(
-        localAgentToken,
-        localPath,
-        generatedFiles,
-      );
-      setLogs((current) => [
-        ...current,
-        `Copied ${synced.files} generated files to ${synced.path} on ${localAgentInfo.machine}.`,
-      ]);
+      let actionPath = localPath;
+      if (syncBeforeRun) {
+        const synced = await api.localAgent.syncProject(
+          localAgentToken,
+          localPath,
+          generatedFiles,
+        );
+        actionPath = synced.path;
+        setLogs((current) => [
+          ...current,
+          `Copied ${synced.files} generated files to ${synced.path} on ${localAgentInfo.machine}.`,
+        ]);
 
-      appendLocalConsole(
-        `Copied ${synced.files} generated files to ${synced.path}\n`,
-      );
+        appendLocalConsole(
+          `Copied ${synced.files} generated files to ${synced.path}\n`,
+        );
+      } else {
+        appendLocalConsole(
+          `Using existing local project files at ${localPath}\n`,
+        );
+      }
       const responseResult = await api.localAgent.runProjectStreaming(
         localAgentToken,
         action,
-        synced.path,
+        actionPath,
         (event: LocalProjectStreamEvent) => {
           if (event.type === "notice") {
             appendLocalConsole(`\n[notice] ${event.message}\n\n`);
@@ -1237,6 +1476,90 @@ function App({ user }: { user: User }) {
       setLogs((current) => [...current, `ERROR: ${message}`]);
     } finally {
       setSyncingGeneratedFiles(false);
+    }
+  }
+
+  // Download the saved project as a ZIP without requiring a Local Agent connection.
+  async function downloadProjectZip() {
+    if (!selected || !generatedFiles.length || downloadingProjectZip) return;
+
+    setDownloadingProjectZip(true);
+    try {
+      await new Promise<void>((resolve) =>
+        window.requestAnimationFrame(() => resolve()),
+      );
+
+      const projectFolder =
+        selected.name
+          ?.normalize("NFKD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-zA-Z0-9._-]+/g, "-")
+          .replace(/^[.-]+|[.-]+$/g, "")
+          .slice(0, 80) || selected.id;
+      const fileTree: Record<string, Record<string, Uint8Array>> = {
+        [projectFolder]: Object.create(null) as Record<string, Uint8Array>,
+      };
+      const seenPaths = new Set<string>();
+
+      for (const file of generatedFiles) {
+        if (
+          !file ||
+          typeof file.path !== "string" ||
+          typeof file.content !== "string"
+        ) {
+          throw new Error("The saved project contains an invalid file.");
+        }
+        const relativePath = file.path.replaceAll("\\", "/");
+        const segments = relativePath.split("/");
+        if (
+          !relativePath ||
+          relativePath.startsWith("/") ||
+          /^[a-zA-Z]:/.test(relativePath) ||
+          segments.some(
+            (segment: string) =>
+              !segment ||
+              segment === "." ||
+              segment === ".." ||
+              /[\u0000-\u001f]/.test(segment),
+          )
+        ) {
+          throw new Error(
+            `The saved project has an unsafe file path: ${file.path}`,
+          );
+        }
+
+        const archivePath = segments.join("/");
+        const pathKey = archivePath.toLowerCase();
+        if (seenPaths.has(pathKey)) {
+          throw new Error(`The saved project has a duplicate file: ${file.path}`);
+        }
+        seenPaths.add(pathKey);
+        fileTree[projectFolder][archivePath] = strToU8(file.content);
+      }
+
+      const archive = zipSync(fileTree, { level: 6 });
+      const blob = new Blob([archive], { type: "application/zip" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${projectFolder}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setLogs((current) => [
+        ...current,
+        `Downloaded ${generatedFiles.length} project files as ${link.download}.`,
+      ]);
+    } catch (cause) {
+      const message =
+        cause instanceof Error
+          ? cause.message
+          : "Could not create a ZIP download for this project.";
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+      showModal("error", "Project download failed", message);
+    } finally {
+      setDownloadingProjectZip(false);
     }
   }
 
@@ -1574,8 +1897,31 @@ function App({ user }: { user: User }) {
   );
   const codeContent = codeArtifact?.content;
   const generatedFiles = Array.isArray(codeContent) ? codeContent : [];
-  const planArtifacts = artifacts.filter(
-    (artifact: any) => artifact.type !== "CODE" && artifact.type !== "REVIEW",
+  const buildDiagnostics = parseBuildDiagnostics(localResult);
+  const selectedWorkspacePath = selected
+    ? `projects/${selected.id}`
+    : "";
+  const workspaceMatchesSelectedProject =
+    workspaceListing?.path === selectedWorkspacePath ||
+    Boolean(
+      selectedWorkspacePath &&
+        workspaceListing?.path.startsWith(`${selectedWorkspacePath}/`),
+    );
+  const editorLineCount = Math.max(1, workspaceEditorDraft.split("\n").length);
+  const editorFileName = workspaceEditorFile?.path.split(/[\\/]/).at(-1) || "";
+  const editorLanguage =
+    editorFileName.split(".").at(-1)?.toUpperCase() || "TEXT";
+  const editorFileDiagnostics = buildDiagnostics.filter(
+    (diagnostic) => {
+      if (!diagnostic.file || !workspaceEditorFile) return false;
+      const errorPath = normalizeDiagnosticPath(diagnostic.file);
+      const editorPath = normalizeDiagnosticPath(workspaceEditorFile.path);
+      return (
+        errorPath === editorPath ||
+        errorPath.endsWith(`/${editorPath}`) ||
+        editorPath.endsWith(`/${errorPath}`)
+      );
+    },
   );
   const reviewArtifacts = artifacts.filter(
     (artifact: any) =>
@@ -1617,7 +1963,7 @@ function App({ user }: { user: User }) {
           </button>
         </div>
       </header>
-      {activeApiRequests > 0 && (
+      {showApiLoading && (
         <div
           className="api-loading-indicator"
           role="status"
@@ -1708,15 +2054,68 @@ function App({ user }: { user: User }) {
               </div>
 
               <div className="mt-6 glass rounded-2xl overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-800 font-semibold">
-                  Explorer
+                <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setGeneratedExplorerExpanded((expanded) => !expanded)
+                    }
+                    aria-expanded={generatedExplorerExpanded}
+                    aria-controls="generated-explorer-files"
+                    className="flex items-center gap-2 rounded-md px-2 py-1 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
+                    title={
+                      generatedExplorerExpanded
+                        ? "Minimize generated files list"
+                        : "Expand generated files list"
+                    }
+                  >
+                    <span
+                      className={`inline-block w-4 text-center text-indigo-300 transition-transform ${
+                        generatedExplorerExpanded ? "rotate-0" : "-rotate-90"
+                      }`}
+                      aria-hidden="true"
+                    >
+                      ▾
+                    </span>
+                    Explorer
+                    <span className="text-xs font-normal text-slate-500">
+                      {generatedFiles.length} files
+                    </span>
+                  </button>
+                  <label className="flex items-center gap-2 text-[11px] text-slate-500">
+                    List height
+                    <select
+                      value={generatedExplorerHeight}
+                      onChange={(event) =>
+                        setGeneratedExplorerHeight(
+                          event.target.value === "max" ? "max" : "min",
+                        )
+                      }
+                      disabled={!generatedExplorerExpanded}
+                      aria-label="Generated Explorer file list height"
+                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-300 outline-none focus:border-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <option value="min">Min</option>
+                      <option value="max">Max</option>
+                    </select>
+                  </label>
                 </div>
-                <div className="p-4 font-mono text-sm">
+                <div
+                  id="generated-explorer-files"
+                  className={`overflow-auto p-4 font-mono text-sm ${
+                    !generatedExplorerExpanded
+                      ? "hidden"
+                      : generatedExplorerHeight === "min"
+                        ? "max-h-[220px]"
+                        : "max-h-[600px]"
+                  }`}
+                >
                   {generatedFiles.length ? (
                     generatedFiles.map((file: any, index: number) => (
                       <div
                         key={file.path || index}
-                        className="py-1 text-slate-300"
+                        className="truncate py-1 text-slate-300"
+                        title={file.path}
                       >
                         {file.path}
                       </div>
@@ -1732,15 +2131,16 @@ function App({ user }: { user: User }) {
               {/* Workspace files are browsed and edited through the loopback agent only. */}
               <section
                 className="mt-5 glass overflow-hidden rounded-2xl"
-                aria-label="Local workspace browser"
+                aria-label="Local code editor and workspace browser"
+                id="local-workspace-editor"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
                   <div>
-                    <h3 className="font-semibold">Local workspace files</h3>
+                    <h3 className="font-semibold">Code Editor</h3>
                     <p className="mt-1 text-xs text-slate-500">
                       {workspaceListing
                         ? `${localAgentInfo?.workspaceRoot}${workspaceListing.path ? `\\${workspaceListing.path.replaceAll("/", "\\")}` : ""}`
-                        : "Connect the Local Agent to browse files on your PC."}
+                        : "Connect the Local Agent to edit files on your PC."}
                     </p>
                   </div>
                   <div className="flex gap-2">
@@ -1759,6 +2159,23 @@ function App({ user }: { user: User }) {
                           Up
                         </button>
                       )}
+                    {workspaceMatchesSelectedProject && (
+                      <button
+                        type="button"
+                        onClick={() => void runLocalAction("build", false)}
+                        disabled={
+                          !localAgentInfo ||
+                          Boolean(localAction) ||
+                          !generatedFiles.length
+                        }
+                        title="Build the existing local project without syncing over your edits."
+                        className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-200 hover:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {localAction === "build"
+                          ? "Building..."
+                          : "Build edited files"}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() =>
@@ -1785,136 +2202,254 @@ function App({ user }: { user: User }) {
                     </button>
                   </div>
                 </div>
-                <div className="grid min-h-[360px] lg:grid-cols-[minmax(220px,0.7fr)_minmax(0,1.3fr)]">
-                  <div className="max-h-[480px] overflow-auto border-b border-slate-800 p-3 lg:border-b-0 lg:border-r">
-                    {!localAgentInfo ? (
-                      <p className="p-2 text-sm text-slate-500">
-                        Connect the Local Agent to view your workspace.
-                      </p>
-                    ) : workspaceEntriesLoading && !workspaceListing ? (
-                      <p className="p-2 text-sm text-slate-500">
-                        Loading workspace files...
-                      </p>
-                    ) : !workspaceListing?.entries.length ? (
-                      <p className="p-2 text-sm text-slate-500">
-                        This folder is empty.
-                      </p>
-                    ) : (
-                      <div className="space-y-1 font-mono text-xs">
-                        {workspaceListing.entries.map((entry) => (
-                          <button
-                            type="button"
-                            key={entry.path}
-                            onClick={() =>
-                              entry.type === "directory"
-                                ? void browseWorkspaceDirectory(entry.path)
-                                : void openWorkspaceFile(entry)
-                            }
-                            disabled={
-                              workspaceEntriesLoading ||
-                              (entry.type === "file" &&
-                                entry.editable === false)
-                            }
-                            title={
-                              entry.type === "file" && entry.editable === false
-                                ? "Files larger than 1 MB are not editable in the browser."
-                                : entry.path
-                            }
-                            className={`block w-full truncate rounded-md px-2 py-2 text-left ${
-                              workspaceEditorFile?.path === entry.path
-                                ? "bg-indigo-500/15 text-indigo-200"
-                                : entry.editable === false
-                                  ? "cursor-not-allowed text-slate-600"
-                                  : "text-slate-300 hover:bg-slate-800"
-                            }`}
-                          >
-                            <span
-                              className="mr-2 text-slate-500"
-                              aria-hidden="true"
-                            >
-                              {entry.type === "directory" ? "▸" : "·"}
-                            </span>
-                            {entry.name}
-                            {entry.type === "file" && (
-                              <span className="float-right text-slate-600">
-                                {entry.size !== undefined
-                                  ? `${Math.ceil(entry.size / 1024)} KB`
+                {buildDiagnostics.length > 0 && (
+                  <div
+                    className="border-b border-slate-800 bg-red-950/15 px-4 py-3"
+                    aria-label="Build diagnostics"
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-red-200">
+                        Build diagnostics
+                      </h4>
+                      <span className="text-[11px] text-slate-400">
+                        {buildDiagnostics.length} issue
+                        {buildDiagnostics.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <div className="max-h-48 space-y-1 overflow-auto">
+                      {buildDiagnostics.map((diagnostic, index) => (
+                        <button
+                          type="button"
+                          key={`${diagnostic.file}-${diagnostic.line}-${diagnostic.message}-${index}`}
+                          onClick={() => void openBuildDiagnostic(diagnostic)}
+                          disabled={!diagnostic.file}
+                          title={
+                            diagnostic.file
+                              ? "Open this source file in the editor."
+                              : "This error does not identify a source file."
+                          }
+                          className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-red-400/10 disabled:cursor-default disabled:hover:bg-transparent"
+                        >
+                          <span className="mt-0.5 shrink-0 text-[10px] font-bold uppercase text-red-300">
+                            {diagnostic.severity}
+                          </span>
+                          <span className="min-w-0 flex-1 text-xs leading-5 text-slate-200">
+                            {diagnostic.file && (
+                              <span className="mr-2 font-mono text-indigo-200">
+                                {diagnostic.file}
+                                {diagnostic.line ? `:${diagnostic.line}` : ""}
+                                {diagnostic.column
+                                  ? `:${diagnostic.column}`
                                   : ""}
                               </span>
                             )}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                            {diagnostic.message}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex min-h-[360px] flex-col">
+                )}
+                <div className="grid min-h-[560px] lg:grid-cols-[minmax(240px,0.65fr)_minmax(0,1.65fr)]">
+                  <div
+                    id="workspace-explorer-list"
+                    className="max-h-[650px] overflow-auto border-b border-slate-800 p-3 lg:border-b-0 lg:border-r"
+                  >
+                      {!localAgentInfo ? (
+                        <p className="p-2 text-sm text-slate-500">
+                          Connect the Local Agent to view your workspace.
+                        </p>
+                      ) : workspaceEntriesLoading && !workspaceListing ? (
+                        <p className="p-2 text-sm text-slate-500">
+                          Loading workspace files...
+                        </p>
+                      ) : !workspaceListing?.entries.length ? (
+                        <p className="p-2 text-sm text-slate-500">
+                          This folder is empty.
+                        </p>
+                      ) : (
+                        <div className="space-y-1 font-mono text-xs">
+                          {workspaceListing.entries.map((entry) => (
+                            <button
+                              type="button"
+                              key={entry.path}
+                              onClick={() =>
+                                entry.type === "directory"
+                                  ? void browseWorkspaceDirectory(entry.path)
+                                  : void openWorkspaceFile(entry)
+                              }
+                              disabled={
+                                workspaceEntriesLoading ||
+                                (entry.type === "file" &&
+                                  entry.editable === false)
+                              }
+                              title={
+                                entry.type === "file" &&
+                                entry.editable === false
+                                  ? "Files larger than 1 MB are not editable in the browser."
+                                  : entry.path
+                              }
+                              className={`block w-full truncate rounded-md px-2 py-2 text-left ${
+                                workspaceEditorFile?.path === entry.path
+                                  ? "bg-indigo-500/15 text-indigo-200"
+                                  : entry.editable === false
+                                    ? "cursor-not-allowed text-slate-600"
+                                    : "text-slate-300 hover:bg-slate-800"
+                              }`}
+                            >
+                              <span
+                                className="mr-2 text-slate-500"
+                                aria-hidden="true"
+                              >
+                                {entry.type === "directory" ? "▸" : "·"}
+                              </span>
+                              {entry.name}
+                              {entry.type === "file" && (
+                                <span className="float-right text-slate-600">
+                                  {entry.size !== undefined
+                                    ? `${Math.ceil(entry.size / 1024)} KB`
+                                    : ""}
+                                </span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                  </div>
+                  <div className="flex min-h-[560px] min-w-0 flex-col bg-[#080d17]">
                     {workspaceEditorFile ? (
                       <>
-                        <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-3 py-2 text-xs">
-                          <span className="truncate font-mono text-slate-300">
-                            {workspaceEditorFile.path}
-                          </span>
-                          {workspaceEditorDraft !==
-                            workspaceEditorFile.content && (
-                            <span className="shrink-0 text-amber-300">
-                              Unsaved changes
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 bg-slate-900/80 px-3 py-2">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="rounded bg-indigo-400/10 px-2 py-1 text-[10px] font-bold tracking-wide text-indigo-200">
+                              {editorLanguage}
                             </span>
-                          )}
+                            <span className="truncate font-mono text-xs text-slate-200">
+                              {workspaceEditorFile.path}
+                            </span>
+                          </div>
+                          <span
+                            className={`shrink-0 text-[11px] ${
+                              workspaceEditorDraft !==
+                              workspaceEditorFile.content
+                                ? "text-amber-300"
+                                : "text-slate-500"
+                            }`}
+                          >
+                            {workspaceEditorDraft !==
+                            workspaceEditorFile.content
+                              ? "● Unsaved"
+                              : "Saved"}
+                          </span>
                         </div>
-                        <textarea
-                          aria-label={`Edit ${workspaceEditorFile.path}`}
-                          spellCheck={false}
-                          value={workspaceEditorDraft}
-                          onChange={(event) =>
-                            setWorkspaceEditorDraft(event.target.value)
-                          }
-                          className="min-h-[320px] flex-1 resize-y bg-slate-950/70 p-4 font-mono text-xs leading-5 text-slate-200 outline-none focus:ring-1 focus:ring-inset focus:ring-indigo-500"
-                        />
+                        <div className="flex min-h-0 flex-1 overflow-hidden">
+                          <div
+                            ref={editorGutterRef}
+                            aria-hidden="true"
+                            className="w-14 shrink-0 overflow-hidden border-r border-slate-800/80 bg-[#070b12] py-4 text-right font-mono text-xs leading-6 text-slate-600"
+                          >
+                            {Array.from(
+                              { length: editorLineCount },
+                              (_, index) => {
+                                const line = index + 1;
+                                const hasIssue = editorFileDiagnostics.some(
+                                  (diagnostic) => diagnostic.line === line,
+                                );
+                                return (
+                                  <div
+                                    key={line}
+                                    className={`h-6 px-3 ${
+                                      hasIssue
+                                        ? "bg-red-400/10 text-red-300"
+                                        : line === editorCursor.line
+                                          ? "text-indigo-300"
+                                          : ""
+                                    }`}
+                                  >
+                                    {line}
+                                  </div>
+                                );
+                              },
+                            )}
+                          </div>
+                          <textarea
+                            ref={workspaceEditorRef}
+                            aria-label={`Edit ${workspaceEditorFile.path}`}
+                            spellCheck={false}
+                            autoCapitalize="off"
+                            autoComplete="off"
+                            wrap="off"
+                            style={{ tabSize: 2 }}
+                            value={workspaceEditorDraft}
+                            onChange={(event) => {
+                              setWorkspaceEditorDraft(event.target.value);
+                              updateEditorCursor(event.target);
+                            }}
+                            onClick={(event) =>
+                              updateEditorCursor(event.currentTarget)
+                            }
+                            onKeyUp={(event) =>
+                              updateEditorCursor(event.currentTarget)
+                            }
+                            onScroll={(event) => {
+                              if (editorGutterRef.current) {
+                                editorGutterRef.current.scrollTop =
+                                  event.currentTarget.scrollTop;
+                              }
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Tab") return;
+                              event.preventDefault();
+                              const editor = event.currentTarget;
+                              editor.setRangeText(
+                                "  ",
+                                editor.selectionStart,
+                                editor.selectionEnd,
+                                "end",
+                              );
+                              setWorkspaceEditorDraft(editor.value);
+                              updateEditorCursor(editor);
+                            }}
+                            className="h-full min-h-[500px] min-w-0 flex-1 resize-none overflow-auto bg-transparent px-4 py-4 font-mono text-[13px] leading-6 text-slate-200 outline-none selection:bg-indigo-500/30 focus:ring-1 focus:ring-inset focus:ring-indigo-500/50"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between gap-3 border-t border-slate-800 bg-slate-900/70 px-3 py-1.5 text-[10px] text-slate-500">
+                          <span>Local file · UTF-8</span>
+                          <span>
+                            Ln {editorCursor.line}, Col {editorCursor.column}
+                            {editorFileDiagnostics.length > 0 &&
+                              ` · ${editorFileDiagnostics.length} issue${editorFileDiagnostics.length === 1 ? "" : "s"}`}
+                          </span>
+                        </div>
                       </>
                     ) : (
                       <div className="grid flex-1 place-items-center p-6 text-center text-sm text-slate-500">
-                        Choose a text file to view or edit it on your PC.
+                        <div>
+                          <div className="mb-2 text-lg text-slate-400">
+                            No file open
+                          </div>
+                          Choose a text file from Explorer, or run a build to
+                          inspect and open source diagnostics here.
+                        </div>
                       </div>
                     )}
                   </div>
                 </div>
                 <div className="border-t border-slate-800 px-4 py-3">
                   <p className="text-xs leading-5 text-slate-500">
-                    Saving writes directly to the selected local file.
+                    Build diagnostics can open their source file at the
+                    reported line. Save writes directly to the selected local
+                    file; use{" "}
+                    <span className="text-emerald-300">
+                      Build edited files
+                    </span>{" "}
+                    to compile local changes without syncing over them.
                     Hidden/secret files, dependency folders, symlinks, binary
                     files, and files over 1 MB are not editable here. Review
                     your changes before saving.
                   </p>
                 </div>
               </section>
-
-              {planArtifacts.length > 0 && (
-                <div className="mt-5 glass rounded-2xl p-4">
-                  <div className="mb-3 flex items-center justify-between">
-                    <div className="text-sm font-semibold">
-                      Saved project artifacts
-                    </div>
-                    <span className="text-xs text-slate-500">
-                      Stored in PostgreSQL
-                    </span>
-                  </div>
-                  <div className="space-y-2">
-                    {planArtifacts.map((artifact: any) => (
-                      <details
-                        key={artifact.id}
-                        className="rounded-lg border border-slate-800 bg-slate-950/60"
-                      >
-                        <summary className="cursor-pointer px-3 py-2.5 text-sm text-slate-300">
-                          {artifact.name}
-                        </summary>
-                        <pre className="max-h-72 overflow-auto border-t border-slate-800 p-3 text-xs leading-5 text-slate-400">
-                          {JSON.stringify(artifact.content, null, 2)}
-                        </pre>
-                      </details>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               {/* Findings are tied to the code artifact reviewed by the latest run. */}
               {latestReview && (
@@ -2022,6 +2557,19 @@ function App({ user }: { user: User }) {
                             generationStatus === "RUNNING"
                           ? "Applying changes..."
                           : "Request modification"}
+                    </button>
+                  )}
+                  {generatedFiles.length > 0 && (
+                    <button
+                      type="button"
+                      disabled={downloadingProjectZip}
+                      onClick={() => void downloadProjectZip()}
+                      className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-emerald-200 disabled:cursor-wait disabled:opacity-50"
+                      title="Download all saved project files as a ZIP. No Local Agent or pairing token required."
+                    >
+                      {downloadingProjectZip
+                        ? "Preparing ZIP..."
+                        : "Download ZIP"}
                     </button>
                   )}
                   <button
@@ -2397,11 +2945,11 @@ function App({ user }: { user: User }) {
                   <p className="mt-3 text-xs leading-5 text-slate-500">
                     Generated files are saved in your DevForge account first.
                     Use <strong>Sync files to PC</strong> to copy them into{" "}
-                    <code>projects/{selected.id}</code>, or choose Build/Test to
-                    sync and execute them. Import uploads up to 300 text files
-                    and 2 MB; dependency/build folders and secret environment
-                    files are skipped. Build and test scripts run on your PC;
-                    only run projects you trust.
+                    <code>projects/{selected.id}</code> with the Local Agent, or
+                    select <strong>Download ZIP</strong> to save a copy without
+                    connecting the agent. Build/Test require the connected
+                    Local Agent and run scripts on your PC. Only run projects
+                    you trust.
                   </p>
                 </div>
                 {localConsoleOutput && (

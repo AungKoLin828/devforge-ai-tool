@@ -355,6 +355,12 @@ export function useProjectGeneration(options: Options = {}) {
       activeRef.current = true;
       controllerRef.current = controller;
       const finishApiActivity = beginApiActivity();
+      let apiActivityFinished = false;
+      const finishEnqueueActivity = () => {
+        if (apiActivityFinished) return;
+        apiActivityFinished = true;
+        finishApiActivity();
+      };
       updateError(null);
       updateStatus("STARTING");
       setOperation(operation);
@@ -382,6 +388,7 @@ export function useProjectGeneration(options: Options = {}) {
         );
 
         const data = await parseResponse<ApiResponse>(response);
+        finishEnqueueActivity();
 
         if (response.status !== 202) {
           throw new Error(
@@ -418,7 +425,7 @@ export function useProjectGeneration(options: Options = {}) {
         onFailure?.(message);
         return null;
       } finally {
-        finishApiActivity();
+        finishEnqueueActivity();
         activeRef.current = false;
         if (controllerRef.current === controller) controllerRef.current = null;
       }

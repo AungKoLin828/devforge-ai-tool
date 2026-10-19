@@ -561,6 +561,36 @@ export const api = {
     }),
   // Local Agent requests are authenticated directly with its browser-held pairing token.
   localAgent: {
+    pair: async () => {
+      const finishActivity = beginApiActivity();
+      try {
+        const response = await fetch(`${LOCAL_AGENT_URL}/pair`, {
+          cache: "no-store",
+          signal: AbortSignal.timeout(5000),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || typeof body.token !== "string") {
+          throw new Error(
+            body.error ||
+              "Could not pair with the Local Agent. Update or reinstall it, then retry.",
+          );
+        }
+        return body.token;
+      } catch (cause) {
+        if (
+          cause instanceof DOMException &&
+          (cause.name === "TimeoutError" || cause.name === "AbortError")
+        ) {
+          throw new Error("Timed out while connecting to the Local Agent.");
+        }
+        if (cause instanceof TypeError) {
+          throw new Error("The Local Agent is not responding yet.");
+        }
+        throw cause;
+      } finally {
+        finishActivity();
+      }
+    },
     health: (token: string) =>
       localAgentRequest<{ ok: true } & LocalAgentInfo>(
         token,

@@ -98,6 +98,13 @@ const server = http.createServer(async (req, res) => {
     return respond(res, { error: "Origin is not allowed" }, 403, origin);
   }
 
+  if (req.url === "/pair" && req.method === "GET") {
+    if (!origin || !allowedOrigins.has(origin)) {
+      return respond(res, { error: "Pairing requires an approved DevForge origin." }, 403);
+    }
+    return respond(res, { success: true, token }, 200, origin);
+  }
+
   if (req.headers.authorization !== `Bearer ${token}`) {
     return respond(res, { error: "Unauthorized" }, 401, origin);
   }
@@ -334,7 +341,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  console.log(
-    `DevForge Local Agent listening on http://127.0.0.1:${port}\nPairing token: ${token}`,
-  );
+  console.log(`DevForge Local Agent listening on http://127.0.0.1:${port}`);
+  if (process.env.DEVFORGE_AGENT_SILENT !== "1") {
+    console.log(`Pairing token: ${token}`);
+  }
 });

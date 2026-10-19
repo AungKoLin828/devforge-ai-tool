@@ -23,7 +23,7 @@ $sourceRoot = Join-Path $installRoot "src"
 $repository = "https://raw.githubusercontent.com/AungKoLin828/devforge-ai-tool/main/agent/src"
 # Pin expected content hashes so a partial or altered download is never installed.
 $expectedHashes = @{
-  "index.js" = "68F5D1ACF37B944D0C1916798DE4F74D04D7049D39EBA37F598739182685CD93"
+  "index.js" = "8EA91B63F4C9EE67F51DFC1B0128A7998E54A9F098060EDE75F551209D11BF3C"
   "executor.js" = "FB1059A897334989321F14A0A841D4EB7C32667400B0909B10AD15DAC1C54151"
   "security.js" = "109A76165151907E8433D4AE2F4B5F45C5FFE8750E0E10E94DC97F78F2BEA864"
 }
@@ -65,21 +65,73 @@ foreach ($file in @("index.js", "executor.js", "security.js")) {
   }
 }
 
-# Generate a launcher that binds the agent to this workspace without changing machine policy.
+# Generate an on-demand background launcher for the installed agent.
 $escapedWorkspace = $workspace.Replace("'", "''")
 $launcher = @"
 `$ErrorActionPreference = 'Stop'
-`$env:DEVFORGE_WORKSPACE = '$escapedWorkspace'
-Set-Location -LiteralPath `$PSScriptRoot
-node (Join-Path `$PSScriptRoot 'src\index.js')
+`$mutex = [System.Threading.Mutex]::new(`$false, 'Local\DevForgeAgentStart')
+if (-not `$mutex.WaitOne(0)) {
+  exit 0
+}
+
+try {
+  `$tcpClient = New-Object System.Net.Sockets.TcpClient
+  try {
+    `$tcpClient.Connect('127.0.0.1', 45821)
+    exit 0
+  }
+  catch {
+  }
+  finally {
+    `$tcpClient.Dispose()
+  }
+
+  `$node = Get-Command node -ErrorAction Stop
+  `$env:DEVFORGE_WORKSPACE = '$escapedWorkspace'
+  `$env:DEVFORGE_AGENT_SILENT = '1'
+  `$entryPoint = Join-Path `$PSScriptRoot 'src\index.js'
+  `$stdout = Join-Path `$PSScriptRoot 'agent.stdout.log'
+  `$stderr = Join-Path `$PSScriptRoot 'agent.stderr.log'
+  `$agentProcess = Start-Process -FilePath `$node.Source -ArgumentList ('"' + `$entryPoint + '"') -WorkingDirectory `$PSScriptRoot -WindowStyle Hidden -RedirectStandardOutput `$stdout -RedirectStandardError `$stderr -PassThru
+  for (`$attempt = 0; `$attempt -lt 40; `$attempt++) {
+    `$tcpClient = New-Object System.Net.Sockets.TcpClient
+    try {
+      `$tcpClient.Connect('127.0.0.1', 45821)
+      exit 0
+    }
+    catch {
+      if (`$agentProcess.HasExited) {
+        throw 'The Local Agent exited before it started listening.'
+      }
+      Start-Sleep -Milliseconds 250
+    }
+    finally {
+      `$tcpClient.Dispose()
+    }
+  }
+  throw 'The Local Agent did not start listening within 10 seconds.'
+}
+finally {
+  `$mutex.ReleaseMutex()
+  `$mutex.Dispose()
+}
 "@
 $launcherPath = Join-Path $installRoot "Start-DevForgeAgent.ps1"
 Set-Content -LiteralPath $launcherPath -Value $launcher -Encoding utf8
+
+# Register a per-user URL handler so a user gesture in DevForge can start the agent.
+$protocolKey = "HKCU:\Software\Classes\devforge-agent"
+$protocolCommandKey = Join-Path $protocolKey "shell\open\command"
+New-Item -Path $protocolCommandKey -Force | Out-Null
+New-ItemProperty -Path $protocolKey -Name "URL Protocol" -Value "" -PropertyType String -Force | Out-Null
+$powerShellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+$protocolCommand = "`"$powerShellPath`" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcherPath`" `"%1`""
+Set-Item -Path $protocolCommandKey -Value $protocolCommand
 
 Write-Host ""
 Write-Host "DevForge Local Agent installed without cloning the DevForge application."
 Write-Host "Agent files: $installRoot"
 Write-Host "Workspace:   $workspace"
 Write-Host ""
-Write-Host "Start the agent with:"
-Write-Host "powershell.exe -NoProfile -ExecutionPolicy Bypass -File '$launcherPath'"
+Write-Host "The DevForge app will start and pair the agent when you select Start and connect agent or generate a project."
+Write-Host "If the browser asks to open DevForge Agent, approve it."

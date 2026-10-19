@@ -144,7 +144,7 @@ function UserGuide() {
       number: "03",
       title: "Open and edit the project in VS Code",
       description:
-        "For a simple download, choose Download ZIP in the project workspace; no Local Agent or pairing token is needed. Extract the downloaded archive and open the project folder in VS Code. To sync directly into the DevForge workspace, or use local build/test and GitHub operations, start the Local Agent and connect with its pairing token. DevForge does not currently provide a dedicated VS Code extension.",
+        "For a simple download, choose Download ZIP in the project workspace; no Local Agent is needed. Extract the downloaded archive and open the project folder in VS Code. To sync directly into the DevForge workspace, or use local build/test and GitHub operations, install the Local Agent once, then select Start and connect agent. DevForge does not currently provide a dedicated VS Code extension.",
     },
     {
       number: "04",
@@ -552,6 +552,7 @@ function App({ user }: { user: User }) {
   const [localAgentToken, setLocalAgentToken] = useState(
     () => window.localStorage.getItem("devforge-local-agent-token") || "",
   );
+  const [localAgentConnecting, setLocalAgentConnecting] = useState(false);
   const [localAgentInfo, setLocalAgentInfo] = useState<{
     machine: string;
     platform: string;
@@ -1116,6 +1117,9 @@ function App({ user }: { user: User }) {
 
     const operationLabel =
       mode === "modify" ? "modification" : "project generation";
+    if (!localAgentInfo && !localAgentConnecting) {
+      void connectLocalAgent(true, true);
+    }
     setLogs((current) => [...current, `Starting AI ${operationLabel}...`]);
     try {
       const completedRun = await runGeneration(
@@ -1360,18 +1364,33 @@ function App({ user }: { user: User }) {
     }
   }
 
-  // Verify the pairing token, persist it locally, then load the agent workspace.
-  async function connectLocalAgent() {
-    const token = localAgentToken.trim();
-    if (!token) {
-      setLocalAgentError(
-        "Enter the pairing token printed by your local agent.",
-      );
-      return;
-    }
-
+  // Launch the installed Windows agent on demand, then pair through loopback.
+  async function connectLocalAgent(startAgent = true, quiet = false) {
+    if (localAgentConnecting) return;
+    if (startAgent) window.location.href = "devforge-agent://start";
+    setLocalAgentConnecting(true);
     setLocalAgentError(null);
     try {
+      let token = "";
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 24; attempt += 1) {
+        try {
+          token = await api.localAgent.pair();
+          break;
+        } catch (cause) {
+          lastError = cause;
+          await new Promise((resolve) => window.setTimeout(resolve, 500));
+        }
+      }
+      if (!token) {
+        throw lastError instanceof Error
+          ? new Error(
+              `${lastError.message} Install or update the Local Agent from the User guide, then try again.`,
+            )
+          : new Error(
+              "The Local Agent did not start. Install it from the User guide, then try again.",
+            );
+      }
       const result = await api.localAgent.health(token);
       window.localStorage.setItem("devforge-local-agent-token", token);
       setLocalAgentToken(token);
@@ -1399,11 +1418,16 @@ function App({ user }: { user: User }) {
       setWorkspaceListing(null);
       setWorkspaceEditorFile(null);
       setWorkspaceEditorDraft("");
-      setLocalAgentError(
+      const message =
         cause instanceof Error
           ? cause.message
-          : "Could not connect to the local agent.",
-      );
+          : "Could not connect to the local agent.";
+      setLocalAgentError(message);
+      if (!quiet) {
+        setLogs((current) => [...current, `ERROR: ${message}`]);
+      }
+    } finally {
+      setLocalAgentConnecting(false);
     }
   }
 
@@ -3009,35 +3033,34 @@ function App({ user }: { user: User }) {
                 </div>
                 <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                    <label className="flex-1 text-xs text-slate-400">
-                      Local agent pairing token
-                      <input
-                        type="password"
-                        autoComplete="off"
-                        value={localAgentToken}
-                        onChange={(event) => {
-                          const token = event.target.value;
-                          setLocalAgentToken(token);
-                          setLocalAgentInfo(null);
-                          setLocalAgentError(null);
-                          setWorkspaceProjects([]);
-                          setWorkspaceListing(null);
-                          setWorkspaceEditorFile(null);
-                          setWorkspaceEditorDraft("");
-                        }}
-                        placeholder="Paste the token shown in the agent terminal"
-                        className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
-                      />
-                    </label>
+                    <p className="flex-1 text-xs leading-5 text-slate-400">
+                      DevForge will start the installed Local Agent and pair
+                      automatically. The agent stays on this PC and keeps
+                      project files local.
+                    </p>
                     <button
                       onClick={() => void connectLocalAgent()}
+                      disabled={localAgentConnecting}
                       className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-indigo-400"
                     >
-                      {localAgentInfo
-                        ? "Reconnect agent"
-                        : "Connect local agent"}
+                      {localAgentConnecting
+                        ? "Starting and connecting..."
+                        : localAgentInfo
+                          ? "Reconnect agent"
+                          : "Start and connect agent"}
                     </button>
                   </div>
+                  {localAgentError && (
+                    <p className="mt-3 text-xs text-amber-300">
+                      {localAgentError}{" "}
+                      <a
+                        href="/guide"
+                        className="underline underline-offset-2 hover:text-amber-200"
+                      >
+                        Open setup guide
+                      </a>
+                    </p>
+                  )}
                   {localAgentInfo && (
                     <p className="mt-3 text-xs text-emerald-300">
                       Connected to {localAgentInfo.machine} (
@@ -3318,11 +3341,17 @@ function App({ user }: { user: User }) {
                   </section>
                   {!localAgentInfo && (
                     <p className="mt-3 text-xs leading-5 text-amber-300">
-                      To start the Local Agent, open a terminal in the DevForge
-                      project folder on your PC and run{" "}
-                      <code>npm run agent:dev</code>. Keep that terminal open,
-                      copy the pairing token printed there, paste it above, then
-                      select <strong>Connect local agent</strong>.
+                      Select <strong>Start and connect agent</strong> to start
+                      the installed agent and pair automatically. Select{" "}
+                      <strong>Generate</strong> to start and pair it while
+                      generating a project. For first-time setup, follow the{" "}
+                      <a
+                        href="/guide"
+                        className="underline underline-offset-2 hover:text-amber-200"
+                      >
+                        Local Agent install guide
+                      </a>
+                      .
                     </p>
                   )}
                   <p className="mt-3 text-xs leading-5 text-slate-500">

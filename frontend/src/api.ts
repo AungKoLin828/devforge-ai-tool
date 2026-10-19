@@ -493,6 +493,14 @@ export const api = {
   projects: () => request<{ success: true; projects: any[] }>("/api/projects"),
   project: (id: string) =>
     request<{ success: true; project: any }>(`/api/projects/${id}`),
+  renameProject: (id: string, name: string) =>
+    request<{ success: true; project: any }>(
+      `/api/projects/${encodeURIComponent(id)}/rename`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      },
+    ),
   deleteProject: (id: string) =>
     request<{ success: true }>(`/api/projects/${id}`, { method: "DELETE" }),
   removeImportedProject: (id: string) =>

@@ -27,6 +27,7 @@ import {
   importProject,
   list,
   owner,
+  rename,
   remove,
   removeImportedProject,
   startGenerateProject,
@@ -344,6 +345,21 @@ export async function handleApi(req: Request) {
       if (action === "import/remove" && req.method === "POST") {
         await removeImportedProject(projectId, user.id);
         return json({ success: true });
+      }
+
+      if (action === "rename" && req.method === "PATCH") {
+        const requestBody = await body<{ name: unknown }>(req);
+        if (
+          typeof requestBody.name !== "string" ||
+          !requestBody.name.trim() ||
+          requestBody.name.trim().length > 120
+        ) {
+          return error("Project name must be between 1 and 120 characters", 400);
+        }
+        return json({
+          success: true,
+          project: await rename(projectId, user.id, requestBody.name.trim()),
+        });
       }
 
       // Base project routes read details or perform the explicitly requested deletion.

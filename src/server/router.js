@@ -3,7 +3,7 @@ import { requireAuth, AuthError, createSession, clearSession, } from "./auth.js"
 import { githubOAuthConfig, githubLoginUrl, exchange, githubUser, upsertGithubUser, listGitHubRepositories, connectGitHubRepository, createGitHubRepository, disconnectGitHubRepository, updateGitHubSync, } from "./github.js";
 import { randomToken } from "./crypto.js";
 import { prisma } from "./db.js";
-import { create, chatWithProject, detail, importProject, list, owner, remove, removeImportedProject, startGenerateProject, startReviewProject, } from "./projects.js";
+import { create, chatWithProject, detail, importProject, list, owner, rename, remove, removeImportedProject, startGenerateProject, startReviewProject, } from "./projects.js";
 import { ensureAgent, registerAgent, queueJob, claimJob, } from "./agent.js";
 // Keep OAuth redirects as minimal responses with an explicit status.
 const redirect = (url, status = 302) => new Response(null, {
@@ -217,6 +217,18 @@ export async function handleApi(req) {
             if (action === "import/remove" && req.method === "POST") {
                 await removeImportedProject(projectId, user.id);
                 return json({ success: true });
+            }
+            if (action === "rename" && req.method === "PATCH") {
+                const requestBody = await body(req);
+                if (typeof requestBody.name !== "string" ||
+                    !requestBody.name.trim() ||
+                    requestBody.name.trim().length > 120) {
+                    return error("Project name must be between 1 and 120 characters", 400);
+                }
+                return json({
+                    success: true,
+                    project: await rename(projectId, user.id, requestBody.name.trim()),
+                });
             }
             // Base project routes read details or perform the explicitly requested deletion.
             if (!action && req.method === "GET") {

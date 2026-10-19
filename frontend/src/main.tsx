@@ -520,6 +520,9 @@ function App({ user }: { user: User }) {
   const [modal, setModal] = useState<ModalState | null>(null);
   const modalResolver = useRef<((confirmed: boolean) => void) | null>(null);
   const [selected, setSelected] = useState<any>();
+  const [renamingProject, setRenamingProject] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameSaving, setRenameSaving] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [logs, setLogs] = useState<string[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -767,6 +770,7 @@ function App({ user }: { user: User }) {
       });
       setProjects((current) => [response.project, ...current]);
       setSelected(response.project);
+      setRenamingProject(false);
       setPrompt("");
       setChatMessages([]);
       resetGeneration();
@@ -780,6 +784,57 @@ function App({ user }: { user: User }) {
         cause instanceof Error ? cause.message : "Could not create project.";
       setLogs((current) => [...current, `ERROR: ${message}`]);
       showModal("error", "Could not create project", message);
+    }
+  }
+
+  // Persist a project display name without changing its code or project settings.
+  async function renameSelectedProject() {
+    if (!selected || renameSaving) return;
+    const name = renameDraft.trim();
+    if (!name) {
+      showModal("warning", "Project name required", "Enter a project name.");
+      return;
+    }
+    if (name.length > 120) {
+      showModal(
+        "warning",
+        "Project name too long",
+        "Project names must be 120 characters or fewer.",
+      );
+      return;
+    }
+    if (name === selected.name) {
+      setRenamingProject(false);
+      return;
+    }
+
+    setRenameSaving(true);
+    try {
+      const response = await api.renameProject(selected.id, name);
+      setSelected((current: any) =>
+        current?.id === selected.id
+          ? { ...current, ...response.project }
+          : current,
+      );
+      setProjects((current) =>
+        current.map((project) =>
+          project.id === selected.id
+            ? { ...project, ...response.project }
+            : project,
+        ),
+      );
+      setRenamingProject(false);
+      setLogs((current) => [
+        ...current,
+        `Renamed project to "${response.project.name}".`,
+      ]);
+    } catch (cause) {
+      const message =
+        cause instanceof Error ? cause.message : "Could not rename project.";
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+      showModal("error", "Could not rename project", message);
+    } finally {
+      setRenameSaving(false);
     }
   }
 
@@ -1843,6 +1898,7 @@ function App({ user }: { user: User }) {
     try {
       const response = await api.project(projectId);
       setSelected(response.project);
+      setRenamingProject(false);
       setGitHubLocalPath(response.project.localPath || "");
       setPrompt("");
       setChatMessages([]);
@@ -2045,7 +2101,54 @@ function App({ user }: { user: User }) {
             <>
               <div className="flex justify-between gap-4">
                 <div>
-                  <h2 className="text-2xl font-bold">{selected.name}</h2>
+                  {renamingProject ? (
+                    <form
+                      className="flex flex-wrap items-center gap-2"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void renameSelectedProject();
+                      }}
+                    >
+                      <input
+                        autoFocus
+                        aria-label="Project name"
+                        maxLength={120}
+                        value={renameDraft}
+                        onChange={(event) => setRenameDraft(event.target.value)}
+                        disabled={renameSaving}
+                        className="min-w-[16rem] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-lg font-semibold text-white outline-none focus:border-indigo-500 disabled:opacity-60"
+                      />
+                      <button
+                        type="submit"
+                        disabled={renameSaving || !renameDraft.trim()}
+                        className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-50"
+                      >
+                        {renameSaving ? "Saving..." : "Save"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={renameSaving}
+                        onClick={() => setRenamingProject(false)}
+                        className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-slate-500 disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </form>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h2 className="text-2xl font-bold">{selected.name}</h2>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRenameDraft(selected.name);
+                          setRenamingProject(true);
+                        }}
+                        className="rounded-md border border-slate-700 px-2.5 py-1 text-xs text-slate-300 transition hover:border-indigo-400 hover:text-indigo-200"
+                      >
+                        Rename
+                      </button>
+                    </div>
+                  )}
                   <p className="text-slate-400 mt-1">{selected.description}</p>
                 </div>
                 <span className="h-fit rounded-full bg-slate-800 px-3 py-1 text-xs">

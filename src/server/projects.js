@@ -36,6 +36,23 @@ export async function detail(id, userId) {
 export const list = (userId) => prisma.project.findMany({
     where: { userId },
 });
+/** Rename a project owned by the requesting user without changing its artifacts. */
+export async function rename(id, userId, name) {
+    const project = await prisma.project.findUnique({
+        where: { id },
+        select: { id: true, userId: true },
+    });
+    if (!project) {
+        throw new Error("Project not found");
+    }
+    if (project.userId !== userId) {
+        throw new Error("Forbidden");
+    }
+    return prisma.project.update({
+        where: { id },
+        data: { name },
+    });
+}
 /** Permanently remove an owned project and all records cascaded from it. */
 export async function remove(id, userId) {
     const project = await prisma.project.findUnique({

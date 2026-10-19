@@ -11,6 +11,8 @@ import {
   getApiActivitySnapshot,
   subscribeToApiActivity,
   type ChatMessage,
+  type AIProvider,
+  type AIProviderInfo,
   type LocalProjectResult,
   type LocalWorkspaceEntry,
   type LocalWorkspaceFile,
@@ -114,12 +116,11 @@ function parseBuildDiagnostics(result: LocalProjectResult | null) {
   return diagnostics.slice(0, 100);
 }
 
-// Text-only brand lockup shared by the landing page and dashboard headers.
+// Shared logo asset used by the landing page, guide, and dashboard headers.
 function BrandWordmark() {
   return (
-    <span className="brand-wordmark">
-      <span className="brand-wordmark-name">DevForge</span>
-      <span className="brand-wordmark-ai">AI</span>
+    <span className="brand-logo">
+      <img src="/DevForgeAI.png" alt="DevForge AI" />
     </span>
   );
 }
@@ -257,7 +258,7 @@ function Login() {
       number: "02",
       title: "Generate and keep the work",
       description:
-        "Generate code with OpenRouter and save the plans and files as PostgreSQL-backed project artifacts.",
+        "Generate code with OpenRouter, OpenAI, or your own OpenAI-compatible provider and save the plans and files.",
     },
     {
       number: "03",
@@ -273,7 +274,7 @@ function Login() {
     ["02", "AI code review", "Available"],
     ["03", "Local project import, build and test", "Available"],
     ["04", "GitHub synchronization", "Available"],
-    ["05", "More AI providers", "Planned"],
+    ["05", "More AI providers", "Available"],
   ];
 
   return (
@@ -520,6 +521,25 @@ function App({ user }: { user: User }) {
   const [modal, setModal] = useState<ModalState | null>(null);
   const modalResolver = useRef<((confirmed: boolean) => void) | null>(null);
   const [selected, setSelected] = useState<any>();
+  const [selectedAIProvider, setSelectedAIProvider] = useState<AIProvider>(
+    () => {
+      const saved = window.localStorage.getItem("devforge-ai-provider");
+      return saved === "OPENAI" || saved === "CUSTOM"
+        ? saved
+        : "OPENROUTER";
+    },
+  );
+  const [aiProviderConfigs, setAIProviderConfigs] = useState<AIProviderInfo[]>(
+    [],
+  );
+  const [providerSettingsExpanded, setProviderSettingsExpanded] =
+    useState(false);
+  const [providerSettingsProvider, setProviderSettingsProvider] =
+    useState<AIProvider>("OPENROUTER");
+  const [providerApiKeyDraft, setProviderApiKeyDraft] = useState("");
+  const [providerModelDraft, setProviderModelDraft] = useState("");
+  const [providerBaseUrlDraft, setProviderBaseUrlDraft] = useState("");
+  const [providerSaving, setProviderSaving] = useState(false);
   const [renamingProject, setRenamingProject] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
@@ -616,6 +636,19 @@ function App({ user }: { user: User }) {
     review: runReview,
     reset: resetGeneration,
   } = useProjectGeneration();
+
+  useEffect(() => {
+    window.localStorage.setItem("devforge-ai-provider", selectedAIProvider);
+  }, [selectedAIProvider]);
+
+  useEffect(() => {
+    const config = aiProviderConfigs.find(
+      (item) => item.provider === providerSettingsProvider,
+    );
+    setProviderModelDraft(config?.model || "");
+    setProviderBaseUrlDraft(config?.baseUrl || "");
+    setProviderApiKeyDraft("");
+  }, [aiProviderConfigs, providerSettingsProvider]);
 
   useEffect(() => {
     if (localConsoleRef.current) {
@@ -723,6 +756,90 @@ function App({ user }: { user: User }) {
     }
   }
 
+  async function refreshAIProviders() {
+    const response = await api.providers();
+    setAIProviderConfigs(response.providers);
+  }
+
+  function selectProviderSettings(provider: AIProvider) {
+    setProviderSettingsProvider(provider);
+    const config = aiProviderConfigs.find((item) => item.provider === provider);
+    setProviderModelDraft(config?.model || "");
+    setProviderBaseUrlDraft(config?.baseUrl || "");
+    setProviderApiKeyDraft("");
+  }
+
+  async function saveAIProviderSettings() {
+    if (providerSaving) return;
+    setProviderSaving(true);
+    try {
+      await api.saveAIProvider(providerSettingsProvider, {
+        ...(providerApiKeyDraft.trim()
+          ? { apiKey: providerApiKeyDraft.trim() }
+          : {}),
+        model: providerModelDraft.trim(),
+        ...(providerSettingsProvider === "CUSTOM"
+          ? { baseUrl: providerBaseUrlDraft.trim() }
+          : {}),
+      });
+      setProviderApiKeyDraft("");
+      await refreshAIProviders();
+      setLogs((current) => [
+        ...current,
+        `${providerSettingsProvider} provider settings saved.`,
+      ]);
+      showModal(
+        "success",
+        "AI provider saved",
+        "Provider settings were saved. The API key is encrypted and will not be shown again.",
+      );
+    } catch (cause) {
+      const message =
+        cause instanceof Error
+          ? cause.message
+          : "Could not save AI provider settings.";
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+      showModal("error", "Could not save AI provider", message);
+    } finally {
+      setProviderSaving(false);
+    }
+  }
+
+  async function removeAIProviderSettings() {
+    const config = aiProviderConfigs.find(
+      (item) => item.provider === providerSettingsProvider,
+    );
+    if (!config?.hasUserKey || providerSaving) return;
+    if (
+      !(await confirmModal(
+        "Remove saved API key",
+        `Remove your saved ${config.label} API key? The default server provider configuration, if any, will not be changed.`,
+        "Remove key",
+      ))
+    ) {
+      return;
+    }
+    setProviderSaving(true);
+    try {
+      await api.deleteAIProvider(providerSettingsProvider);
+      setProviderApiKeyDraft("");
+      await refreshAIProviders();
+      setLogs((current) => [
+        ...current,
+        `Removed saved ${providerSettingsProvider} API key.`,
+      ]);
+    } catch (cause) {
+      const message =
+        cause instanceof Error
+          ? cause.message
+          : "Could not remove the saved provider key.";
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+      showModal("error", "Could not remove API key", message);
+    } finally {
+      setProviderSaving(false);
+    }
+  }
+
   useEffect(() => {
     load().catch((cause) => {
       const message =
@@ -731,6 +848,14 @@ function App({ user }: { user: User }) {
       showModal("error", "Could not load projects", message);
     });
     void refreshGitHubRepositories();
+    void refreshAIProviders().catch((cause) => {
+      const message =
+        cause instanceof Error
+          ? cause.message
+          : "Could not load AI provider settings.";
+      setLogs((current) => [...current, `ERROR: ${message}`]);
+      showModal("error", "Could not load AI provider settings", message);
+    });
     // Initial page load only. Selection changes are handled by the project buttons.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -996,7 +1121,7 @@ function App({ user }: { user: User }) {
       const completedRun = await runGeneration(
         selected.id,
         prompt,
-        "OPENROUTER",
+        selectedAIProvider,
         mode,
       );
       if (!completedRun) return;
@@ -1036,7 +1161,7 @@ function App({ user }: { user: User }) {
     if (!selected || isBusy || !generatedFiles.length) return;
 
     setLogs((current) => [...current, "Starting AI code review..."]);
-    const completedRun = await runReview(selected.id);
+    const completedRun = await runReview(selected.id, selectedAIProvider);
     if (!completedRun) return;
 
     try {
@@ -1924,7 +2049,11 @@ function App({ user }: { user: User }) {
     setChatInput("");
     setChatBusy(true);
     try {
-      const response = await api.chat(selected.id, nextMessages);
+      const response = await api.chat(
+        selected.id,
+        nextMessages,
+        selectedAIProvider,
+      );
       setChatMessages((current) => [
         ...current,
         { role: "assistant", content: response.answer },
@@ -1994,7 +2123,7 @@ function App({ user }: { user: User }) {
   return (
     <div className="h-screen flex flex-col bg-slate-950">
       {/* Global session status and sign-out controls. */}
-      <header className="h-14 border-b border-slate-800 px-5 flex items-center justify-between">
+      <header className="h-16 border-b border-slate-800 px-5 flex items-center justify-between">
         <BrandWordmark />
         <div className="flex gap-4 items-center text-sm">
           <a
@@ -2618,9 +2747,160 @@ function App({ user }: { user: User }) {
 
               {/* One prompt supports initial generation and later modification requests. */}
               <div className="mt-5 glass rounded-2xl p-4">
-                <div className="text-sm font-semibold mb-3">
-                  AI Project Builder
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-sm font-semibold">AI Project Builder</div>
+                  <label className="flex items-center gap-2 text-xs text-slate-400">
+                    AI provider
+                    <select
+                      value={selectedAIProvider}
+                      disabled={isBusy}
+                      onChange={(event) =>
+                        setSelectedAIProvider(event.target.value as AIProvider)
+                      }
+                      className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-50"
+                    >
+                      {aiProviderConfigs.map((provider) => (
+                        <option
+                          key={provider.provider}
+                          value={provider.provider}
+                        >
+                          {provider.label}
+                          {provider.configured ? "" : " · setup required"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
+                <details
+                  open={providerSettingsExpanded}
+                  onToggle={(event) =>
+                    setProviderSettingsExpanded(event.currentTarget.open)
+                  }
+                  className="mb-4 rounded-xl border border-slate-800 bg-slate-950/50"
+                >
+                  <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-slate-300 hover:text-white">
+                    AI provider settings
+                  </summary>
+                  <div className="space-y-3 border-t border-slate-800 p-4">
+                    <p className="text-xs leading-5 text-slate-500">
+                      Provider settings and keys apply only to your account.
+                      Keys are encrypted before storage and never returned to
+                      the browser. OpenAI-compatible services (including
+                      compatible endpoints from other AI providers) can use
+                      Custom.
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="text-xs text-slate-400">
+                        Provider to configure
+                        <select
+                          value={providerSettingsProvider}
+                          onChange={(event) =>
+                            selectProviderSettings(
+                              event.target.value as AIProvider,
+                            )
+                          }
+                          className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
+                        >
+                          <option value="OPENROUTER">OpenRouter</option>
+                          <option value="OPENAI">OpenAI</option>
+                          <option value="CUSTOM">
+                            Custom OpenAI-compatible
+                          </option>
+                        </select>
+                      </label>
+                      <label className="text-xs text-slate-400">
+                        Model
+                        <input
+                          value={providerModelDraft}
+                          onChange={(event) =>
+                            setProviderModelDraft(event.target.value)
+                          }
+                          maxLength={200}
+                          placeholder={
+                            providerSettingsProvider === "OPENROUTER"
+                              ? "openrouter/free"
+                              : providerSettingsProvider === "OPENAI"
+                                ? "gpt-4o-mini"
+                                : "Model ID from your provider"
+                          }
+                          className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
+                        />
+                      </label>
+                    </div>
+                    {providerSettingsProvider === "CUSTOM" && (
+                      <label className="block text-xs text-slate-400">
+                        Public HTTPS API base URL
+                        <input
+                          type="url"
+                          value={providerBaseUrlDraft}
+                          onChange={(event) =>
+                            setProviderBaseUrlDraft(event.target.value)
+                          }
+                          maxLength={2048}
+                          placeholder="https://api.example.com/v1"
+                          className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
+                        />
+                        <span className="mt-1 block text-[11px] text-slate-500">
+                          Must support the OpenAI-compatible
+                          /chat/completions API. Private/local endpoints are
+                          not allowed.
+                        </span>
+                      </label>
+                    )}
+                    <label className="block text-xs text-slate-400">
+                      API key
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={providerApiKeyDraft}
+                        onChange={(event) =>
+                          setProviderApiKeyDraft(event.target.value)
+                        }
+                        maxLength={4096}
+                        placeholder={
+                          aiProviderConfigs.find(
+                            (provider) =>
+                              provider.provider === providerSettingsProvider,
+                          )?.hasUserKey
+                            ? "Saved key is hidden; enter a new key to replace it"
+                            : "Enter your provider API key"
+                        }
+                        className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
+                      />
+                    </label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void saveAIProviderSettings()}
+                        disabled={providerSaving}
+                        className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:cursor-wait disabled:opacity-50"
+                      >
+                        {providerSaving ? "Saving..." : "Save provider"}
+                      </button>
+                      {aiProviderConfigs.find(
+                        (provider) =>
+                          provider.provider === providerSettingsProvider,
+                      )?.hasUserKey && (
+                        <button
+                          type="button"
+                          onClick={() => void removeAIProviderSettings()}
+                          disabled={providerSaving}
+                          className="rounded-lg border border-red-500/30 px-3 py-2 text-xs text-red-300 hover:border-red-400 disabled:opacity-50"
+                        >
+                          Remove saved key
+                        </button>
+                      )}
+                      <span className="text-[11px] text-slate-500">
+                        {aiProviderConfigs.find(
+                          (provider) =>
+                            provider.provider === providerSettingsProvider,
+                        )?.configured
+                          ? "Configured"
+                          : "Not configured yet"}
+                      </span>
+                    </div>
+                  </div>
+                </details>
                 <textarea
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}

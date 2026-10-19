@@ -1,6 +1,12 @@
 
 import { prisma } from "./db.js";
-import { generate, SYSTEM, type Message, type Provider } from "./ai.js";
+import {
+  assertAIProviderConfigured,
+  generate,
+  SYSTEM,
+  type Message,
+  type Provider,
+} from "./ai.js";
 
 const BACKGROUND_FUNCTION_PATH =
   "/.netlify/functions/generate-project-background";
@@ -281,8 +287,10 @@ export async function chatWithProject(
   projectId: string,
   userId: string,
   inputMessages: unknown,
+  provider: Provider = "OPENROUTER",
 ) {
   await owner(projectId, userId);
+  await assertAIProviderConfigured(userId, provider);
   if (!Array.isArray(inputMessages) || inputMessages.length === 0 || inputMessages.length > 12) {
     throw new Error("Chat must include between 1 and 12 messages");
   }
@@ -359,7 +367,7 @@ export async function chatWithProject(
       content: `${SYSTEM}\nAnswer follow-up questions in a conversational, useful way. Use the project context when relevant, ask a concise clarifying question when needed, and do not claim to have changed files or run commands. Project context:\n${projectContext}`,
     },
     ...messages,
-  ]);
+  ], provider, undefined, userId);
 
   if (!response.text.trim()) {
     throw new Error("The AI provider returned an empty chat response");
@@ -388,6 +396,8 @@ export async function startGenerateProject(
   if (cleanPrompt.length > 30000) {
     throw new Error("Prompt must be 30,000 characters or fewer");
   }
+  await owner(id, userId);
+  await assertAIProviderConfigured(userId, provider);
 
   const secret = process.env.DEVFORGE_BACKGROUND_SECRET;
   const baseUrl =
@@ -694,6 +704,8 @@ export async function processGenerateProject(
         },
       ],
       provider,
+      undefined,
+      userId,
     );
 
     const cleanedText = result.text
@@ -897,7 +909,10 @@ export async function processGenerateProject(
 export async function startReviewProject(
   projectId: string,
   userId: string,
+  provider: Provider = "OPENROUTER",
 ) {
+  await owner(projectId, userId);
+  await assertAIProviderConfigured(userId, provider);
   const secret = process.env.DEVFORGE_BACKGROUND_SECRET;
   const baseUrl =
     process.env.URL ||
@@ -996,7 +1011,7 @@ export async function startReviewProject(
         projectId,
         operation: "REVIEW",
         status: "RUNNING",
-        input: { provider: "OPENROUTER" },
+        input: { provider },
         startedAt: new Date(),
       },
     });
@@ -1078,6 +1093,8 @@ export async function processReviewProject(
 
   if (run.status === "SUCCESS") return { alreadyCompleted: true };
   if (run.status !== "RUNNING") throw new Error("Review run is not active");
+  const runInput = run.input as { provider?: Provider } | null;
+  const provider = runInput?.provider || "OPENROUTER";
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -1151,7 +1168,9 @@ export async function processReviewProject(
           }),
         },
       ],
-      "OPENROUTER",
+      provider,
+      undefined,
+      userId,
     );
 
     const cleanedText = result.text

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { beginApiActivity } from "../api";
+import { beginApiActivity, type AIProvider } from "../api";
 
 // UI lifecycle states for a queued background generation, modification, or review.
 export type GenerationStatus =
@@ -329,7 +329,7 @@ export function useProjectGeneration(options: Options = {}) {
     async (
       projectId: string,
       prompt: string,
-      provider = "OPENROUTER",
+      provider: AIProvider = "OPENROUTER",
       operation: "generate" | "modify" | "review" = "generate",
     ): Promise<GenerationRun | null> => {
       if (activeRef.current) {
@@ -377,11 +377,10 @@ export function useProjectGeneration(options: Options = {}) {
               "Content-Type": "application/json",
               Accept: "application/json",
             },
-            body: JSON.stringify(
-              operation !== "review"
-                ? { prompt: prompt.trim(), provider }
-                : {},
-            ),
+            body: JSON.stringify({
+              provider,
+              ...(operation !== "review" ? { prompt: prompt.trim() } : {}),
+            }),
           },
           controller.signal,
           Math.max(requestTimeoutMs * 2, 20_000),
@@ -434,7 +433,8 @@ export function useProjectGeneration(options: Options = {}) {
   );
 
   const review = useCallback(
-    (projectId: string) => generate(projectId, "", "OPENROUTER", "review"),
+    (projectId: string, provider: AIProvider = "OPENROUTER") =>
+      generate(projectId, "", provider, "review"),
     [generate],
   );
 

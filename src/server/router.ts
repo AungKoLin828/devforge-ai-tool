@@ -21,6 +21,12 @@ import {
 import { randomToken } from "./crypto.js";
 import { prisma } from "./db.js";
 import {
+  deleteAIProvider,
+  listAIProviders,
+  saveAIProvider,
+  type Provider,
+} from "./ai.js";
+import {
   create,
   chatWithProject,
   detail,
@@ -46,6 +52,10 @@ const redirect = (url: string, status = 302) =>
     status,
     headers: { Location: url },
   });
+
+function isAIProvider(value: unknown): value is Provider {
+  return value === "OPENROUTER" || value === "OPENAI" || value === "CUSTOM";
+}
 
 // Normalize expected and unexpected errors before returning them to API clients.
 function getErrorInfo(caught: unknown) {
@@ -192,6 +202,45 @@ export async function handleApi(req: Request) {
     }
 
     const user = await requireAuth(req);
+
+    const aiProviderMatch = path.match(
+      /^ai\/providers\/(OPENROUTER|OPENAI|CUSTOM)$/,
+    );
+    if (aiProviderMatch && req.method === "PUT") {
+      const provider = aiProviderMatch[1] as Provider;
+      const requestBody = await body<{
+        apiKey?: unknown;
+        model?: unknown;
+        baseUrl?: unknown;
+      }>(req);
+      if (
+        (requestBody.apiKey !== undefined &&
+          (typeof requestBody.apiKey !== "string" ||
+            requestBody.apiKey.length > 4096)) ||
+        (requestBody.model !== undefined &&
+          (typeof requestBody.model !== "string" ||
+            requestBody.model.length > 200)) ||
+        (requestBody.baseUrl !== undefined &&
+          (typeof requestBody.baseUrl !== "string" ||
+            requestBody.baseUrl.length > 2048))
+      ) {
+        return error("AI provider settings contain invalid values", 400);
+      }
+      await saveAIProvider(user.id, provider, {
+        apiKey: requestBody.apiKey as string | undefined,
+        model: requestBody.model as string | undefined,
+        baseUrl: requestBody.baseUrl as string | undefined,
+      });
+      const providerInfo = (await listAIProviders(user.id)).find(
+        (item) => item.provider === provider,
+      );
+      if (!providerInfo) throw new Error("Could not load saved AI provider settings.");
+      return json({ success: true, provider: providerInfo });
+    }
+    if (aiProviderMatch && req.method === "DELETE") {
+      await deleteAIProvider(user.id, aiProviderMatch[1] as Provider);
+      return json({ success: true });
+    }
 
     if (path === "github/repositories" && req.method === "GET") {
       return json({
@@ -383,7 +432,7 @@ export async function handleApi(req: Request) {
         const requestBody = await body<any>(req);
 
         const provider = requestBody.provider || "OPENROUTER";
-        if (provider !== "OPENROUTER") {
+        if (!isAIProvider(provider)) {
           return error("Unsupported AI provider", 400);
         }
 
@@ -407,7 +456,16 @@ export async function handleApi(req: Request) {
       }
 
       if (action === "review" && req.method === "POST") {
-        const result = await startReviewProject(projectId, user.id);
+        const requestBody = await body<{ provider?: unknown }>(req);
+        const provider = requestBody.provider || "OPENROUTER";
+        if (!isAIProvider(provider)) {
+          return error("Unsupported AI provider", 400);
+        }
+        const result = await startReviewProject(
+          projectId,
+          user.id,
+          provider as Provider,
+        );
         return json(
           {
             success: true,
@@ -418,13 +476,21 @@ export async function handleApi(req: Request) {
       }
 
       if (action === "chat" && req.method === "POST") {
-        const requestBody = await body<{ messages: unknown }>(req);
+        const requestBody = await body<{
+          messages: unknown;
+          provider?: unknown;
+        }>(req);
+        const provider = requestBody.provider || "OPENROUTER";
+        if (!isAIProvider(provider)) {
+          return error("Unsupported AI provider", 400);
+        }
         return json({
           success: true,
           ...(await chatWithProject(
             projectId,
             user.id,
             requestBody.messages,
+            provider as Provider,
           )),
         });
       }
@@ -544,17 +610,7 @@ export async function handleApi(req: Request) {
     if (path === "ai/providers" && req.method === "GET") {
       return json({
         success: true,
-        providers: await prisma.aIProvider.findMany({
-          where: { userId: user.id },
-          select: {
-            id: true,
-            provider: true,
-            label: true,
-            enabled: true,
-            model: true,
-            baseUrl: true,
-          },
-        }),
+        providers: await listAIProviders(user.id),
       });
     }
 
@@ -596,6 +652,15 @@ export async function handleApi(req: Request) {
     if (
       message.includes("required") ||
       message.includes("30,000 characters") ||
+      message.includes("200 characters or fewer") ||
+      message.includes("public HTTPS") ||
+      message.includes("public DNS hostname") ||
+      message.includes("public IP addresses") ||
+      message.includes("could not be resolved") ||
+      message.includes("without credentials, query, or fragment") ||
+      message.includes("Model name") ||
+      message.includes("not configured") ||
+      message.includes("disabled in your AI provider settings") ||
       message.includes("Unsupported AI provider") ||
       message.startsWith("Chat ")
     ) {

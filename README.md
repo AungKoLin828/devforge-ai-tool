@@ -1,6 +1,6 @@
 # DevForge AI Tool
 
-DevForge AI is an AI-assisted project workspace built around GitHub sign-in, PostgreSQL-backed project artifacts, and a separately run local agent. The web app generates and reviews projects with OpenRouter, sends generated Node.js projects to the local agent for build and test commands, and synchronizes local Git repositories with GitHub.
+DevForge AI is an AI-assisted project workspace built around GitHub sign-in, PostgreSQL-backed project artifacts, and a separately run local agent. The web app generates and reviews projects with OpenRouter, OpenAI, or a user-configured OpenAI-compatible provider, sends generated projects to the local agent for build and test commands, and synchronizes local Git repositories with GitHub.
 
 The public user guide is available at `/guide` and can be read without signing in. Creating or managing projects and using connected services still requires GitHub authentication.
 
@@ -114,7 +114,13 @@ Use a managed Postgres database (including Netlify Database if available for the
 
 ## API baseline
 
-`GET /api/auth/github` · `GET /api/auth/github/callback` · `POST /api/auth/logout` · `GET /api/auth/me` · `GET /api/github/repositories` · `GET/POST /api/projects` · `POST /api/projects/import` · `GET/DELETE /api/projects/:id` · `POST /api/projects/:id/github/connect` · `POST /api/projects/:id/github/create` · `POST /api/projects/:id/github/status` · `POST /api/projects/:id/generate` · `POST /api/projects/:id/review` · `POST /api/projects/:id/chat` · `GET /api/projects/:id/runs/:runId` · `GET /api/projects/:id/history` · `POST /api/projects/:id/jobs` · `GET /api/agent` · `POST /api/agent/register` · `POST /api/agent/job/claim` · `POST /api/agent/job/result` · `GET /api/ai/providers`.
+`GET /api/auth/github` · `GET /api/auth/github/callback` · `POST /api/auth/logout` · `GET /api/auth/me` · `GET /api/github/repositories` · `GET/POST /api/projects` · `POST /api/projects/import` · `GET/DELETE /api/projects/:id` · `POST /api/projects/:id/github/connect` · `POST /api/projects/:id/github/create` · `POST /api/projects/:id/github/status` · `POST /api/projects/:id/generate` · `POST /api/projects/:id/review` · `POST /api/projects/:id/chat` · `GET /api/projects/:id/runs/:runId` · `GET /api/projects/:id/history` · `POST /api/projects/:id/jobs` · `GET /api/agent` · `POST /api/agent/register` · `POST /api/agent/job/claim` · `POST /api/agent/job/result` · `GET /api/ai/providers` · `PUT/DELETE /api/ai/providers/:provider`.
+
+## AI provider configuration
+
+Choose OpenRouter, OpenAI, or **Custom OpenAI-compatible** in the AI Project Builder. Provider credentials and model settings are scoped to the signed-in account; API keys are encrypted at rest and are never returned to the browser after saving. The server's existing OpenRouter environment configuration remains available as the default when no account-specific key is saved.
+
+For a custom provider, enter its HTTPS base URL, model identifier, and API key. The endpoint must use the OpenAI-compatible `/chat/completions` protocol and resolve to a public host. Native Gemini, Anthropic, or other provider protocols are not supported unless the provider exposes that compatible API. Generation, project modifications, reviews, and chat use the provider selected in the workspace.
 
 Deleting a project permanently removes its database record and related artifacts, runs, and jobs. A confirmation prompt is shown in the workspace; copies already synced to a Local Agent workspace are not deleted.
 
@@ -128,4 +134,4 @@ GitHub synchronization is available from a project's workspace. Connect a writab
 
 Generation creates a PostgreSQL `ProjectRun` and runs in a Netlify Background Function. A successful run saves requirements, architecture, database design, API design, the implementation plan, and generated files as `Artifact` records in one transaction before marking the project `READY`. Invalid or empty generated file lists fail the run instead of reporting a ready project. `GET /api/projects/:id` returns those saved artifacts so they remain available when the project is opened again or the page is refreshed.
 
-`POST /api/projects/:id/review` queues an OpenRouter review of the saved generated files. Review findings are validated and saved as a `REVIEW` artifact; the run and project transition through `REVIEWING` to `READY` on success or `FAILED` on error. Build, test, and Git commands run through the loopback-only Local Agent. Generated Node.js project files and command output remain on the developer's PC, and GitHub repository contents are transferred directly between that PC and GitHub.
+`POST /api/projects/:id/review` queues a review of the saved generated files using the selected provider. Review findings are validated and saved as a `REVIEW` artifact; the run and project transition through `REVIEWING` to `READY` on success or `FAILED` on error. Build, test, and Git commands run through the loopback-only Local Agent. Generated project files and command output remain on the developer's PC, and GitHub repository contents are transferred directly between that PC and GitHub.

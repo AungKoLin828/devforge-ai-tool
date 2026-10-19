@@ -3,6 +3,7 @@ import { requireAuth, AuthError, createSession, clearSession, } from "./auth.js"
 import { githubOAuthConfig, githubLoginUrl, exchange, githubUser, upsertGithubUser, listGitHubRepositories, connectGitHubRepository, createGitHubRepository, disconnectGitHubRepository, updateGitHubSync, } from "./github.js";
 import { randomToken } from "./crypto.js";
 import { prisma } from "./db.js";
+import { deleteAIProvider, listAIProviders, saveAIProvider, } from "./ai.js";
 import { create, chatWithProject, detail, importProject, list, owner, rename, remove, removeImportedProject, startGenerateProject, startReviewProject, } from "./projects.js";
 import { ensureAgent, registerAgent, queueJob, claimJob, } from "./agent.js";
 // Keep OAuth redirects as minimal responses with an explicit status.
@@ -10,6 +11,9 @@ const redirect = (url, status = 302) => new Response(null, {
     status,
     headers: { Location: url },
 });
+function isAIProvider(value) {
+    return value === "OPENROUTER" || value === "OPENAI" || value === "CUSTOM";
+}
 // Normalize expected and unexpected errors before returning them to API clients.
 function getErrorInfo(caught) {
     let current = caught;
@@ -120,6 +124,35 @@ export async function handleApi(req) {
             return json({ success: true, user });
         }
         const user = await requireAuth(req);
+        const aiProviderMatch = path.match(/^ai\/providers\/(OPENROUTER|OPENAI|CUSTOM)$/);
+        if (aiProviderMatch && req.method === "PUT") {
+            const provider = aiProviderMatch[1];
+            const requestBody = await body(req);
+            if ((requestBody.apiKey !== undefined &&
+                (typeof requestBody.apiKey !== "string" ||
+                    requestBody.apiKey.length > 4096)) ||
+                (requestBody.model !== undefined &&
+                    (typeof requestBody.model !== "string" ||
+                        requestBody.model.length > 200)) ||
+                (requestBody.baseUrl !== undefined &&
+                    (typeof requestBody.baseUrl !== "string" ||
+                        requestBody.baseUrl.length > 2048))) {
+                return error("AI provider settings contain invalid values", 400);
+            }
+            await saveAIProvider(user.id, provider, {
+                apiKey: requestBody.apiKey,
+                model: requestBody.model,
+                baseUrl: requestBody.baseUrl,
+            });
+            const providerInfo = (await listAIProviders(user.id)).find((item) => item.provider === provider);
+            if (!providerInfo)
+                throw new Error("Could not load saved AI provider settings.");
+            return json({ success: true, provider: providerInfo });
+        }
+        if (aiProviderMatch && req.method === "DELETE") {
+            await deleteAIProvider(user.id, aiProviderMatch[1]);
+            return json({ success: true });
+        }
         if (path === "github/repositories" && req.method === "GET") {
             return json({
                 success: true,
@@ -246,7 +279,7 @@ export async function handleApi(req) {
                 req.method === "POST") {
                 const requestBody = await body(req);
                 const provider = requestBody.provider || "OPENROUTER";
-                if (provider !== "OPENROUTER") {
+                if (!isAIProvider(provider)) {
                     return error("Unsupported AI provider", 400);
                 }
                 const result = await startGenerateProject(projectId, user.id, String(requestBody.prompt || ""), provider, action);
@@ -258,7 +291,12 @@ export async function handleApi(req) {
                 }, 202);
             }
             if (action === "review" && req.method === "POST") {
-                const result = await startReviewProject(projectId, user.id);
+                const requestBody = await body(req);
+                const provider = requestBody.provider || "OPENROUTER";
+                if (!isAIProvider(provider)) {
+                    return error("Unsupported AI provider", 400);
+                }
+                const result = await startReviewProject(projectId, user.id, provider);
                 return json({
                     success: true,
                     ...result,
@@ -266,9 +304,13 @@ export async function handleApi(req) {
             }
             if (action === "chat" && req.method === "POST") {
                 const requestBody = await body(req);
+                const provider = requestBody.provider || "OPENROUTER";
+                if (!isAIProvider(provider)) {
+                    return error("Unsupported AI provider", 400);
+                }
                 return json({
                     success: true,
-                    ...(await chatWithProject(projectId, user.id, requestBody.messages)),
+                    ...(await chatWithProject(projectId, user.id, requestBody.messages, provider)),
                 });
             }
             // GET /api/projects/:projectId/runs/:runId
@@ -359,17 +401,7 @@ export async function handleApi(req) {
         if (path === "ai/providers" && req.method === "GET") {
             return json({
                 success: true,
-                providers: await prisma.aIProvider.findMany({
-                    where: { userId: user.id },
-                    select: {
-                        id: true,
-                        provider: true,
-                        label: true,
-                        enabled: true,
-                        model: true,
-                        baseUrl: true,
-                    },
-                }),
+                providers: await listAIProviders(user.id),
             });
         }
         return error("Not found", 404);
@@ -405,6 +437,15 @@ export async function handleApi(req) {
         }
         if (message.includes("required") ||
             message.includes("30,000 characters") ||
+            message.includes("200 characters or fewer") ||
+            message.includes("public HTTPS") ||
+            message.includes("public DNS hostname") ||
+            message.includes("public IP addresses") ||
+            message.includes("could not be resolved") ||
+            message.includes("without credentials, query, or fragment") ||
+            message.includes("Model name") ||
+            message.includes("not configured") ||
+            message.includes("disabled in your AI provider settings") ||
             message.includes("Unsupported AI provider") ||
             message.startsWith("Chat ")) {
             return error(message, 400);

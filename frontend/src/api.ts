@@ -7,6 +7,17 @@ export type User = {
   avatarUrl: string | null;
 };
 
+export type AIProvider = "OPENROUTER" | "OPENAI" | "CUSTOM";
+
+export type AIProviderInfo = {
+  provider: AIProvider;
+  label: string;
+  configured: boolean;
+  hasUserKey: boolean;
+  model: string;
+  baseUrl: string;
+};
+
 /** One turn in the short project-question conversation sent to the API. */
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -527,14 +538,27 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ prompt }),
     }),
-  chat: (id: string, messages: ChatMessage[]) =>
+  chat: (id: string, messages: ChatMessage[], provider: AIProvider) =>
     request<{ success: true; answer: string }>(`/api/projects/${id}/chat`, {
       method: "POST",
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, provider }),
     }),
   history: (id: string) => request<any>(`/api/projects/${id}/history`),
   agent: () => request<any>("/api/agent"),
-  providers: () => request<any>("/api/ai/providers"),
+  providers: () =>
+    request<{ success: true; providers: AIProviderInfo[] }>("/api/ai/providers"),
+  saveAIProvider: (
+    provider: AIProvider,
+    settings: { apiKey?: string; model?: string; baseUrl?: string },
+  ) =>
+    request<{ success: true; provider: AIProviderInfo }>(
+      `/api/ai/providers/${provider}`,
+      { method: "PUT", body: JSON.stringify(settings) },
+    ),
+  deleteAIProvider: (provider: AIProvider) =>
+    request<{ success: true }>(`/api/ai/providers/${provider}`, {
+      method: "DELETE",
+    }),
   // Local Agent requests are authenticated directly with its browser-held pairing token.
   localAgent: {
     health: (token: string) =>

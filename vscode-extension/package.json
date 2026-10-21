@@ -1,0 +1,172 @@
+{
+  "name": "devforge-ai-developer-tools",
+  "displayName": "DevForge AI Developer Tools",
+  "description": "DevForge AI coding assistant with a custom chat UI, project generation, code review, modification, explanations, tests, and error fixing through the hosted backend.",
+  "version": "0.2.2",
+  "publisher": "aungkolin",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages",
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:devforge.selectProject",
+    "onCommand:devforge.signOut",
+    "onCommand:devforge.signIn",
+    "onCommand:devforge.openChat",
+    "onCommand:devforge.generateProject",
+    "onCommand:devforge.reviewCurrentFile",
+    "onCommand:devforge.reviewWorkspace",
+    "onCommand:devforge.modifyCurrentFile",
+    "onCommand:devforge.explainSelection",
+    "onCommand:devforge.generateTests",
+    "onCommand:devforge.fixCurrentFile",
+    "onCommand:devforge.clearFindings"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "devforge.signIn",
+        "title": "DevForge AI: Sign In to Existing Account",
+        "category": "DevForge AI"
+      },
+      {
+        "command": "devforge.selectProject",
+        "title": "DevForge AI: Select Project",
+        "category": "DevForge AI"
+      },
+      {
+        "command": "devforge.signOut",
+        "title": "DevForge AI: Sign Out",
+        "category": "DevForge AI"
+      },
+      {
+        "command": "devforge.openChat",
+        "title": "DevForge AI: Open Chat",
+        "category": "DevForge AI"
+      },
+      {
+        "command": "devforge.generateProject",
+        "title": "DevForge AI: Generate Project",
+        "category": "DevForge AI"
+      },
+      {
+        "command": "devforge.reviewCurrentFile",
+        "title": "DevForge AI: Review Current File",
+        "category": "DevForge AI"
+      },
+      {
+        "command": "devforge.reviewWorkspace",
+        "title": "DevForge AI: Review Workspace",
+        "category": "DevForge AI"
+      },
+      {
+        "command": "devforge.modifyCurrentFile",
+        "title": "DevForge AI: Modify Current File",
+        "category": "DevForge AI"
+      },
+      {
+        "command": "devforge.explainSelection",
+        "title": "DevForge AI: Explain Code / Selection",
+        "category": "DevForge AI"
+      },
+      {
+        "command": "devforge.generateTests",
+        "title": "DevForge AI: Generate Tests",
+        "category": "DevForge AI"
+      },
+      {
+        "command": "devforge.fixCurrentFile",
+        "title": "DevForge AI: Fix Errors in Current File",
+        "category": "DevForge AI"
+      },
+      {
+        "command": "devforge.clearFindings",
+        "title": "DevForge AI: Clear Findings",
+        "category": "DevForge AI"
+      }
+    ],
+    "configuration": {
+      "title": "DevForge AI Developer Tools",
+      "properties": {
+        "devforge.backendUrl": {
+          "type": "string",
+          "default": "https://devforge-ai-tool.netlify.app",
+          "description": "Base URL of your existing DevForge Netlify site. The extension uses existing /api/auth/me, /api/projects, and /api/projects/:id/chat routes. No provider API key is stored in the extension."
+        },
+        "devforge.maxWorkspaceFiles": {
+          "type": "number",
+          "default": 40,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Maximum number of source files included in one workspace review."
+        },
+        "devforge.maxFileBytes": {
+          "type": "number",
+          "default": 30000,
+          "minimum": 1000,
+          "maximum": 100000,
+          "description": "Maximum size of each source file sent for review."
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "devforge.openChat",
+          "group": "navigation@99"
+        },
+        {
+          "command": "devforge.reviewCurrentFile",
+          "when": "editorTextFocus",
+          "group": "navigation@100"
+        },
+        {
+          "command": "devforge.modifyCurrentFile",
+          "when": "editorTextFocus",
+          "group": "navigation@101"
+        },
+        {
+          "command": "devforge.explainSelection",
+          "when": "editorTextFocus",
+          "group": "navigation@102"
+        },
+        {
+          "command": "devforge.generateTests",
+          "when": "editorTextFocus",
+          "group": "navigation@103"
+        },
+        {
+          "command": "devforge.fixCurrentFile",
+          "when": "editorTextFocus",
+          "group": "navigation@104"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "devforge.reviewWorkspace",
+          "when": "explorerViewletFocus",
+          "group": "navigation@100"
+        }
+      ],
+      "commandPalette": []
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "package": "npm run compile && npx vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.7.2",
+    "@vscode/vsce": "^2.32.0"
+  },
+  "icon": "media/icon.png"
+}

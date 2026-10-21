@@ -21,6 +21,7 @@
         "npm:@vitejs/plugin-react@^4.7.0",
         "npm:autoprefixer@^10.4.21",
         "npm:dotenv@^17.2.3",
+        "npm:fflate@~0.8.3",
         "npm:netlify-cli@^27.11.2",
         "npm:postcss@^8.5.6",
         "npm:prisma@7.10.0",

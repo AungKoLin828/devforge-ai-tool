@@ -1,8 +1,8 @@
 {
   "name": "devforge-ai-developer-tools",
   "displayName": "DevForge AI Developer Tools",
-  "description": "DevForge AI coding assistant with a custom chat UI, project generation, code review, modification, explanations, tests, and error fixing through the hosted backend.",
-  "version": "0.2.2",
+  "description": "DevForge AI coding assistant using either your local DevForge backend or the hosted Netlify backend.",
+  "version": "0.2.3",
   "publisher": "aungkolin",
   "license": "UNLICENSED",
   "engines": {
@@ -94,10 +94,28 @@
     "configuration": {
       "title": "DevForge AI Developer Tools",
       "properties": {
-        "devforge.backendUrl": {
+        "devforge.backendEnvironment": {
+          "type": "string",
+          "enum": [
+            "local",
+            "netlify"
+          ],
+          "enumDescriptions": [
+            "Use the locally running DevForge web app and its local Netlify Functions.",
+            "Use the deployed DevForge Netlify site."
+          ],
+          "default": "local",
+          "description": "Choose whether the extension uses your local DevForge backend or the hosted Netlify backend."
+        },
+        "devforge.localBackendUrl": {
+          "type": "string",
+          "default": "http://localhost:8888",
+          "description": "Local DevForge backend base URL. Start the web app with `npm run dev:netlify` so Netlify Functions are available, normally at http://localhost:8888."
+        },
+        "devforge.netlifyBackendUrl": {
           "type": "string",
           "default": "https://devforge-ai-tool.netlify.app",
-          "description": "Base URL of your existing DevForge Netlify site. The extension uses existing /api/auth/me, /api/projects, and /api/projects/:id/chat routes. No provider API key is stored in the extension."
+          "description": "Base URL of the deployed DevForge Netlify site."
         },
         "devforge.maxWorkspaceFiles": {
           "type": "number",

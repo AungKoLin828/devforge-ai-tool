@@ -2,6 +2,31 @@
 
 DevForge AI adds a custom chat panel and coding commands to VS Code. It connects to the **existing DevForge Netlify backend** and does not add or require an AI-provider API key inside the extension. The extension source is self-contained under `vscode-extension/`; no DevForge web app, Netlify Function, database, or local-agent source is changed by this package.
 
+## Choose local or Netlify backend
+
+The extension supports both environments without changing the DevForge web app or Netlify Functions. Open **VS Code Settings** (`Ctrl+,`) and search for **DevForge AI**:
+
+- `DevForge AI Developer Tools: Backend Environment` = `local` or `netlify`.
+- `Local Backend Url` defaults to `http://localhost:8888`.
+- `Netlify Backend Url` defaults to `https://devforge-ai-tool.netlify.app`.
+
+### Local development
+
+1. Start the DevForge web app from its project root using `npm run dev:netlify`.
+2. Netlify CLI normally serves the app and functions at `http://localhost:8888`. Use that full origin in `Local Backend Url` if your port differs.
+3. Set `Backend Environment` to `local`.
+4. Run **DevForge AI: Sign In to Existing Account**. Sign in to the local app in the browser and copy the local `devforge_session` cookie value from browser DevTools. Local and hosted cookies are stored separately.
+
+Do not use the Vite-only `http://localhost:5173` URL unless your local setup also routes `/api/*` to the Netlify Functions. The extension needs the backend routes, not just the frontend dev server. HTTP is permitted only for loopback local development.
+
+### Hosted Netlify deployment
+
+1. Set `Backend Environment` to `netlify`.
+2. Keep `Netlify Backend Url` set to your deployed site URL.
+3. Run **DevForge AI: Sign In to Existing Account** and copy the `devforge_session` cookie from the hosted site's browser session.
+
+When changing environments, sign in separately for each environment. The extension stores the two session cookie values separately. No AI provider API key is configured or stored by this extension; the selected backend must have a valid account session and AI provider configuration.
+
 ## How the connection works
 
 The extension uses existing routes from the hosted DevForge application:
@@ -17,7 +42,7 @@ It does **not** call a new `/api/vscode/assistant` endpoint. AI provider credent
 
 - VS Code 1.85 or later.
 - Node.js 20 or later recommended for building.
-- An account on your deployed DevForge site.
+- An account on the selected local or hosted DevForge site.
 - A valid `devforge_session` session cookie from your own signed-in browser session.
 - At least one DevForge project, or permission to create one.
 - An AI provider configured for your account in the existing DevForge web app.
@@ -36,13 +61,13 @@ npm run package
 The package filename is derived from `package.json` and version. For this release it should be:
 
 ```text
-devforge-ai-developer-tools-0.2.2.vsix
+devforge-ai-developer-tools-0.2.3.vsix
 ```
 
 Install it:
 
 ```powershell
-code --install-extension .\devforge-ai-developer-tools-0.2.2.vsix --force
+code --install-extension .\devforge-ai-developer-tools-0.2.3.vsix --force
 ```
 
 If the filename differs, use the actual `.vsix` file created by `npm run package`. Reload VS Code after installing.

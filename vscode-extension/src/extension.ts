@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 
 const DIAGNOSTIC_SOURCE = 'DevForge AI';
-const SESSION_SECRET_KEY = 'devforge.backendSessionCookie';
-const PROJECT_STATE_KEY = 'devforge.selectedProjectId';
+const SESSION_SECRET_KEY_PREFIX = 'devforge.backendSessionCookie';
+const PROJECT_STATE_KEY_PREFIX = 'devforge.selectedProjectId';
 const EXCLUDED_DIRS = new Set([
   '.git', '.next', '.nuxt', '.output', '.turbo', '.vercel', '.vscode',
   'coverage', 'dist', 'build', 'out', 'vendor', 'node_modules', 'target',
@@ -124,8 +124,8 @@ async function runReview(
   output: vscode.OutputChannel,
 ): Promise<void> {
   const backendUrl = getBackendUrl();
-  if (!/^https:\/\//i.test(backendUrl)) {
-    vscode.window.showErrorMessage('DevForge AI backend URL must use HTTPS.');
+  if (!isAllowedBackendUrl(backendUrl)) {
+    vscode.window.showErrorMessage('DevForge AI requires HTTPS, except for localhost/127.0.0.1 when using the local backend.');
     return;
   }
 
@@ -270,13 +270,39 @@ type BackendRequest = { action: string; systemPrompt?: string; prompt: string; f
 type ApiProject = { id: string; name: string; description?: string | null; stack?: string | null; status?: string };
 
 function getBackendUrl(): string {
-  return String(vscode.workspace.getConfiguration('devforge').get('backendUrl', 'https://devforge-ai-tool.netlify.app')).trim().replace(/\/+$/, '');
+  const config = vscode.workspace.getConfiguration('devforge');
+  const environment = config.get<'local' | 'netlify'>('backendEnvironment', 'local');
+  const key = environment === 'local' ? 'localBackendUrl' : 'netlifyBackendUrl';
+  const fallback = environment === 'local' ? 'http://localhost:8888' : 'https://devforge-ai-tool.netlify.app';
+  return String(config.get(key, fallback)).trim().replace(/\/+$/, '');
+}
+
+function getBackendEnvironment(): 'local' | 'netlify' {
+  return vscode.workspace.getConfiguration('devforge').get<'local' | 'netlify'>('backendEnvironment', 'local');
+}
+
+function getSessionSecretKey(): string {
+  // Keep local and hosted sessions separate so switching environments never sends the wrong cookie.
+  return `${SESSION_SECRET_KEY_PREFIX}:${getBackendEnvironment()}`;
+}
+
+function getProjectStateKey(): string {
+  // A project selected on localhost must not accidentally be reused against Netlify (or vice versa).
+  return `${PROJECT_STATE_KEY_PREFIX}:${getBackendEnvironment()}`;
+}
+
+function isAllowedBackendUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'https:') return true;
+    return url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  } catch { return false; }
 }
 
 async function apiRequest<T>(context: vscode.ExtensionContext, path: string, init: RequestInit = {}, allowUnauthenticated = false): Promise<T> {
   const baseUrl = getBackendUrl();
-  if (!/^https:\/\//i.test(baseUrl)) throw new Error('DevForge backend URL must use HTTPS.');
-  const cookie = await context.secrets.get(SESSION_SECRET_KEY);
+  if (!isAllowedBackendUrl(baseUrl)) throw new Error('DevForge backend must use HTTPS, except localhost/127.0.0.1 for local development.');
+  const cookie = await context.secrets.get(getSessionSecretKey());
   const headers = new Headers(init.headers ?? {});
   headers.set('Accept', 'application/json');
   if (init.body !== undefined && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
@@ -299,9 +325,10 @@ async function apiRequest<T>(context: vscode.ExtensionContext, path: string, ini
 
 async function signIn(context: vscode.ExtensionContext): Promise<void> {
   const baseUrl = getBackendUrl();
+  if (!isAllowedBackendUrl(baseUrl)) { vscode.window.showErrorMessage('Invalid backend URL. Use HTTPS for Netlify or localhost HTTP for local development.'); return; }
   const opened = await vscode.env.openExternal(vscode.Uri.parse(baseUrl));
   if (!opened) { vscode.window.showWarningMessage(`Open ${baseUrl} in your browser and sign in with GitHub first.`); }
-  const instructions = 'Sign in to DevForge in the browser that just opened. Then copy the value of the devforge_session cookie from browser DevTools → Application/Storage → Cookies → your DevForge site. Paste ONLY the cookie value below. It is saved in VS Code SecretStorage, not in settings or source code.';
+  const instructions = `Sign in to DevForge in the browser that just opened. Then copy the value of the devforge_session cookie from browser DevTools → Application/Storage → Cookies → ${baseUrl}. Paste ONLY the cookie value below. It is saved in VS Code SecretStorage, not in settings or source code. Local and Netlify sessions are stored separately.`;
   const cookieValue = await vscode.window.showInputBox({
     title: 'DevForge AI: Connect existing account',
     prompt: instructions,
@@ -311,30 +338,31 @@ async function signIn(context: vscode.ExtensionContext): Promise<void> {
   });
   if (!cookieValue?.trim()) return;
   const clean = cookieValue.trim().replace(/^devforge_session=/, '').replace(/;.*$/, '');
-  const previous = await context.secrets.get(SESSION_SECRET_KEY);
-  await context.secrets.store(SESSION_SECRET_KEY, clean);
+  const secretKey = getSessionSecretKey();
+  const previous = await context.secrets.get(secretKey);
+  await context.secrets.store(secretKey, clean);
   try {
     const result = await apiRequest<{ success: boolean; user: { githubUsername?: string | null; githubName?: string | null; email?: string | null } }>(context, '/api/auth/me');
     const user = result.user;
     vscode.window.showInformationMessage(`Connected to DevForge${user?.githubUsername ? ` as @${user.githubUsername}` : user?.email ? ` as ${user.email}` : ''}.`);
   } catch (error) {
-    if (previous) await context.secrets.store(SESSION_SECRET_KEY, previous); else await context.secrets.delete(SESSION_SECRET_KEY);
+    if (previous) await context.secrets.store(secretKey, previous); else await context.secrets.delete(secretKey);
     vscode.window.showErrorMessage(`Could not verify the DevForge session: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
 async function signOut(context: vscode.ExtensionContext): Promise<void> {
-  await context.secrets.delete(SESSION_SECRET_KEY);
-  await context.globalState.update(PROJECT_STATE_KEY, undefined);
+  await context.secrets.delete(getSessionSecretKey());
+  await context.globalState.update(getProjectStateKey(), undefined);
   vscode.window.showInformationMessage('DevForge session removed from VS Code SecretStorage. Your DevForge web account is unchanged.');
 }
 
 async function requireSession(context: vscode.ExtensionContext): Promise<void> {
-  if (!(await context.secrets.get(SESSION_SECRET_KEY))) {
-    const action = await vscode.window.showInformationMessage('Connect your existing DevForge account to use its hosted AI service.', 'Sign In');
+  if (!(await context.secrets.get(getSessionSecretKey()))) {
+    const action = await vscode.window.showInformationMessage('Connect your DevForge account to the selected backend.', 'Sign In');
     if (action === 'Sign In') await signIn(context);
   }
-  if (!(await context.secrets.get(SESSION_SECRET_KEY))) throw new Error('Sign in to your DevForge account first.');
+  if (!(await context.secrets.get(getSessionSecretKey()))) throw new Error('Sign in to your DevForge account first.');
   await apiRequest(context, '/api/auth/me');
 }
 
@@ -356,7 +384,7 @@ async function selectProject(context: vscode.ExtensionContext): Promise<ApiProje
   const picked = await vscode.window.showQuickPick(choices, { title: 'Choose the DevForge project for this workspace', placeHolder: 'Select a project or create one' });
   if (!picked) return undefined;
   if (picked.project) {
-    await context.globalState.update(PROJECT_STATE_KEY, picked.project.id);
+    await context.globalState.update(getProjectStateKey(), picked.project.id);
     vscode.window.showInformationMessage(`DevForge project selected: ${picked.project.name}`);
     return picked.project;
   }
@@ -367,7 +395,7 @@ async function selectProject(context: vscode.ExtensionContext): Promise<ApiProje
     const created = await apiRequest<{ project: ApiProject }>(context, '/api/projects', {
       method: 'POST', body: JSON.stringify({ name: name.trim(), description: `Created from VS Code workspace: ${workspaceName}`, stack: detectWorkspaceStack() }),
     });
-    await context.globalState.update(PROJECT_STATE_KEY, created.project.id);
+    await context.globalState.update(getProjectStateKey(), created.project.id);
     vscode.window.showInformationMessage(`Created and selected DevForge project: ${created.project.name}`);
     return created.project;
   }
@@ -383,12 +411,12 @@ function detectWorkspaceStack(): string {
 
 async function ensureProject(context: vscode.ExtensionContext): Promise<ApiProject> {
   await requireSession(context);
-  const selectedId = context.globalState.get<string>(PROJECT_STATE_KEY);
+  const selectedId = context.globalState.get<string>(getProjectStateKey());
   const projects = await listProjects(context);
   const selected = projects.find(project => project.id === selectedId);
   if (selected) return selected;
   if (projects.length === 1) {
-    await context.globalState.update(PROJECT_STATE_KEY, projects[0].id);
+    await context.globalState.update(getProjectStateKey(), projects[0].id);
     return projects[0];
   }
   const chosen = await selectProject(context);

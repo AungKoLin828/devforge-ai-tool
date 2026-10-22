@@ -35,7 +35,10 @@ const DIAGNOSTIC_SOURCE_EXTENSIONS =
   "(?:tsx?|jsx?|mjs|cjs|vue|svelte|py|go|rs|java|c|cc|cpp|h|hpp|css|json|html)";
 
 function normalizeDiagnosticPath(value: string) {
-  return value.replaceAll("\\", "/").replace(/^\.?\//, "").toLowerCase();
+  return value
+    .replaceAll("\\", "/")
+    .replace(/^\.?\//, "")
+    .toLowerCase();
 }
 
 function parseBuildDiagnostics(result: LocalProjectResult | null) {
@@ -97,7 +100,10 @@ function parseBuildDiagnostics(result: LocalProjectResult | null) {
           break;
         }
       }
-      if (!diagnostic && /\b(error|failed to compile|build failed)\b/i.test(line)) {
+      if (
+        !diagnostic &&
+        /\b(error|failed to compile|build failed)\b/i.test(line)
+      ) {
         diagnostic = {
           file: null,
           line: null,
@@ -524,9 +530,7 @@ function App({ user }: { user: User }) {
   const [selectedAIProvider, setSelectedAIProvider] = useState<AIProvider>(
     () => {
       const saved = window.localStorage.getItem("devforge-ai-provider");
-      return saved === "OPENAI" || saved === "CUSTOM"
-        ? saved
-        : "OPENROUTER";
+      return saved === "OPENAI" || saved === "CUSTOM" ? saved : "OPENROUTER";
     },
   );
   const [aiProviderConfigs, setAIProviderConfigs] = useState<AIProviderInfo[]>(
@@ -1564,9 +1568,7 @@ function App({ user }: { user: User }) {
               `${event.stream === "stderr" ? "[stderr] " : ""}${event.text}`,
             );
           } else if (event.type === "stage-complete") {
-            appendLocalConsole(
-              `\n[exit ${event.stage.code ?? "unknown"}]\n`,
-            );
+            appendLocalConsole(`\n[exit ${event.stage.code ?? "unknown"}]\n`);
             if (
               /No supported build\/test configuration was found/i.test(
                 event.stage.stderr,
@@ -1735,7 +1737,9 @@ function App({ user }: { user: User }) {
         const archivePath = segments.join("/");
         const pathKey = archivePath.toLowerCase();
         if (seenPaths.has(pathKey)) {
-          throw new Error(`The saved project has a duplicate file: ${file.path}`);
+          throw new Error(
+            `The saved project has a duplicate file: ${file.path}`,
+          );
         }
         seenPaths.add(pathKey);
         fileTree[projectFolder][archivePath] = strToU8(file.content);
@@ -2107,31 +2111,27 @@ function App({ user }: { user: User }) {
   const codeContent = codeArtifact?.content;
   const generatedFiles = Array.isArray(codeContent) ? codeContent : [];
   const buildDiagnostics = parseBuildDiagnostics(localResult);
-  const selectedWorkspacePath = selected
-    ? `projects/${selected.id}`
-    : "";
+  const selectedWorkspacePath = selected ? `projects/${selected.id}` : "";
   const workspaceMatchesSelectedProject =
     workspaceListing?.path === selectedWorkspacePath ||
     Boolean(
       selectedWorkspacePath &&
-        workspaceListing?.path.startsWith(`${selectedWorkspacePath}/`),
+      workspaceListing?.path.startsWith(`${selectedWorkspacePath}/`),
     );
   const editorLineCount = Math.max(1, workspaceEditorDraft.split("\n").length);
   const editorFileName = workspaceEditorFile?.path.split(/[\\/]/).at(-1) || "";
   const editorLanguage =
     editorFileName.split(".").at(-1)?.toUpperCase() || "TEXT";
-  const editorFileDiagnostics = buildDiagnostics.filter(
-    (diagnostic) => {
-      if (!diagnostic.file || !workspaceEditorFile) return false;
-      const errorPath = normalizeDiagnosticPath(diagnostic.file);
-      const editorPath = normalizeDiagnosticPath(workspaceEditorFile.path);
-      return (
-        errorPath === editorPath ||
-        errorPath.endsWith(`/${editorPath}`) ||
-        editorPath.endsWith(`/${errorPath}`)
-      );
-    },
-  );
+  const editorFileDiagnostics = buildDiagnostics.filter((diagnostic) => {
+    if (!diagnostic.file || !workspaceEditorFile) return false;
+    const errorPath = normalizeDiagnosticPath(diagnostic.file);
+    const editorPath = normalizeDiagnosticPath(workspaceEditorFile.path);
+    return (
+      errorPath === editorPath ||
+      errorPath.endsWith(`/${editorPath}`) ||
+      editorPath.endsWith(`/${errorPath}`)
+    );
+  });
   const reviewArtifacts = artifacts.filter(
     (artifact: any) =>
       artifact.type === "REVIEW" &&
@@ -2511,66 +2511,65 @@ function App({ user }: { user: User }) {
                     id="workspace-explorer-list"
                     className="max-h-[650px] overflow-auto border-b border-slate-800 p-3 lg:border-b-0 lg:border-r"
                   >
-                      {!localAgentInfo ? (
-                        <p className="p-2 text-sm text-slate-500">
-                          Connect the Local Agent to view your workspace.
-                        </p>
-                      ) : workspaceEntriesLoading && !workspaceListing ? (
-                        <p className="p-2 text-sm text-slate-500">
-                          Loading workspace files...
-                        </p>
-                      ) : !workspaceListing?.entries.length ? (
-                        <p className="p-2 text-sm text-slate-500">
-                          This folder is empty.
-                        </p>
-                      ) : (
-                        <div className="space-y-1 font-mono text-xs">
-                          {workspaceListing.entries.map((entry) => (
-                            <button
-                              type="button"
-                              key={entry.path}
-                              onClick={() =>
-                                entry.type === "directory"
-                                  ? void browseWorkspaceDirectory(entry.path)
-                                  : void openWorkspaceFile(entry)
-                              }
-                              disabled={
-                                workspaceEntriesLoading ||
-                                (entry.type === "file" &&
-                                  entry.editable === false)
-                              }
-                              title={
-                                entry.type === "file" &&
-                                entry.editable === false
-                                  ? "Files larger than 1 MB are not editable in the browser."
-                                  : entry.path
-                              }
-                              className={`block w-full truncate rounded-md px-2 py-2 text-left ${
-                                workspaceEditorFile?.path === entry.path
-                                  ? "bg-indigo-500/15 text-indigo-200"
-                                  : entry.editable === false
-                                    ? "cursor-not-allowed text-slate-600"
-                                    : "text-slate-300 hover:bg-slate-800"
-                              }`}
+                    {!localAgentInfo ? (
+                      <p className="p-2 text-sm text-slate-500">
+                        Connect the Local Agent to view your workspace.
+                      </p>
+                    ) : workspaceEntriesLoading && !workspaceListing ? (
+                      <p className="p-2 text-sm text-slate-500">
+                        Loading workspace files...
+                      </p>
+                    ) : !workspaceListing?.entries.length ? (
+                      <p className="p-2 text-sm text-slate-500">
+                        This folder is empty.
+                      </p>
+                    ) : (
+                      <div className="space-y-1 font-mono text-xs">
+                        {workspaceListing.entries.map((entry) => (
+                          <button
+                            type="button"
+                            key={entry.path}
+                            onClick={() =>
+                              entry.type === "directory"
+                                ? void browseWorkspaceDirectory(entry.path)
+                                : void openWorkspaceFile(entry)
+                            }
+                            disabled={
+                              workspaceEntriesLoading ||
+                              (entry.type === "file" &&
+                                entry.editable === false)
+                            }
+                            title={
+                              entry.type === "file" && entry.editable === false
+                                ? "Files larger than 1 MB are not editable in the browser."
+                                : entry.path
+                            }
+                            className={`block w-full truncate rounded-md px-2 py-2 text-left ${
+                              workspaceEditorFile?.path === entry.path
+                                ? "bg-indigo-500/15 text-indigo-200"
+                                : entry.editable === false
+                                  ? "cursor-not-allowed text-slate-600"
+                                  : "text-slate-300 hover:bg-slate-800"
+                            }`}
+                          >
+                            <span
+                              className="mr-2 text-slate-500"
+                              aria-hidden="true"
                             >
-                              <span
-                                className="mr-2 text-slate-500"
-                                aria-hidden="true"
-                              >
-                                {entry.type === "directory" ? "▸" : "·"}
+                              {entry.type === "directory" ? "▸" : "·"}
+                            </span>
+                            {entry.name}
+                            {entry.type === "file" && (
+                              <span className="float-right text-slate-600">
+                                {entry.size !== undefined
+                                  ? `${Math.ceil(entry.size / 1024)} KB`
+                                  : ""}
                               </span>
-                              {entry.name}
-                              {entry.type === "file" && (
-                                <span className="float-right text-slate-600">
-                                  {entry.size !== undefined
-                                    ? `${Math.ceil(entry.size / 1024)} KB`
-                                    : ""}
-                                </span>
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="flex min-h-[560px] min-w-0 flex-col bg-[#080d17]">
                     {workspaceEditorFile ? (
@@ -2693,12 +2692,9 @@ function App({ user }: { user: User }) {
                 </div>
                 <div className="border-t border-slate-800 px-4 py-3">
                   <p className="text-xs leading-5 text-slate-500">
-                    Build diagnostics can open their source file at the
-                    reported line. Save writes directly to the selected local
-                    file; use{" "}
-                    <span className="text-emerald-300">
-                      Build edited files
-                    </span>{" "}
+                    Build diagnostics can open their source file at the reported
+                    line. Save writes directly to the selected local file; use{" "}
+                    <span className="text-emerald-300">Build edited files</span>{" "}
                     to compile local changes without syncing over them.
                     Hidden/secret files, dependency folders, symlinks, binary
                     files, and files over 1 MB are not editable here. Review
@@ -2772,7 +2768,9 @@ function App({ user }: { user: User }) {
               {/* One prompt supports initial generation and later modification requests. */}
               <div className="mt-5 glass rounded-2xl p-4">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <div className="text-sm font-semibold">AI Project Builder</div>
+                  <div className="text-sm font-semibold">
+                    AI Project Builder
+                  </div>
                   <label className="flex items-center gap-2 text-xs text-slate-400">
                     AI provider
                     <select
@@ -2865,9 +2863,8 @@ function App({ user }: { user: User }) {
                           className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
                         />
                         <span className="mt-1 block text-[11px] text-slate-500">
-                          Must support the OpenAI-compatible
-                          /chat/completions API. Private/local endpoints are
-                          not allowed.
+                          Must support the OpenAI-compatible /chat/completions
+                          API. Private/local endpoints are not allowed.
                         </span>
                       </label>
                     )}
@@ -3359,9 +3356,9 @@ function App({ user }: { user: User }) {
                     Use <strong>Sync files to PC</strong> to copy them into{" "}
                     <code>projects/{selected.id}</code> with the Local Agent, or
                     select <strong>Download ZIP</strong> to save a copy without
-                    connecting the agent. Build/Test require the connected
-                    Local Agent and run scripts on your PC. Only run projects
-                    you trust.
+                    connecting the agent. Build/Test require the connected Local
+                    Agent and run scripts on your PC. Only run projects you
+                    trust.
                   </p>
                 </div>
                 {localConsoleOutput && (
@@ -3628,10 +3625,139 @@ function App({ user }: { user: User }) {
   );
 }
 
+/**
+ * /connect page opened by the VS Code extension. It shows the pairing code,
+ * signs the user in with GitHub if needed, and approves the pairing so the
+ * extension receives its session automatically — no cookie copying.
+ */
+function ConnectExtension({
+  user,
+  loading,
+}: {
+  user: User | null;
+  loading: boolean;
+}) {
+  const [code, setCode] = useState<string | null>(null);
+  const [status, setStatus] = useState<
+    "idle" | "approving" | "approved" | "error"
+  >("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // The code arrives in the query string: /connect?code=...
+    const params = new URLSearchParams(window.location.search);
+    const value = params.get("code");
+    if (value) setCode(value);
+    else
+      setError(
+        "No pairing code was provided. Start sign-in from VS Code again.",
+      );
+  }, []);
+
+  async function approve() {
+    if (!code || status === "approving") return;
+    setStatus("approving");
+    setError(null);
+    try {
+      await api.approvePairing(code);
+      setStatus("approved");
+    } catch (cause) {
+      setStatus("error");
+      setError(cause instanceof Error ? cause.message : "Pairing failed");
+    }
+  }
+
+  // Auto-approve as soon as the user is signed in and a code is present.
+  useEffect(() => {
+    if (user && code && status === "idle") void approve();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, code, status]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen grid place-items-center bg-slate-950 text-slate-200">
+        <div
+          className="flex items-center gap-3"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="api-loading-spinner" aria-hidden="true" />
+          <span>Connecting to VS Code…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen grid place-items-center bg-slate-950 px-4 text-slate-200">
+        <div className="w-full max-w-md space-y-4 text-center">
+          <h1 className="text-2xl font-semibold">
+            Connect VS Code to DevForge
+          </h1>
+          <p className="text-sm text-slate-400">
+            Sign in with GitHub first. DevForge will then connect VS Code
+            automatically.
+          </p>
+          <button
+            type="button"
+            onClick={() => api.login()}
+            className="w-full rounded-lg bg-sky-600 px-4 py-2.5 font-medium text-white hover:bg-sky-500"
+          >
+            Sign in with GitHub
+          </button>
+          {error ? <p className="text-sm text-rose-400">{error}</p> : null}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen grid place-items-center bg-slate-950 px-4 text-slate-200">
+      <div className="w-full max-w-md space-y-4 text-center">
+        <h1 className="text-2xl font-semibold">Connect VS Code to DevForge</h1>
+        {status === "approved" ? (
+          <>
+            <p className="text-sm text-emerald-400">
+              VS Code is connected. You can close this tab and return to VS
+              Code.
+            </p>
+          </>
+        ) : status === "error" ? (
+          <>
+            <p className="text-sm text-rose-400">{error}</p>
+            <button
+              type="button"
+              onClick={approve}
+              className="w-full rounded-lg bg-sky-600 px-4 py-2.5 font-medium text-white hover:bg-sky-500"
+            >
+              Try again
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-slate-400">
+              Approving connection for VS Code…
+            </p>
+            <div
+              className="flex items-center justify-center gap-3"
+              role="status"
+            >
+              <span className="api-loading-spinner" aria-hidden="true" />
+              <span>Please wait…</span>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Resolve the current session before rendering either the login or project UI.
 function Root() {
-  const isPublicGuide =
-    window.location.pathname.replace(/\/+$/, "") === "/guide";
+  const pathname = window.location.pathname.replace(/\/+$/, "");
+  const isPublicGuide = pathname === "/guide";
+  const isConnectPage = pathname === "/connect";
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -3645,6 +3771,7 @@ function Root() {
       .finally(() => setLoading(false));
   }, [isPublicGuide]);
   if (isPublicGuide) return <UserGuide />;
+  if (isConnectPage) return <ConnectExtension user={user} loading={loading} />;
   if (loading) {
     return (
       <div className="min-h-screen grid place-items-center bg-slate-950 text-slate-200">

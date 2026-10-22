@@ -191,7 +191,9 @@ async function localAgentRequest<T>(
           `The Local Agent does not recognize ${path}. Stop the running agent, update/reinstall it, and start it again before retrying.`,
         );
       }
-      throw new Error(body.error || `Local agent request failed (${response.status})`);
+      throw new Error(
+        body.error || `Local agent request failed (${response.status})`,
+      );
     }
     return body as T;
   } catch (cause) {
@@ -279,8 +281,14 @@ async function localAgentProjectStream(
           }
           throw new Error(error);
         }
-        if (!fallbackBody || typeof fallbackBody !== "object" || !("result" in fallbackBody)) {
-          throw new Error("The Local Agent returned an invalid build/test result.");
+        if (
+          !fallbackBody ||
+          typeof fallbackBody !== "object" ||
+          !("result" in fallbackBody)
+        ) {
+          throw new Error(
+            "The Local Agent returned an invalid build/test result.",
+          );
         }
         const resultValue: unknown = fallbackBody.result;
         if (
@@ -290,7 +298,9 @@ async function localAgentProjectStream(
           !("stages" in resultValue) ||
           !("success" in resultValue)
         ) {
-          throw new Error("The Local Agent returned an invalid build/test result.");
+          throw new Error(
+            "The Local Agent returned an invalid build/test result.",
+          );
         }
         const result = resultValue as Record<string, unknown>;
         if (
@@ -299,7 +309,9 @@ async function localAgentProjectStream(
           typeof result.success !== "boolean" ||
           !result.stages.every(isLocalCommandResult)
         ) {
-          throw new Error("The Local Agent returned an invalid build/test result.");
+          throw new Error(
+            "The Local Agent returned an invalid build/test result.",
+          );
         }
 
         const compatibleResult: LocalProjectResult = {
@@ -324,7 +336,9 @@ async function localAgentProjectStream(
         onEvent({ type: "complete", result: compatibleResult });
         return compatibleResult;
       }
-      throw new Error(body.error || `Local agent request failed (${response.status})`);
+      throw new Error(
+        body.error || `Local agent request failed (${response.status})`,
+      );
     }
     if (!response.body) {
       throw new Error("The Local Agent did not provide a streaming response.");
@@ -344,7 +358,9 @@ async function localAgentProjectStream(
         throw new Error("The Local Agent returned invalid build/test output.");
       }
       if (!parsed || typeof parsed !== "object" || !("type" in parsed)) {
-        throw new Error("The Local Agent returned an invalid build/test event.");
+        throw new Error(
+          "The Local Agent returned an invalid build/test event.",
+        );
       }
       const data = parsed as Record<string, unknown>;
 
@@ -381,7 +397,9 @@ async function localAgentProjectStream(
           typeof result.success !== "boolean" ||
           !result.stages.every(isLocalCommandResult)
         ) {
-          throw new Error("The Local Agent returned an invalid build/test result.");
+          throw new Error(
+            "The Local Agent returned an invalid build/test result.",
+          );
         }
         const resultValue: LocalProjectResult = {
           action,
@@ -396,7 +414,9 @@ async function localAgentProjectStream(
       } else if (data.type === "error" && typeof data.error === "string") {
         throw new Error(data.error);
       } else {
-        throw new Error("The Local Agent returned an unknown build/test event.");
+        throw new Error(
+          "The Local Agent returned an unknown build/test event.",
+        );
       }
       return null;
     };
@@ -413,7 +433,9 @@ async function localAgentProjectStream(
     }
     if (buffer.trim()) finalResult = handleLine(buffer) || finalResult;
     if (!finalResult) {
-      throw new Error("The Local Agent ended the stream before the action completed.");
+      throw new Error(
+        "The Local Agent ended the stream before the action completed.",
+      );
     }
     return finalResult;
   } catch (cause) {
@@ -453,6 +475,12 @@ async function request<T>(url: string, init: RequestInit = {}) {
 export const api = {
   // Session and GitHub OAuth-backed repository operations.
   me: () => request<{ success: true; user: User }>("/api/auth/me"),
+  // Approve a VS Code extension pairing request so the extension gets a session automatically.
+  approvePairing: (code: string) =>
+    request<{ success: true }>("/api/auth/pair/approve", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
   login: () => {
     location.href = "/api/auth/github";
   },
@@ -461,7 +489,11 @@ export const api = {
     request<{ success: true; repositories: GitHubRepository[] }>(
       "/api/github/repositories",
     ),
-  connectGitHubRepository: (projectId: string, owner: string, repository: string) =>
+  connectGitHubRepository: (
+    projectId: string,
+    owner: string,
+    repository: string,
+  ) =>
     request<{ success: true; repository: ConnectedGitHubRepository }>(
       `/api/projects/${encodeURIComponent(projectId)}/github/connect`,
       {
@@ -546,7 +578,9 @@ export const api = {
   history: (id: string) => request<any>(`/api/projects/${id}/history`),
   agent: () => request<any>("/api/agent"),
   providers: () =>
-    request<{ success: true; providers: AIProviderInfo[] }>("/api/ai/providers"),
+    request<{ success: true; providers: AIProviderInfo[] }>(
+      "/api/ai/providers",
+    ),
   saveAIProvider: (
     provider: AIProvider,
     settings: { apiKey?: string; model?: string; baseUrl?: string },
@@ -651,7 +685,12 @@ export const api = {
       ),
     cloneGitHubRepository: (
       token: string,
-      input: { owner: string; repository: string; branch: string; path: string },
+      input: {
+        owner: string;
+        repository: string;
+        branch: string;
+        path: string;
+      },
     ) =>
       localAgentRequest<LocalGitResult>(
         token,
@@ -661,7 +700,12 @@ export const api = {
       ),
     initializeGitHubRepository: (
       token: string,
-      input: { owner: string; repository: string; branch: string; path: string },
+      input: {
+        owner: string;
+        repository: string;
+        branch: string;
+        path: string;
+      },
     ) =>
       localAgentRequest<LocalGitResult>(
         token,
@@ -671,7 +715,12 @@ export const api = {
       ),
     pullGitHubRepository: (
       token: string,
-      input: { owner: string; repository: string; branch: string; path: string },
+      input: {
+        owner: string;
+        repository: string;
+        branch: string;
+        path: string;
+      },
     ) =>
       localAgentRequest<LocalGitResult>(
         token,

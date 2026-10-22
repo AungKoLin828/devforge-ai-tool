@@ -2,7 +2,7 @@
   "name": "devforge-ai-developer-tools",
   "displayName": "DevForge AI Developer Tools",
   "description": "DevForge AI coding assistant using either your local DevForge backend or the hosted Netlify backend.",
-  "version": "0.2.5",
+  "version": "0.3.1",
   "publisher": "aungkolin",
   "license": "UNLICENSED",
   "engines": {
@@ -14,6 +14,9 @@
     "Other"
   ],
   "activationEvents": [
+    "onStartupFinished",
+    "onCommand:devforge.selectAiProvider",
+    "onCommand:devforge.configureCustomProvider",
     "onCommand:devforge.selectProject",
     "onCommand:devforge.signOut",
     "onCommand:devforge.signIn",
@@ -43,6 +46,21 @@
       {
         "command": "devforge.signOut",
         "title": "DevForge AI: Sign Out",
+        "category": "DevForge AI"
+      },
+      {
+        "command": "devforge.selectAiProvider",
+        "title": "DevForge AI: Select AI Provider",
+        "category": "DevForge AI"
+      },
+      {
+        "command": "devforge.configureCustomProvider",
+        "title": "DevForge AI: Configure Custom API Provider",
+        "category": "DevForge AI"
+      },
+      {
+        "command": "devforge.showShortcuts",
+        "title": "DevForge AI: Show Shortcuts",
         "category": "DevForge AI"
       },
       {
@@ -133,6 +151,51 @@
         }
       }
     },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "devforgeContainer",
+          "title": "DevForge AI",
+          "icon": "media/devforge-activitybar.svg"
+        }
+      ]
+    },
+    "views": {
+      "devforgeContainer": [
+        {
+          "id": "devforgeCommandsView",
+          "name": "Commands",
+          "when": "true"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "devforge.openChat",
+        "key": "ctrl+alt+d",
+        "mac": "cmd+alt+d"
+      },
+      {
+        "command": "devforge.reviewCurrentFile",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r"
+      },
+      {
+        "command": "devforge.explainSelection",
+        "key": "ctrl+alt+e",
+        "mac": "cmd+alt+e"
+      },
+      {
+        "command": "devforge.modifyCurrentFile",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m"
+      },
+      {
+        "command": "devforge.fixCurrentFile",
+        "key": "ctrl+alt+f",
+        "mac": "cmd+alt+f"
+      }
+    ],
     "menus": {
       "editor/context": [
         {

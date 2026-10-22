@@ -144,6 +144,7 @@ model User {
   aiProviders          AIProvider[]
   auditLogs            AuditLog[]
   airequests           AIRequest[]
+  pairings             Pairing[]
 
   @@index([githubUsername])
   @@index([email])
@@ -352,4 +353,21 @@ model AuditLog {
 
   @@index([userId, createdAt])
   @@index([entityType, entityId, createdAt])
+}
+
+/**
+ * Short-lived pairing requests from the VS Code extension. The extension
+ * creates a code, the user approves it in the browser after GitHub sign-in,
+ * and the session token is then handed to the extension automatically.
+ */
+model Pairing {
+  id        String    @id @default(cuid())
+  codeHash  String    @unique
+  userId    String?
+  tokenHash String?
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
 }

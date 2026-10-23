@@ -1,7 +1,7 @@
 import { json, error, body } from "./http.js";
 import { requireAuth, AuthError, createSession, clearSession, } from "./auth.js";
 import { githubOAuthConfig, githubLoginUrl, exchange, githubUser, upsertGithubUser, listGitHubRepositories, connectGitHubRepository, createGitHubRepository, disconnectGitHubRepository, updateGitHubSync, } from "./github.js";
-import { randomToken } from "./crypto.js";
+import { randomToken, sha256 } from "./crypto.js";
 import { prisma } from "./db.js";
 import { deleteAIProvider, listAIProviders, saveAIProvider, } from "./ai.js";
 import { create, chatWithProject, detail, importProject, list, owner, rename, remove, removeImportedProject, startGenerateProject, startReviewProject, } from "./projects.js";
@@ -108,6 +108,63 @@ export async function handleApi(req) {
                     "Set-Cookie": sessionCookie,
                 },
             });
+        }
+        // ---- VS Code extension device pairing (automated sign-in) ----
+        // Extension creates a pairing code (public, no session yet).
+        if (path === "auth/pair/start" && req.method === "POST") {
+            const code = randomToken();
+            await prisma.pairing.create({
+                data: {
+                    codeHash: sha256(code),
+                    expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+                },
+            });
+            return json({ success: true, code });
+        }
+        // Extension polls for the paired session (public; returns 404 until paired).
+        if (path === "auth/pair/poll" && req.method === "POST") {
+            const requestBody = await body(req);
+            const code = typeof requestBody.code === "string" ? requestBody.code : "";
+            if (!code) return error("Missing pairing code", 400);
+            const pairing = await prisma.pairing.findUnique({
+                where: { codeHash: sha256(code) },
+            });
+            if (!pairing || pairing.expiresAt <= new Date() || !pairing.tokenHash) {
+                return json({ success: true, pending: true });
+            }
+            // One-time read: hand over the session token, then destroy the pairing.
+            await prisma.pairing.delete({ where: { id: pairing.id } });
+            return json({ success: true, pending: false, token: pairing.tokenHash });
+        }
+        // Logged-in user approves a pairing code in the browser (session required).
+        if (path === "auth/pair/approve" && req.method === "POST") {
+            const user = await requireAuth(req);
+            const requestBody = await body(req);
+            const code = typeof requestBody.code === "string" ? requestBody.code : "";
+            if (!code) return error("Missing pairing code", 400);
+            const pairing = await prisma.pairing.findUnique({
+                where: { codeHash: sha256(code) },
+            });
+            if (!pairing || pairing.expiresAt <= new Date()) {
+                return error("Pairing code is invalid or expired. Start sign-in again from VS Code.", 400);
+            }
+            const session = await createSession({
+                id: user.id,
+                githubUsername: user.githubUsername,
+                githubName: user.githubName,
+                email: user.email,
+                avatarUrl: user.avatarUrl,
+            });
+            // Extract the raw token from the Set-Cookie value so the extension can
+            // store it directly; the cookie value is the URL-encoded random token.
+            const match = /devforge_session=([^;]+)/.exec(session);
+            const token = match ? decodeURIComponent(match[1]) : "";
+            if (!token) return error("Could not create a session for pairing", 500);
+            await prisma.pairing.update({
+                where: { id: pairing.id },
+                data: { userId: user.id, tokenHash: token },
+            });
+            return json({ success: true });
         }
         if (path === "auth/logout" && req.method === "POST") {
             const user = await requireAuth(req).catch(() => null);

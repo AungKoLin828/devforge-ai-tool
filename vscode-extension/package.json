@@ -2,7 +2,7 @@
   "name": "devforge-ai-developer-tools",
   "displayName": "DevForge AI Developer Tools",
   "description": "DevForge AI coding assistant using either your local DevForge backend or the hosted Netlify backend.",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "publisher": "aungkolin",
   "license": "UNLICENSED",
   "engines": {
@@ -16,7 +16,6 @@
   "activationEvents": [
     "onStartupFinished",
     "onCommand:devforge.selectAiProvider",
-    "onCommand:devforge.configureCustomProvider",
     "onCommand:devforge.selectProject",
     "onCommand:devforge.signOut",
     "onCommand:devforge.signIn",
@@ -50,12 +49,7 @@
       },
       {
         "command": "devforge.selectAiProvider",
-        "title": "DevForge AI: Select AI Provider",
-        "category": "DevForge AI"
-      },
-      {
-        "command": "devforge.configureCustomProvider",
-        "title": "DevForge AI: Configure Custom API Provider",
+        "title": "DevForge AI: Select AI Provider & Configure API Key",
         "category": "DevForge AI"
       },
       {

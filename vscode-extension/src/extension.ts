@@ -95,9 +95,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("devforge.selectAiProvider", () =>
       selectAiProvider(context),
     ),
-    vscode.commands.registerCommand("devforge.configureCustomProvider", () =>
-      configureCustomProvider(context),
-    ),
     vscode.commands.registerCommand("devforge.showShortcuts", () =>
       vscode.commands.executeCommand(
         "workbench.view.extension.devforgeContainer",
@@ -217,10 +214,9 @@ class DevForgeCommandsTree implements vscode.TreeDataProvider<vscode.TreeItem> {
       }
       return [
         item("devforge.openChat", "Open Chat (Ctrl+Alt+D)", "comment"),
-        item("devforge.selectAiProvider", "Select AI Provider", "organization"),
         item(
-          "devforge.configureCustomProvider",
-          "Configure AI Provider / API Key",
+          "devforge.selectAiProvider",
+          "AI Provider (Select / API Key)",
           "gear",
         ),
         item("devforge.selectProject", "Select Project", "folder-active"),
@@ -616,168 +612,97 @@ async function listProviderInfos(
   return Array.isArray(result.providers) ? result.providers : [];
 }
 
-/** Let the user pick which configured provider the extension should use (default: OpenRouter). */
+/**
+ * One merged UI for both selecting the active AI provider and configuring it
+ * (API key, model, and Custom base URL) in a single webview dialog.
+ */
 async function selectAiProvider(
   context: vscode.ExtensionContext,
 ): Promise<ProviderId | undefined> {
   await requireSession(context);
   const providers = await listProviderInfos(context);
   const current = await getSelectedProvider(context);
-  const choices: Array<vscode.QuickPickItem & { provider?: ProviderId }> =
-    providers.map((info) => ({
-      label: `${info.provider === current ? "$(check) " : "$(circle-outline) "}${info.label}`,
-      description:
-        info.provider === "CUSTOM"
-          ? `Custom${info.baseUrl ? ` · ${info.baseUrl}` : ""}`
-          : info.provider,
-      detail: info.configured
-        ? `Configured${info.model ? ` · model: ${info.model}` : " · default model"}${info.hasUserKey ? " · your API key" : " · server key"}`
-        : 'Not configured — add an API key in DevForge web settings or via "Configure Custom API"',
-      provider: info.provider as ProviderId | undefined,
-    }));
-  choices.push({
-    label: "$(gear) Configure Custom API provider (base URL, API key, model)",
-    description: "Fetch models from your custom endpoint and save it",
-  });
-  const picked = await vscode.window.showQuickPick(choices, {
-    title: "DevForge AI: Choose AI provider (default: OpenRouter)",
-    placeHolder: "OpenRouter is used unless you select another provider",
-  });
-  if (!picked) return undefined;
-  if (picked.provider) {
-    await context.globalState.update(getProviderStateKey(), picked.provider);
-    vscode.window.showInformationMessage(
-      `DevForge AI provider set to ${picked.provider === "OPENROUTER" ? "OpenRouter (default)" : picked.provider}.`,
-    );
-    return picked.provider;
-  }
-  await configureCustomProvider(context);
-  return undefined;
-}
 
-/** Save OPENAI or CUSTOM provider settings on the backend via PUT /api/ai/providers/:provider. */
-async function saveProviderSettings(
-  context: vscode.ExtensionContext,
-  provider: "OPENAI" | "CUSTOM",
-  input: { apiKey?: string; model?: string; baseUrl?: string },
-): Promise<void> {
-  await apiRequest(context, `/api/ai/providers/${provider}`, {
-    method: "PUT",
-    body: JSON.stringify(input),
-  });
-}
-
-/**
- * Configure the CUSTOM provider with a modal webview dialog: base URL, API key,
- * fetched model list, and model id in one place instead of chained input boxes.
- */
-async function configureCustomProvider(
-  context: vscode.ExtensionContext,
-): Promise<void> {
-  await requireSession(context);
-
+  let result: ProviderId | undefined;
   await new Promise<void>((resolve) => {
     const panel = vscode.window.createWebviewPanel(
-      "devforgeCustomProvider",
-      "DevForge AI — Custom API Provider",
+      "devforgeAiProvider",
+      "DevForge AI — AI Provider",
       vscode.ViewColumn.Active,
-      {
-        enableScripts: true,
-        retainContextWhenHidden: false,
-      },
+      { enableScripts: true, retainContextWhenHidden: false },
     );
     const nonce = String(Date.now());
-    panel.webview.html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';"><title>Custom API Provider</title><style>
-    :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;padding:20px;background:var(--vscode-editor-background);color:var(--vscode-foreground);font:13px var(--vscode-font-family)}h2{margin:0 0 4px;font-size:16px}p.desc{margin:0 0 16px;opacity:.75;font-size:12px}label{display:block;margin:12px 0 4px;font-weight:600}input,select{width:100%;padding:7px 9px;border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:4px;background:var(--vscode-input-background);color:var(--vscode-input-foreground);font:inherit}input[type=password]{letter-spacing:2px}.row{display:flex;gap:8px;align-items:center}.row select{flex:1}.hint{font-size:11px;opacity:.7;margin-top:4px}.error{color:var(--vscode-errorForeground);font-size:12px;min-height:16px;margin-top:6px}.buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}button{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border:0;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit}button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}button:disabled{opacity:.5;cursor:default}#status{font-size:12px;opacity:.8;margin-top:8px;min-height:16px}#modelList{max-height:220px;overflow:auto;border:1px solid var(--vscode-panel-border);border-radius:4px;margin-top:6px}.mopt{padding:5px 9px;cursor:pointer;overflow-wrap:anywhere}.mopt:hover{background:var(--vscode-list-hoverBackground)}.mopt.sel{background:var(--vscode-list-activeSelectionBackground);color:var(--vscode-list-activeSelectionForeground)}
+    const payload = providers.map((info) => ({
+      provider: info.provider,
+      label: info.label,
+      configured: info.configured,
+      hasUserKey: info.hasUserKey,
+      model: info.model,
+      baseUrl: info.baseUrl,
+    }));
+    panel.webview.html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';"><title>AI Provider</title><style>
+    :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;padding:20px;background:var(--vscode-editor-background);color:var(--vscode-foreground);font:13px var(--vscode-font-family)}h2{margin:0 0 4px;font-size:16px}p.desc{margin:0 0 16px;opacity:.75;font-size:12px}label{display:block;margin:12px 0 4px;font-weight:600}input,select{width:100%;padding:7px 9px;border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:4px;background:var(--vscode-input-background);color:var(--vscode-input-foreground);font:inherit}input[type=password]{letter-spacing:2px}.hint{font-size:11px;opacity:.7;margin-top:4px}.buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}button{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border:0;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit}button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}button:disabled{opacity:.5;cursor:default}#status{font-size:12px;opacity:.8;margin-top:8px;min-height:16px}.prov{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--vscode-panel-border);border-radius:4px;margin-top:6px;cursor:pointer}.prov:hover{background:var(--vscode-list-hoverBackground)}.prov.sel{background:var(--vscode-list-activeSelectionBackground);color:var(--vscode-list-activeSelectionForeground)}.prov .meta{font-size:11px;opacity:.75}
     </style></head><body>
-    <h2>Custom API provider</h2>
-    <p class="desc">Connect any OpenAI-compatible endpoint. The API key is stored encrypted on the DevForge server, never in settings or source code.</p>
-    <label for="baseUrl">Base URL (public HTTPS, OpenAI-compatible)</label>
-    <input id="baseUrl" placeholder="https://api.example.com/v1" spellcheck="false">
-    <div class="error" id="baseUrlError"></div>
-    <label for="apiKey">API key</label>
-    <input id="apiKey" type="password" placeholder="API key" autocomplete="off">
-    <label for="model">Model</label>
-    <div class="row">
-      <select id="modelSource">
-        <option value="endpoint">Load models from this endpoint (/models)</option>
-        <option value="openrouter">Use OpenRouter model catalog</option>
-        <option value="manual">Type a model ID manually</option>
-      </select>
-      <button id="fetchModels" type="button">Load</button>
+    <h2>AI provider</h2>
+    <p class="desc">Select the provider to use, then save its API key and model in the same place. Keys are stored encrypted on the DevForge server.</p>
+    <div id="providers"></div>
+    <div id="config">
+      <label for="apiKey">API key</label>
+      <input id="apiKey" type="password" placeholder="API key" autocomplete="off">
+      <label for="model">Model</label>
+      <input id="model" placeholder="Model ID" spellcheck="false">
+      <div id="baseUrlWrap" style="display:none">
+        <label for="baseUrl">Base URL (public HTTPS, OpenAI-compatible)</label>
+        <input id="baseUrl" placeholder="https://api.example.com/v1" spellcheck="false">
+      </div>
+      <div class="hint">Leave the API key blank to keep the saved key unchanged.</div>
     </div>
-    <div id="manualWrap" style="display:none">
-      <input id="manualModel" placeholder="e.g. my-org/my-model" spellcheck="false">
-    </div>
-    <div id="listWrap" style="display:none">
-      <input id="filter" placeholder="Filter models…" spellcheck="false">
-      <div id="modelList"></div>
-    </div>
-    <div class="hint" id="modelHint">Choose a source above, then load or type a model.</div>
     <div class="buttons">
       <button class="secondary" id="cancel" type="button">Cancel</button>
-      <button id="save" type="button" disabled>Save &amp; Select</button>
+      <button id="save" type="button">Save &amp; Select</button>
     </div>
     <div id="status"></div>
     <script nonce="${nonce}">
     const vscode=acquireVsCodeApi();
     const $=id=>document.getElementById(id);
-    let models=[];let selectedModel='';
-    function validateUrl(){const v=$('baseUrl').value.trim();let msg='';try{const u=new URL(v);if(u.protocol!=='https:')msg='The base URL must use HTTPS.';else if(u.username||u.password||u.search||u.hash)msg='No credentials, query, or fragment allowed.';}catch{msg=v?'Enter a valid absolute HTTPS URL.':''}$('baseUrlError').textContent=msg;update();return !msg&&!!v;}
-    function currentModel(){return $('modelSource').value==='manual'?$('manualModel').value.trim():selectedModel;}
-    function update(){$('save').disabled=!(validateUrl()&&$('apiKey').value.trim()&&currentModel());$('fetchModels').style.display=($('modelSource').value==='manual')?'none':'';$('manualWrap').style.display=($('modelSource').value==='manual')?'':'none';$('listWrap').style.display=(models.length&&$('modelSource').value!=='manual')?'':'none';}
-    function renderList(){const q=$('filter').value.toLowerCase();const box=$('modelList');box.innerHTML='';const shown=models.filter(m=>m.toLowerCase().includes(q)).slice(0,400);for(const m of shown){const d=document.createElement('div');d.className='mopt'+(m===selectedModel?' sel':'');d.textContent=m;d.addEventListener('click',()=>{selectedModel=m;renderList();update();});box.appendChild(d);}if(!shown.length){const d=document.createElement('div');d.className='mopt';d.textContent='No matching models.';box.appendChild(d);}}
-    $('baseUrl').addEventListener('input',()=>{models=[];selectedModel='';renderList();update();});
-    $('apiKey').addEventListener('input',update);
-    $('manualModel').addEventListener('input',update);
-    $('filter').addEventListener('input',renderList);
-    $('modelSource').addEventListener('change',()=>{selectedModel='';renderList();update();if($('modelSource').value==='openrouter'&&models.length===0){loadModels('openrouter');}});
-    function loadModels(source){if(source==='endpoint'&&(!validateUrl()||!$('apiKey').value.trim())){$('status').textContent='Enter a valid HTTPS base URL and API key first.';return;}$('status').textContent='Loading models…';vscode.postMessage({type:'loadModels',source,baseUrl:$('baseUrl').value.trim(),apiKey:$('apiKey').value.trim()});}
-    $('fetchModels').addEventListener('click',()=>loadModels($('modelSource').value));
-    $('save').addEventListener('click',()=>{const model=currentModel();if(!model){$('status').textContent='Choose or type a model first.';return;}$('status').textContent='Saving…';$('save').disabled=true;vscode.postMessage({type:'save',baseUrl:$('baseUrl').value.trim(),apiKey:$('apiKey').value.trim(),model});});
+    const providers=${JSON.stringify(payload)};
+    let current=${JSON.stringify(current)};
+    function render(){const box=$('providers');box.innerHTML='';for(const p of providers){const d=document.createElement('div');d.className='prov'+(p.provider===current?' sel':'');const sel=document.createElement('strong');sel.textContent=p.provider===current?'✓ ':'';sel.textContent+=p.label;const meta=document.createElement('span');meta.className='meta';meta.textContent=(p.configured?'Configured':'Not configured')+(p.model?' · '+p.model:'');d.appendChild(sel);d.appendChild(meta);d.addEventListener('click',()=>{current=p.provider;render();syncConfig();});box.appendChild(d);}}
+    function info(){return providers.find(p=>p.provider===current)||providers[0];}
+    function syncConfig(){const p=info();$('apiKey').value='';$('model').value=p.model||'';$('baseUrlWrap').style.display=(p.provider==='CUSTOM')?'':'none';$('baseUrl').value=p.baseUrl||'';}
+    $('save').addEventListener('click',()=>{$('status').textContent='Saving…';$('save').disabled=true;vscode.postMessage({type:'save',provider:current,apiKey:$('apiKey').value.trim(),model:$('model').value.trim(),baseUrl:$('baseUrl').value.trim()});});
     $('cancel').addEventListener('click',()=>vscode.postMessage({type:'cancel'}));
-    window.addEventListener('message',e=>{const m=e.data;if(m.type==='models'){models=m.models;$('status').textContent=m.models.length+' models loaded. Click one to select it.';renderList();update();}if(m.type==='modelsError'){$('status').textContent='Could not load models: '+m.text+' — you can still type a model ID manually.';}if(m.type==='saved'){$('status').textContent='Saved. Closing…';setTimeout(()=>vscode.postMessage({type:'cancel'}),400);}if(m.type==='saveError'){$('status').textContent='Save failed: '+m.text;$('save').disabled=false;}});
-    update();
+    window.addEventListener('message',e=>{const m=e.data;if(m.type==='saved'){$('status').textContent='Saved. Closing…';setTimeout(()=>vscode.postMessage({type:'cancel'}),400);}if(m.type==='saveError'){$('status').textContent='Save failed: '+m.text;$('save').disabled=false;}});
+    render();syncConfig();
     </script></body></html>`;
     panel.webview.onDidReceiveMessage(
       async (msg: {
         type?: string;
-        baseUrl?: string;
+        provider?: string;
         apiKey?: string;
         model?: string;
-        source?: string;
+        baseUrl?: string;
       }) => {
         if (msg.type === "cancel") {
           panel.dispose();
           resolve();
           return;
         }
-        if (msg.type === "loadModels" && msg.source) {
+        if (msg.type === "save" && msg.provider) {
           try {
-            const models =
-              msg.source === "openrouter"
-                ? await fetchOpenRouterModels()
-                : await fetchCustomModels(msg.baseUrl || "", msg.apiKey || "");
-            await panel.webview.postMessage({ type: "models", models });
-          } catch (error) {
-            await panel.webview.postMessage({
-              type: "modelsError",
-              text: error instanceof Error ? error.message : String(error),
+            const provider = msg.provider as ProviderId;
+            await saveProviderSettings(context, provider, {
+              ...(msg.apiKey ? { apiKey: msg.apiKey } : {}),
+              ...(msg.model ? { model: msg.model } : {}),
+              ...(provider === "CUSTOM" && msg.baseUrl
+                ? { baseUrl: msg.baseUrl }
+                : {}),
             });
-          }
-          return;
-        }
-        if (msg.type === "save" && msg.baseUrl && msg.apiKey && msg.model) {
-          try {
-            await saveProviderSettings(context, "CUSTOM", {
-              apiKey: msg.apiKey,
-              model: msg.model,
-              baseUrl: msg.baseUrl,
-            });
-            await context.globalState.update(getProviderStateKey(), "CUSTOM");
+            await context.globalState.update(getProviderStateKey(), provider);
             vscode.window.showInformationMessage(
-              `Custom provider saved and selected (model: ${msg.model}).`,
+              `DevForge AI provider set to ${provider === "OPENROUTER" ? "OpenRouter (default)" : provider}${msg.model ? ` (model: ${msg.model})` : ""}.`,
             );
+            result = provider;
             await panel.webview.postMessage({ type: "saved" });
           } catch (error) {
             await panel.webview.postMessage({
@@ -792,6 +717,20 @@ async function configureCustomProvider(
       context.subscriptions,
     );
     panel.onDidDispose(() => resolve(), undefined, context.subscriptions);
+  });
+  refreshCommandsTree();
+  return result;
+}
+
+/** Save provider settings on the backend via PUT /api/ai/providers/:provider. */
+async function saveProviderSettings(
+  context: vscode.ExtensionContext,
+  provider: "OPENROUTER" | "OPENAI" | "CUSTOM",
+  input: { apiKey?: string; model?: string; baseUrl?: string },
+): Promise<void> {
+  await apiRequest(context, `/api/ai/providers/${provider}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
   });
 }
 

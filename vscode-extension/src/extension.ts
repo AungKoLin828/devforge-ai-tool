@@ -994,91 +994,104 @@ async function signIn(context: vscode.ExtensionContext): Promise<void> {
     );
     return;
   }
-  const code = await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: "DevForge AI: preparing sign-in…",
-      cancellable: false,
-    },
-    async () => {
+
+  const panel = vscode.window.createWebviewPanel(
+    "devforgeSignIn",
+    "Sign in to DevForge AI",
+    vscode.ViewColumn.Active,
+    { enableScripts: true, retainContextWhenHidden: true },
+  );
+  const nonce = getNonce();
+  const environment = getBackendEnvironment() === "local" ? "Local development" : "Netlify hosted";
+  const logoUri = panel.webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "media", "icon.png"),
+  );
+  panel.webview.html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${panel.webview.cspSource} https:; style-src ${panel.webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<title>Sign in to DevForge AI</title><style>
+:root{color-scheme:dark;--bg:#080d18;--panel:#101827;--line:#263449;--muted:#9aa9bd;--text:#edf3ff;--blue:#5b8cff;--cyan:#65d5e8}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -20%,#1c3760 0,transparent 55%),var(--bg);color:var(--text);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh;display:grid;place-items:center;padding:24px}
+.shell{width:100%;max-width:440px}.brand{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:24px}.brand img{width:52px;height:52px;object-fit:contain;border-radius:13px}.brand h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.2px}.brand p{margin:2px 0 0;color:var(--muted);font-size:12px}.card{border:1px solid var(--line);background:linear-gradient(160deg,rgba(20,32,51,.97),rgba(12,19,31,.98));border-radius:18px;padding:28px;box-shadow:0 22px 70px #0006}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:1.7px;color:var(--cyan);font-weight:700}.card h2{font-size:25px;line-height:1.25;margin:9px 0 10px}.desc{color:var(--muted);margin:0 0 22px}.env{display:flex;align-items:center;gap:10px;border:1px solid var(--line);background:#0b1321;border-radius:10px;padding:12px;margin-bottom:18px}.dot{width:9px;height:9px;border-radius:50%;background:#56d6a0;box-shadow:0 0 12px #56d6a066}.env strong{display:block;font-size:13px}.env small{display:block;color:var(--muted);font-size:11px}.btn{width:100%;border:0;border-radius:10px;padding:12px 16px;font:600 14px inherit;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;min-height:45px}.primary{background:linear-gradient(100deg,#4d7cff,#5b9cff);color:white;box-shadow:0 8px 24px #4b7dff35}.primary:hover{filter:brightness(1.08)}.secondary{margin-top:10px;border:1px solid var(--line);background:#121e30;color:var(--text)}.btn:disabled{opacity:.55;cursor:wait}.status{min-height:44px;margin-top:15px;padding:10px 12px;border-radius:9px;background:#0b1320;color:var(--muted);font-size:12px}.status.good{color:#8ee3bd}.status.error{color:#ffb4b4}.foot{color:#74849b;font-size:11px;text-align:center;margin-top:17px}.shield{display:inline-block;margin-right:4px}
+</style></head><body><main class="shell"><div class="brand"><img src="${logoUri}" alt="DevForge AI"><div><h1>DevForge AI</h1><p>Developer tools for VS Code</p></div></div><section class="card"><div class="eyebrow">Secure account connection</div><h2>Sign in to continue</h2><p class="desc">Connect your DevForge account to use AI chat, code review, project generation, and other coding tools from VS Code.</p><div class="env"><span class="dot"></span><div><strong>${escapeHtml(environment)}</strong><small>${escapeHtml(baseUrl)}</small></div></div><button class="btn primary" id="github"><span>↗</span> Continue with GitHub</button><button class="btn secondary" id="retry">Check connection</button><div id="status" class="status" role="status">A browser window will open so you can sign in securely. No AI provider API key is needed in VS Code.</div></section><div class="foot"><span class="shield">◆</span> Your session is stored securely using VS Code SecretStorage.</div></main>
+<script nonce="${nonce}">
+const vscode=acquireVsCodeApi();const github=document.getElementById('github');const retry=document.getElementById('retry');const status=document.getElementById('status');function busy(text){github.disabled=true;retry.disabled=true;status.className='status';status.textContent=text;}github.addEventListener('click',()=>{busy('Preparing secure sign-in…');vscode.postMessage({type:'signIn'});});retry.addEventListener('click',()=>{busy('Checking your connection…');vscode.postMessage({type:'check'});});window.addEventListener('message',e=>{const m=e.data||{};if(m.type==='status'){status.className='status';status.textContent=m.text;}if(m.type==='error'){status.className='status error';status.textContent=m.text;github.disabled=false;retry.disabled=false;}if(m.type==='success'){status.className='status good';status.textContent=m.text;github.disabled=false;retry.disabled=false;}});
+</script></body></html>`;
+
+  const post = (type: string, text: string) =>
+    panel.webview.postMessage({ type, text });
+  let running = false;
+  let panelClosed = false;
+  panel.onDidDispose(() => { panelClosed = true; });
+  const startSignIn = async () => {
+    if (running) return;
+    running = true;
+    post("status", "Requesting a one-time sign-in code…");
+    try {
       const response = await fetch(`${baseUrl}/api/auth/pair/start`, {
         method: "POST",
         headers: { Accept: "application/json" },
       });
-      const data = (await response.json().catch(() => ({}))) as {
-        code?: string;
-      };
-      if (!response.ok || !data.code)
-        throw new Error(
-          "The backend did not return a pairing code. Update the DevForge backend to the latest version.",
-        );
-      return data.code;
-    },
-  );
-
-  // Open the pairing page in the browser; the user signs in there if needed.
-  const connectUrl = vscode.Uri.parse(
-    `${baseUrl}/connect?code=${encodeURIComponent(code)}`,
-  );
-  await vscode.env.openExternal(connectUrl);
-
-  const connected = await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: "DevForge AI: waiting for approval in your browser…",
-      cancellable: true,
-    },
-    async (_progress, token) => {
+      const data = (await response.json().catch(() => ({}))) as { code?: string; error?: string; message?: string };
+      if (!response.ok || !data.code) {
+        throw new Error(data.message || data.error || "The backend does not support device-pairing sign-in. Check the backend's existing authentication flow.");
+      }
+      const connectUrl = vscode.Uri.parse(`${baseUrl}/connect?code=${encodeURIComponent(data.code)}`);
+      await vscode.env.openExternal(connectUrl);
+      post("status", "Browser opened. Sign in with GitHub and approve the connection. Waiting for approval…");
       const deadline = Date.now() + 10 * 60 * 1000;
-      while (Date.now() < deadline && !token.isCancellationRequested) {
+      while (Date.now() < deadline && !panelClosed) {
         const result = await fetch(`${baseUrl}/api/auth/pair/poll`, {
           method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ code }),
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ code: data.code }),
         });
-        const data = (await result.json().catch(() => ({}))) as {
-          pending?: boolean;
-          token?: string;
-        };
-        if (result.ok && !data.pending && data.token) return data.token;
+        const polled = (await result.json().catch(() => ({}))) as { pending?: boolean; token?: string; error?: string; message?: string };
+        if (result.ok && !polled.pending && polled.token) {
+          await context.secrets.store(getSessionSecretKey(), polled.token);
+          try {
+            const resultMe = await apiRequest<{ user?: { githubUsername?: string | null; githubName?: string | null; email?: string | null } }>(context, "/api/auth/me");
+            const user = resultMe.user;
+            const identity = user?.githubUsername ? `@${user.githubUsername}` : user?.email ?? user?.githubName;
+            post("success", `Connected successfully${identity ? ` as ${identity}` : ""}. You can close this tab and return to VS Code.`);
+            refreshCommandsTree();
+            vscode.window.showInformationMessage(`Connected to DevForge${identity ? ` as ${identity}` : ""}.`);
+            return;
+          } catch (error) {
+            await context.secrets.delete(getSessionSecretKey());
+            throw error;
+          }
+        }
+        if (!result.ok && result.status !== 400 && result.status !== 404) {
+          throw new Error(polled.message || polled.error || `Sign-in polling failed (HTTP ${result.status}).`);
+        }
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
-      return undefined;
-    },
-  );
+      throw new Error("Sign-in timed out or was cancelled. Please try again.");
+    } catch (error) {
+      post("error", error instanceof Error ? error.message : String(error));
+    } finally {
+      running = false;
+    }
+  };
 
-  if (!connected) {
-    vscode.window.showInformationMessage(
-      "DevForge sign-in was cancelled or timed out. Run “DevForge AI: Sign In” to try again.",
-    );
-    return;
-  }
+  panel.webview.onDidReceiveMessage(async (message: { type?: string }) => {
+    if (message.type === "signIn") await startSignIn();
+    if (message.type === "check") {
+      try {
+        const response = await fetch(`${baseUrl}/api/auth/me`, { headers: { Accept: "application/json" } });
+        if (response.ok) post("success", "The backend is reachable and already has a valid browser session. Continue with GitHub if you need to connect VS Code.");
+        else post("status", `Backend is reachable (${baseUrl}), but sign-in is required. Choose Continue with GitHub.`);
+      } catch (error) {
+        post("error", `Cannot reach backend: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  });
+}
 
-  const secretKey = getSessionSecretKey();
-  await context.secrets.store(secretKey, connected);
-  try {
-    const result = await apiRequest<{
-      success: boolean;
-      user: {
-        githubUsername?: string | null;
-        githubName?: string | null;
-        email?: string | null;
-      };
-    }>(context, "/api/auth/me");
-    const user = result.user;
-    vscode.window.showInformationMessage(
-      `Connected to DevForge${user?.githubUsername ? ` as @${user.githubUsername}` : user?.email ? ` as ${user.email}` : ""}.`,
-    );
-    refreshCommandsTree();
-  } catch (error) {
-    await context.secrets.delete(secretKey);
-    vscode.window.showErrorMessage(
-      `Could not verify the DevForge session: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+function getNonce(): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  return Array.from({ length: 32 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
 }
 
 async function signOut(context: vscode.ExtensionContext): Promise<void> {

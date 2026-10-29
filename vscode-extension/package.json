@@ -2,8 +2,8 @@
   "name": "devforge-ai-developer-tools",
   "displayName": "DevForge AI Developer Tools",
   "description": "DevForge AI coding assistant using either your local DevForge backend or the hosted Netlify backend.",
-  "version": "0.3.3",
-  "publisher": "Aung Ko Lin",
+  "version": "0.3.4",
+  "publisher": "AungKoLin",
   "license": "UNLICENSED",
   "engines": {
     "vscode": "^1.85.0"

@@ -10,6 +10,8 @@ import {
   api,
   getApiActivitySnapshot,
   subscribeToApiActivity,
+  type AdminStats,
+  type AdminUser,
   type ChatMessage,
   type AIProvider,
   type AIProviderInfo,
@@ -2150,6 +2152,14 @@ function App({ user }: { user: User }) {
       <header className="h-16 border-b border-slate-800 px-5 flex items-center justify-between">
         <BrandWordmark />
         <div className="flex gap-4 items-center text-sm">
+          {(user as User).role === "ADMIN" && (
+            <a
+              href="/admin"
+              className="text-indigo-300 transition hover:text-white"
+            >
+              Admin
+            </a>
+          )}
           <a
             href="/guide"
             className="text-slate-300 transition hover:text-white"
@@ -3753,11 +3763,265 @@ function ConnectExtension({
   );
 }
 
+/**
+ * Admin page: manage every registered user of the web app and VS Code
+ * extension. Only ADMIN-role accounts can load it; the API enforces that too.
+ */
+function AdminPage({ user }: { user: User }) {
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [actingUserId, setActingUserId] = useState<string>("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+
+  async function load() {
+    try {
+      const response = await api.adminUsers();
+      setUsers(response.users);
+      setStats(response.stats);
+      setActingUserId(response.actingUserId);
+      setErrorText(null);
+    } catch (cause) {
+      setErrorText(
+        cause instanceof Error ? cause.message : "Could not load users",
+      );
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function update(id: string, patch: { role?: "USER" | "ADMIN"; isBlocked?: boolean }) {
+    setBusyId(id);
+    try {
+      await api.adminUpdateUser(id, patch);
+      await load();
+    } catch (cause) {
+      setErrorText(cause instanceof Error ? cause.message : "Update failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function remove(user: AdminUser) {
+    const confirmed = window.confirm(
+      `Delete ${user.githubUsername ?? user.githubName ?? user.id}? This permanently removes their projects, artifacts, sessions and agents.`,
+    );
+    if (!confirmed) return;
+    setBusyId(user.id);
+    try {
+      await api.adminDeleteUser(user.id);
+      await load();
+    } catch (cause) {
+      setErrorText(cause instanceof Error ? cause.message : "Delete failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const filtered = users.filter((item) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [
+      item.githubUsername,
+      item.githubName,
+      item.email,
+      item.role,
+    ].some((value) => (value ?? "").toLowerCase().includes(q));
+  });
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-200">
+      <header className="border-b border-slate-800 px-6 py-4 flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-lg font-semibold">DevForge AI — Admin</h1>
+          <p className="text-xs text-slate-400">
+            Manage users of the web app and the VS Code extension.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            className="rounded border border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-800"
+            onClick={() => (window.location.href = "/")}
+          >
+            Back to workspace
+          </button>
+        </div>
+      </header>
+      <main className="max-w-6xl mx-auto px-6 py-6">
+        {errorText && (
+          <div
+            role="alert"
+            className="mb-4 rounded border border-red-800 bg-red-950/60 px-4 py-2 text-sm text-red-200"
+          >
+            {errorText}
+          </div>
+        )}
+        {stats && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+            <StatCard label="Users" value={stats.users} />
+            <StatCard label="Projects" value={stats.projects} />
+            <StatCard label="AI requests" value={stats.aiRequests} />
+            <StatCard
+              label="Active sessions"
+              value={stats.activeSessions}
+            />
+          </div>
+        )}
+        <input
+          className="mb-4 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+          placeholder="Search by username, name, email or role…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <div className="overflow-x-auto rounded border border-slate-800">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-900 text-left text-xs uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="px-3 py-2">User</th>
+                <th className="px-3 py-2">Role</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Projects</th>
+                <th className="px-3 py-2">Last seen</th>
+                <th className="px-3 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((item) => {
+                const self = item.id === actingUserId;
+                const busy = busyId === item.id;
+                return (
+                  <tr
+                    key={item.id}
+                    className="border-t border-slate-800 align-middle"
+                  >
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        {item.avatarUrl && (
+                          <img
+                            src={item.avatarUrl}
+                            alt=""
+                            className="h-7 w-7 rounded-full"
+                          />
+                        )}
+                        <div>
+                          <div className="font-medium">
+                            {item.githubUsername
+                              ? `@${item.githubUsername}`
+                              : (item.githubName ?? item.id)}
+                            {self && (
+                              <span className="ml-2 text-xs text-slate-400">
+                                (you)
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-400">
+                            {item.email ?? "no email"}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={
+                          item.role === "ADMIN"
+                            ? "rounded bg-indigo-900/70 px-2 py-0.5 text-xs"
+                            : "rounded bg-slate-800 px-2 py-0.5 text-xs"
+                        }
+                      >
+                        {item.role}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={
+                          item.isBlocked
+                            ? "text-red-300"
+                            : "text-emerald-300"
+                        }
+                      >
+                        {item.isBlocked ? "Blocked" : "Active"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">{item.projectCount}</td>
+                    <td className="px-3 py-2 text-xs text-slate-400">
+                      {item.lastSeenAt
+                        ? new Date(item.lastSeenAt).toLocaleString()
+                        : "never"}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          disabled={busy || self}
+                          className="rounded border border-slate-700 px-2 py-1 text-xs hover:bg-slate-800 disabled:opacity-40"
+                          onClick={() =>
+                            update(item.id, {
+                              role: item.role === "ADMIN" ? "USER" : "ADMIN",
+                            })
+                          }
+                        >
+                          {item.role === "ADMIN"
+                            ? "Revoke admin"
+                            : "Make admin"}
+                        </button>
+                        <button
+                          disabled={busy || self}
+                          className="rounded border border-slate-700 px-2 py-1 text-xs hover:bg-slate-800 disabled:opacity-40"
+                          onClick={() =>
+                            update(item.id, { isBlocked: !item.isBlocked })
+                          }
+                        >
+                          {item.isBlocked ? "Unblock" : "Block"}
+                        </button>
+                        <button
+                          disabled={busy || self}
+                          className="rounded border border-red-800 px-2 py-1 text-xs text-red-300 hover:bg-red-950 disabled:opacity-40"
+                          onClick={() => remove(item)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!filtered.length && (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-3 py-6 text-center text-slate-400"
+                  >
+                    No users match this search.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded border border-slate-800 bg-slate-900 px-4 py-3">
+      <div className="text-xs uppercase tracking-wide text-slate-400">
+        {label}
+      </div>
+      <div className="text-xl font-semibold">{value}</div>
+    </div>
+  );
+}
+
 // Resolve the current session before rendering either the login or project UI.
 function Root() {
   const pathname = window.location.pathname.replace(/\/+$/, "");
   const isPublicGuide = pathname === "/guide";
   const isConnectPage = pathname === "/connect";
+  const isAdminPage = pathname === "/admin";
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -3786,7 +4050,18 @@ function Root() {
       </div>
     );
   }
-  return user ? <App user={user} /> : <Login />;
+  if (user) {
+    // Non-admins visiting /admin are redirected to the workspace; the admin
+    // API itself also rejects non-admin roles with 403.
+    if (isAdminPage)
+      return (user as User).role === "ADMIN" ? (
+        <AdminPage user={user} />
+      ) : (
+        <App user={user} />
+      );
+    return <App user={user} />;
+  }
+  return <Login />;
 }
 
 createRoot(document.getElementById("root")!).render(<Root />);

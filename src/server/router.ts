@@ -2,6 +2,7 @@
 import { json, error, body } from "./http.js";
 import {
   requireAuth,
+  requireAdmin,
   AuthError,
   createSession,
   clearSession,
@@ -28,6 +29,7 @@ import {
 } from "./ai.js";
 import {
   create,
+  chatWithAssistant,
   chatWithProject,
   detail,
   importProject,
@@ -45,6 +47,13 @@ import {
   queueJob,
   claimJob,
 } from "./agent.js";
+import {
+  adminStats,
+  deleteUser as deleteManagedUser,
+  listUsers,
+  setBlocked,
+  setRole,
+} from "./admin.js";
 
 // Keep OAuth redirects as minimal responses with an explicit status.
 const redirect = (url: string, status = 302) =>
@@ -301,6 +310,84 @@ export async function handleApi(req: Request) {
     if (aiProviderMatch && req.method === "DELETE") {
       await deleteAIProvider(user.id, aiProviderMatch[1] as Provider);
       return json({ success: true });
+    }
+
+    // ---- Admin user management (ADMIN role only) ----
+
+    if (path === "admin/users" && req.method === "GET") {
+      const admin = await requireAdmin(req);
+      const [users, stats] = await Promise.all([listUsers(), adminStats()]);
+      return json({ success: true, users, stats, actingUserId: admin.id });
+    }
+
+    const adminUserMatch = path.match(/^admin\/users\/([^/]+)$/);
+    if (adminUserMatch && req.method === "PATCH") {
+      const admin = await requireAdmin(req);
+      const requestBody = await body<{ role?: unknown; isBlocked?: unknown }>(req);
+      if (
+        requestBody.role !== undefined &&
+        requestBody.role !== "USER" &&
+        requestBody.role !== "ADMIN"
+      ) {
+        return error("Role must be USER or ADMIN", 400);
+      }
+      if (
+        requestBody.isBlocked !== undefined &&
+        typeof requestBody.isBlocked !== "boolean"
+      ) {
+        return error("isBlocked must be true or false", 400);
+      }
+      try {
+        if (requestBody.role !== undefined) {
+          await setRole(
+            adminUserMatch[1],
+            admin.id,
+            requestBody.role as "USER" | "ADMIN",
+          );
+        }
+        if (requestBody.isBlocked !== undefined) {
+          await setBlocked(
+            adminUserMatch[1],
+            admin.id,
+            requestBody.isBlocked as boolean,
+          );
+        }
+      } catch (caught) {
+        const info = getErrorInfo(caught);
+        return error(info.message || "Could not update the user", 400);
+      }
+      return json({ success: true });
+    }
+
+    if (adminUserMatch && req.method === "DELETE") {
+      const admin = await requireAdmin(req);
+      try {
+        await deleteManagedUser(adminUserMatch[1], admin.id);
+      } catch (caught) {
+        const info = getErrorInfo(caught);
+        return error(info.message || "Could not delete the user", 400);
+      }
+      return json({ success: true });
+    }
+
+    if (path === "assistant/chat" && req.method === "POST") {
+      // Dedicated VS Code extension assistant chat, independent of any project.
+      const requestBody = await body<{
+        messages: unknown;
+        provider?: unknown;
+      }>(req);
+      const provider = requestBody.provider || "OPENROUTER";
+      if (!isAIProvider(provider)) {
+        return error("Unsupported AI provider", 400);
+      }
+      return json({
+        success: true,
+        ...(await chatWithAssistant(
+          user.id,
+          requestBody.messages,
+          provider as Provider,
+        )),
+      });
     }
 
     if (path === "github/repositories" && req.method === "GET") {

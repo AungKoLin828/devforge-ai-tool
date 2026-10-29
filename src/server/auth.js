@@ -43,11 +43,20 @@ export async function requireAuth(req) {
     });
     if (!s || s.expiresAt <= new Date())
         throw new AuthError("Session expired", 401);
+    if (s.user.isBlocked)
+        throw new AuthError("This account has been blocked by an administrator", 403);
     await prisma.session.update({
         where: { id: s.id },
         data: { lastSeenAt: new Date() },
     });
     return s.user;
+}
+/** Require an authenticated ADMIN-role user; used by the admin user-management routes. */
+export async function requireAdmin(req) {
+    const user = await requireAuth(req);
+    if (user.role !== "ADMIN")
+        throw new AuthError("Administrator access is required", 403);
+    return user;
 }
 /** HTTP-aware authentication failure that the router can serialize consistently. */
 export class AuthError extends Error {

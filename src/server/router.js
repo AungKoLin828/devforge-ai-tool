@@ -1,11 +1,12 @@
 import { json, error, body } from "./http.js";
-import { requireAuth, AuthError, createSession, clearSession, } from "./auth.js";
+import { requireAuth, requireAdmin, AuthError, createSession, clearSession, } from "./auth.js";
 import { githubOAuthConfig, githubLoginUrl, exchange, githubUser, upsertGithubUser, listGitHubRepositories, connectGitHubRepository, createGitHubRepository, disconnectGitHubRepository, updateGitHubSync, } from "./github.js";
 import { randomToken, sha256 } from "./crypto.js";
 import { prisma } from "./db.js";
 import { deleteAIProvider, listAIProviders, saveAIProvider, } from "./ai.js";
-import { create, chatWithProject, detail, importProject, list, owner, rename, remove, removeImportedProject, startGenerateProject, startReviewProject, } from "./projects.js";
+import { create, chatWithAssistant, chatWithProject, detail, importProject, list, owner, rename, remove, removeImportedProject, startGenerateProject, startReviewProject, } from "./projects.js";
 import { ensureAgent, registerAgent, queueJob, claimJob, } from "./agent.js";
+import { adminStats, deleteUser as deleteManagedUser, listUsers, setBlocked, setRole, } from "./admin.js";
 // Keep OAuth redirects as minimal responses with an explicit status.
 const redirect = (url, status = 302) => new Response(null, {
     status,
@@ -109,6 +110,20 @@ export async function handleApi(req) {
                 },
             });
         }
+        if (path === "auth/logout" && req.method === "POST") {
+            const user = await requireAuth(req).catch(() => null);
+            if (user) {
+                await prisma.session.deleteMany({
+                    where: { userId: user.id },
+                });
+            }
+            return json({ success: true }, 200, { "set-cookie": clearSession() });
+        }
+        if (path === "auth/me" && req.method === "GET") {
+            // All project and repository data routes require a valid session.
+            const user = await requireAuth(req);
+            return json({ success: true, user });
+        }
         // ---- VS Code extension device pairing (automated sign-in) ----
         // Extension creates a pairing code (public, no session yet).
         if (path === "auth/pair/start" && req.method === "POST") {
@@ -125,7 +140,8 @@ export async function handleApi(req) {
         if (path === "auth/pair/poll" && req.method === "POST") {
             const requestBody = await body(req);
             const code = typeof requestBody.code === "string" ? requestBody.code : "";
-            if (!code) return error("Missing pairing code", 400);
+            if (!code)
+                return error("Missing pairing code", 400);
             const pairing = await prisma.pairing.findUnique({
                 where: { codeHash: sha256(code) },
             });
@@ -141,7 +157,8 @@ export async function handleApi(req) {
             const user = await requireAuth(req);
             const requestBody = await body(req);
             const code = typeof requestBody.code === "string" ? requestBody.code : "";
-            if (!code) return error("Missing pairing code", 400);
+            if (!code)
+                return error("Missing pairing code", 400);
             const pairing = await prisma.pairing.findUnique({
                 where: { codeHash: sha256(code) },
             });
@@ -159,26 +176,13 @@ export async function handleApi(req) {
             // store it directly; the cookie value is the URL-encoded random token.
             const match = /devforge_session=([^;]+)/.exec(session);
             const token = match ? decodeURIComponent(match[1]) : "";
-            if (!token) return error("Could not create a session for pairing", 500);
+            if (!token)
+                return error("Could not create a session for pairing", 500);
             await prisma.pairing.update({
                 where: { id: pairing.id },
                 data: { userId: user.id, tokenHash: token },
             });
             return json({ success: true });
-        }
-        if (path === "auth/logout" && req.method === "POST") {
-            const user = await requireAuth(req).catch(() => null);
-            if (user) {
-                await prisma.session.deleteMany({
-                    where: { userId: user.id },
-                });
-            }
-            return json({ success: true }, 200, { "set-cookie": clearSession() });
-        }
-        if (path === "auth/me" && req.method === "GET") {
-            // All project and repository data routes require a valid session.
-            const user = await requireAuth(req);
-            return json({ success: true, user });
         }
         const user = await requireAuth(req);
         const aiProviderMatch = path.match(/^ai\/providers\/(OPENROUTER|OPENAI|CUSTOM)$/);
@@ -209,6 +213,62 @@ export async function handleApi(req) {
         if (aiProviderMatch && req.method === "DELETE") {
             await deleteAIProvider(user.id, aiProviderMatch[1]);
             return json({ success: true });
+        }
+        // ---- Admin user management (ADMIN role only) ----
+        if (path === "admin/users" && req.method === "GET") {
+            const admin = await requireAdmin(req);
+            const [users, stats] = await Promise.all([listUsers(), adminStats()]);
+            return json({ success: true, users, stats, actingUserId: admin.id });
+        }
+        const adminUserMatch = path.match(/^admin\/users\/([^/]+)$/);
+        if (adminUserMatch && req.method === "PATCH") {
+            const admin = await requireAdmin(req);
+            const requestBody = await body(req);
+            if (requestBody.role !== undefined &&
+                requestBody.role !== "USER" &&
+                requestBody.role !== "ADMIN") {
+                return error("Role must be USER or ADMIN", 400);
+            }
+            if (requestBody.isBlocked !== undefined &&
+                typeof requestBody.isBlocked !== "boolean") {
+                return error("isBlocked must be true or false", 400);
+            }
+            try {
+                if (requestBody.role !== undefined) {
+                    await setRole(adminUserMatch[1], admin.id, requestBody.role);
+                }
+                if (requestBody.isBlocked !== undefined) {
+                    await setBlocked(adminUserMatch[1], admin.id, requestBody.isBlocked);
+                }
+            }
+            catch (caught) {
+                const info = getErrorInfo(caught);
+                return error(info.message || "Could not update the user", 400);
+            }
+            return json({ success: true });
+        }
+        if (adminUserMatch && req.method === "DELETE") {
+            const admin = await requireAdmin(req);
+            try {
+                await deleteManagedUser(adminUserMatch[1], admin.id);
+            }
+            catch (caught) {
+                const info = getErrorInfo(caught);
+                return error(info.message || "Could not delete the user", 400);
+            }
+            return json({ success: true });
+        }
+        if (path === "assistant/chat" && req.method === "POST") {
+            // Dedicated VS Code extension assistant chat, independent of any project.
+            const requestBody = await body(req);
+            const provider = requestBody.provider || "OPENROUTER";
+            if (!isAIProvider(provider)) {
+                return error("Unsupported AI provider", 400);
+            }
+            return json({
+                success: true,
+                ...(await chatWithAssistant(user.id, requestBody.messages, provider)),
+            });
         }
         if (path === "github/repositories" && req.method === "GET") {
             return json({

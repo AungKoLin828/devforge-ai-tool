@@ -5,6 +5,32 @@ export type User = {
   githubName: string | null;
   email: string | null;
   avatarUrl: string | null;
+  role?: "USER" | "ADMIN";
+  isBlocked?: boolean;
+};
+
+/** One platform user row shown on the admin page. */
+export type AdminUser = {
+  id: string;
+  githubId: string;
+  githubUsername: string | null;
+  githubName: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+  role: "USER" | "ADMIN";
+  isBlocked: boolean;
+  createdAt: string;
+  lastSeenAt: string | null;
+  projectCount: number;
+  sessionCount: number;
+};
+
+/** Usage counters shown at the top of the admin page. */
+export type AdminStats = {
+  users: number;
+  projects: number;
+  aiRequests: number;
+  activeSessions: number;
 };
 
 export type AIProvider = "OPENROUTER" | "OPENAI" | "CUSTOM";
@@ -475,6 +501,27 @@ async function request<T>(url: string, init: RequestInit = {}) {
 export const api = {
   // Session and GitHub OAuth-backed repository operations.
   me: () => request<{ success: true; user: User }>("/api/auth/me"),
+  // Admin page: manage every user of the web app and VS Code extension.
+  adminUsers: () =>
+    request<{
+      success: true;
+      users: AdminUser[];
+      stats: AdminStats;
+      actingUserId: string;
+    }>("/api/admin/users"),
+  adminUpdateUser: (
+    id: string,
+    patch: { role?: "USER" | "ADMIN"; isBlocked?: boolean },
+  ) =>
+    request<{ success: true }>(
+      `/api/admin/users/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+    ),
+  adminDeleteUser: (id: string) =>
+    request<{ success: true }>(
+      `/api/admin/users/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    ),
   // Approve a VS Code extension pairing request so the extension gets a session automatically.
   approvePairing: (code: string) =>
     request<{ success: true }>("/api/auth/pair/approve", {

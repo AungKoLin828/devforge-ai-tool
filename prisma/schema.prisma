@@ -108,6 +108,12 @@ enum GitProvider {
   GITHUB
 }
 
+/** Platform-level account role managed on the admin page. */
+enum UserRole {
+  USER
+  ADMIN
+}
+
 enum GitSyncStatus {
   NOT_CONNECTED
   CONNECTED
@@ -134,6 +140,8 @@ model User {
   githubName           String?
   email                String?
   avatarUrl            String?
+  role                 UserRole        @default(USER)
+  isBlocked            Boolean         @default(false)
   githubAccessTokenEnc String?
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt

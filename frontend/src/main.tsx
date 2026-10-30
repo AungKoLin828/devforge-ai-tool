@@ -3048,7 +3048,7 @@ function App({ user }: { user: User }) {
                               setWorkspaceEditorDraft(editor.value);
                               updateEditorCursor(editor);
                             }}
-                            className="h-full min-h-[500px] min-w-0 flex-1 resize-none overflow-auto bg-transparent px-4 py-4 font-mono text-[13px] leading-6 text-slate-200 outline-none selection:bg-indigo-500/30 focus:ring-1 focus:ring-inset focus:ring-indigo-500/50"
+                            className="workspace-editor-textarea h-full min-h-[500px] min-w-0 flex-1 resize-none overflow-auto bg-transparent px-4 py-4 font-mono text-[13px] leading-6 text-slate-200 outline-none selection:bg-indigo-500/30 focus:ring-1 focus:ring-inset focus:ring-indigo-500/50"
                           />
                         </div>
                         <div className="flex items-center justify-between gap-3 border-t border-slate-800 bg-slate-900/70 px-3 py-1.5 text-[10px] text-slate-500">

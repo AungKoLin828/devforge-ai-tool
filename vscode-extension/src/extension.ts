@@ -1702,20 +1702,67 @@ function escapeHtml(value: string): string {
 
 /**
  * Detect a generated-files JSON payload in a chat reply, e.g.
- * {"files":[{"path":"relative/path","content":"..."}]} — optionally wrapped in
- * markdown fences. Returns a validated, path-safe list.
+ * {"files":[{"path":"relative/path","content":"..."}]}. The payload may be
+ * the whole reply, wrapped in markdown fences, or embedded inside prose
+ * (models often explain first and then emit the JSON block). Returns a
+ * validated, path-safe list.
  */
 function parseGeneratedFiles(
   reply: string,
 ): Array<{ path: string; content: string }> {
-  const cleaned = reply
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "");
-  if (!cleaned.startsWith("{")) return [];
+  const candidates: string[] = [];
+  // 1. The whole reply, with a single surrounding fence stripped.
+  candidates.push(
+    reply
+      .trim()
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/, ""),
+  );
+  // 2. Every fenced code block in the reply (```json ... ``` or ``` ... ```).
+  for (const match of reply.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)) {
+    candidates.push(match[1].trim());
+  }
+  // 3. Balanced-brace JSON objects embedded anywhere in prose (the payload
+  //    may itself contain escaped braces inside string content, so scan every
+  //    "{" as a potential start and take the longest parseable object).
+  for (let start = reply.indexOf("{"); start !== -1; start = reply.indexOf("{", start + 1)) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < reply.length; index += 1) {
+      const char = reply[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+      if (char === '"') inString = true;
+      else if (char === "{") depth += 1;
+      else if (char === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          candidates.push(reply.slice(start, index + 1));
+          break;
+        }
+      }
+    }
+  }
+  for (const candidate of candidates) {
+    const files = parseGeneratedFilesPayload(candidate);
+    if (files.length) return files;
+  }
+  return [];
+}
+
+/** Parse one candidate JSON string into a validated file list. */
+function parseGeneratedFilesPayload(
+  candidate: string,
+): Array<{ path: string; content: string }> {
+  if (!candidate.startsWith("{")) return [];
   let parsed: { files?: unknown };
   try {
-    parsed = JSON.parse(cleaned) as { files?: unknown };
+    parsed = JSON.parse(candidate) as { files?: unknown };
   } catch {
     return [];
   }

@@ -23,10 +23,6 @@ body {
   scrollbar-color: #475569 #0b1220;
   scrollbar-width: thin;
 }
-*::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
 *::-webkit-scrollbar-track {
   background: #0b1220;
 }
@@ -40,6 +36,17 @@ body {
 }
 *::-webkit-scrollbar-corner {
   background: #0b1220;
+}
+
+/* Code editor: show thicker, easier-to-grab scrollbars than the page default,
+   including the horizontal bar that appears when long lines do not wrap. */
+.workspace-editor-textarea::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+.workspace-editor-textarea {
+  scrollbar-color: #64748b #0b1220;
+  scrollbar-width: auto;
 }
 button,
 input,

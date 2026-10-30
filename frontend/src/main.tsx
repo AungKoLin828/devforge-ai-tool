@@ -274,6 +274,12 @@ function Login() {
       description:
         "Connect a workspace-restricted local agent to import projects and run build or test commands on your PC.",
     },
+    {
+      number: "04",
+      title: "Works in VS Code",
+      description:
+        "Install the DevForge AI VS Code extension to chat with the assistant, review code, fix errors, and generate tests without leaving the editor. Sign in once with device pairing and everything runs from the DevForge chat panel (Ctrl+Alt+D).",
+    },
   ];
 
   const roadmap = [
@@ -430,7 +436,7 @@ function Login() {
             See what DevForge does today and what is being connected next.
           </p>
         </div>
-        <div className="mt-9 grid gap-4 md:grid-cols-3">
+        <div className="mt-9 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {capabilities.map((item) => (
             <article key={item.number} className="glass rounded-2xl p-6">
               <span className="text-sm font-semibold text-indigo-300">
@@ -445,6 +451,39 @@ function Login() {
             </article>
           ))}
         </div>
+
+        {/* VS Code extension availability notice. */}
+        <div
+          className="glass mt-9 flex flex-col gap-4 rounded-2xl p-6 sm:flex-row sm:items-center"
+          aria-label="VS Code extension availability"
+        >
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">
+              Also available for VS Code
+            </p>
+            <h3 className="mt-2 text-lg font-semibold text-white">
+              DevForge AI Developer Tools extension
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              Everything runs from chat right inside your editor: generate
+              source, review code, analyze errors, create tests, and send build
+              requests. Sign in with secure device pairing — no API key or
+              cookie copying needed.
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-col gap-2 text-sm">
+            <span className="rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 font-mono text-xs text-slate-300">
+              Extensions panel → search “DevForge AI”
+            </span>
+            <span className="rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 font-mono text-xs text-slate-300">
+              Install the .vsix from the guide
+            </span>
+            <span className="text-xs text-slate-500">
+              Open chat with Ctrl+Alt+D inside VS Code
+            </span>
+          </div>
+        </div>
+
         <div className="mt-16 grid gap-10 lg:grid-cols-[0.8fr_1.2fr]">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">
@@ -504,8 +543,28 @@ function Login() {
  */
 function detectChatIntent(
   text: string,
-): "generate" | "modify" | "review" | "build" | "test" | "save" | "chat" {
+):
+  | "generate"
+  | "modify"
+  | "review"
+  | "build"
+  | "test"
+  | "save"
+  | "connect-agent"
+  | "disconnect-agent"
+  | "chat" {
   const value = text.toLowerCase();
+  if (
+    /(disconnect|unpair|stop using).*(agent|local)|\bdisconnect agent\b/.test(
+      value,
+    )
+  )
+    return "disconnect-agent";
+  if (
+    /(connect|start|pair|launch|run).*(agent|local)/.test(value) ||
+    /\b(connect|start) agent\b/.test(value)
+  )
+    return "connect-agent";
   if (
     /\b(save|export|download|sync)\b/.test(value) &&
     /\b(file|folder|pc|computer|local|disk|drive)\b/.test(value)
@@ -604,6 +663,24 @@ async function saveGeneratedFilesToLocalPcCandidate(
   return saveGeneratedFilesToLocalPcGeneric(files, projectName);
 }
 
+/** True for transient AI/API failures that are safe to retry automatically. */
+function isRetryableAiRequestError(cause: unknown): boolean {
+  if (cause instanceof TypeError) return true; // fetch network failure
+  const message = cause instanceof Error ? cause.message.toLowerCase() : "";
+  if (!message) return false;
+  return (
+    message.includes("timed out") ||
+    message.includes("timeout") ||
+    message.includes("failed to fetch") ||
+    message.includes("network") ||
+    /http 429/.test(message) ||
+    /http 5\d\d/.test(message) ||
+    /\b(429|500|502|503|504)\b/.test(message) ||
+    message.includes("rate limit") ||
+    message.includes("overloaded")
+  );
+}
+
 function App({ user }: { user: User }) {
   // Message dialogs and confirmations share one resolver so every action is modal-based.
   type ModalKind = "info" | "success" | "warning" | "error";
@@ -661,6 +738,10 @@ function App({ user }: { user: User }) {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
+  // Keep the last failed chat question so the Retry button can replay it.
+  const [lastFailedChatQuestion, setLastFailedChatQuestion] = useState<
+    string | null
+  >(null);
   // Keep the pairing secret in this browser only; it is sent directly to loopback.
   const [localAgentToken, setLocalAgentToken] = useState(
     () => window.localStorage.getItem("devforge-local-agent-token") || "",
@@ -1544,6 +1625,22 @@ function App({ user }: { user: User }) {
     }
   }
 
+  // Stop using the paired agent in this browser without touching the agent process.
+  function disconnectLocalAgent() {
+    window.localStorage.removeItem("devforge-local-agent-token");
+    setLocalAgentToken("");
+    setLocalAgentInfo(null);
+    setLocalAgentError(null);
+    setWorkspaceProjects([]);
+    setWorkspaceListing(null);
+    setWorkspaceEditorFile(null);
+    setWorkspaceEditorDraft("");
+    setLogs((current) => [
+      ...current,
+      "Disconnected the Local Agent from this browser session.",
+    ]);
+  }
+
   // Import a bounded, secret-filtered snapshot from a selected local folder.
   async function importLocalProject() {
     const source = workspaceProjects.find(
@@ -2210,6 +2307,7 @@ function App({ user }: { user: User }) {
     setChatMessages(nextMessages);
     setChatInput("");
     setChatBusy(true);
+    setLastFailedChatQuestion(null);
     const say = (text: string) =>
       setChatMessages((current) => [
         ...current,
@@ -2296,10 +2394,27 @@ function App({ user }: { user: User }) {
         );
         return;
       }
+      if (intent === "connect-agent") {
+        say("Connecting the Local Agent on this PC…");
+        await connectLocalAgent();
+        say(
+          localAgentInfo
+            ? `Connected to ${localAgentInfo.machine} (${localAgentInfo.platform}). Workspace: ${localAgentInfo.workspaceRoot}`
+            : "Could not connect the Local Agent. Install or update it from the Local Agent install guide, then try again.",
+        );
+        return;
+      }
+      if (intent === "disconnect-agent") {
+        disconnectLocalAgent();
+        say(
+          "Disconnected the Local Agent from this browser. Build, test, sync, and GitHub operations are paused until you connect again.",
+        );
+        return;
+      }
       if (intent === "build" || intent === "test") {
         if (!localAgentInfo) {
           say(
-            `A Local Agent connection is required to run ${intent === "build" ? "a build" : "tests"} on your PC. Start it with the “Start and connect agent” button, or just ask me for the ${intent === "build" ? "build" : "test"} strategy instead.`,
+            `A Local Agent connection is required to run ${intent === "build" ? "a build" : "tests"} on your PC. Ask me to "connect the agent" first, or just ask for the ${intent === "build" ? "build" : "test"} strategy instead.`,
           );
         } else {
           say(`Starting the local ${intent} workflow…`);
@@ -2340,11 +2455,46 @@ function App({ user }: { user: User }) {
         cause instanceof Error
           ? cause.message
           : "Could not get an AI response.";
+      const canRetry = isRetryableAiRequestError(cause);
+      // Transient AI/network failures are retried automatically before an error is shown.
+      if (canRetry) {
+        say(
+          `The AI request failed transiently (${message}). Retrying automatically…`,
+        );
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          try {
+            await new Promise((resolve) =>
+              window.setTimeout(resolve, 750 * attempt),
+            );
+            const response = await api.chat(
+              selected.id,
+              nextMessages,
+              selectedAIProvider,
+            );
+            setChatMessages((current) => [
+              ...current,
+              { role: "assistant", content: response.answer },
+            ]);
+            setChatBusy(false);
+            return;
+          } catch (retryCause) {
+            cause = retryCause;
+          }
+        }
+      }
+      const finalMessage =
+        cause instanceof Error
+          ? cause.message
+          : "Could not get an AI response.";
+      setLastFailedChatQuestion(question);
       setChatMessages((current) => [
         ...current,
-        { role: "assistant", content: `Sorry, that failed: ${message}` },
+        {
+          role: "assistant",
+          content: `Sorry, that failed: ${finalMessage}`,
+        },
       ]);
-      showModal("error", "Chat request failed", message);
+      showModal("error", "Chat request failed", finalMessage);
     } finally {
       setChatBusy(false);
     }
@@ -3179,34 +3329,10 @@ function App({ user }: { user: User }) {
                     </div>
                   </div>
                 </details>
-                <textarea
-                  value={prompt}
-                  onChange={(event) => setPrompt(event.target.value)}
-                  disabled={isBusy}
-                  className="w-full h-36 rounded-xl bg-slate-950 border border-slate-800 p-3 outline-none focus:border-indigo-500 disabled:opacity-60"
-                  placeholder={
-                    generatedFiles.length
-                      ? "Optional: type in chat or here to generate/modify..."
-                      : "Describe the software you want to build..."
-                  }
-                />
-                <div className="flex gap-2 mt-3">
-                  <button
-                    disabled={isBusy || !prompt.trim()}
-                    onClick={() => void generate("generate")}
-                    className="bg-indigo-600 disabled:opacity-50 rounded-lg px-4 py-2"
-                  >
-                    {activeOperation === "generate" &&
-                    generationStatus === "STARTING"
-                      ? "Starting..."
-                      : activeOperation === "generate" &&
-                          generationStatus === "RUNNING"
-                        ? "Generating..."
-                        : generatedFiles.length
-                          ? "Regenerate"
-                          : "Generate"}
-                  </button>
-                  {generatedFiles.length > 0 && (
+                {/* All generation/modification requests run from the AI Assistant
+                    chat on the right; no separate prompt or Generate button here. */}
+                {generatedFiles.length > 0 && (
+                  <div className="flex gap-2 mt-3">
                     <button
                       type="button"
                       disabled={downloadingProjectZip}
@@ -3218,8 +3344,6 @@ function App({ user }: { user: User }) {
                         ? "Preparing ZIP..."
                         : "Download ZIP"}
                     </button>
-                  )}
-                  {generatedFiles.length > 0 && (
                     <button
                       type="button"
                       disabled={isBusy || !generatedFiles.length}
@@ -3229,8 +3353,8 @@ function App({ user }: { user: User }) {
                     >
                       Save to my PC
                     </button>
-                  )}
-                </div>
+                  </div>
+                )}
                 <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                     <p className="flex-1 text-xs leading-5 text-slate-400">
@@ -3247,8 +3371,16 @@ function App({ user }: { user: User }) {
                         ? "Starting and connecting..."
                         : localAgentInfo
                           ? "Reconnect agent"
-                          : "Start and connect agent"}
+                          : "Connect agent"}
                     </button>
+                    {localAgentInfo && (
+                      <button
+                        onClick={() => void disconnectLocalAgent()}
+                        className="rounded-lg border border-red-500/40 px-4 py-2 text-sm text-red-200 hover:border-red-400"
+                      >
+                        Disconnect agent
+                      </button>
+                    )}
                   </div>
                   {localAgentError && (
                     <p className="mt-3 text-xs text-amber-300">
@@ -3541,10 +3673,10 @@ function App({ user }: { user: User }) {
                   </section>
                   {!localAgentInfo && (
                     <p className="mt-3 text-xs leading-5 text-amber-300">
-                      Select <strong>Start and connect agent</strong> to start
-                      the installed agent and pair automatically. Select{" "}
-                      <strong>Generate</strong> to start and pair it while
-                      generating a project. For first-time setup, follow the{" "}
+                      Select <strong>Connect agent</strong> to start the
+                      installed agent and pair automatically, or ask the AI
+                      Assistant in chat to connect it for you. For first-time
+                      setup, follow the{" "}
                       <a
                         href="/guide"
                         className="underline underline-offset-2 hover:text-amber-200"
@@ -3650,9 +3782,9 @@ function App({ user }: { user: User }) {
           <div className="border-b border-slate-800 p-4">
             <div className="font-semibold">AI Assistant</div>
             <p className="mt-1 text-xs text-slate-500">
-              All processes run from here: “generate a todo app”, “modify the
-              header”, “review my code”, “build”, “test”, or “save files to my
-              PC”.
+              All processes run from here: “generate a todo app”, “modify
+              the header”, “review my code”, “build”, “test”, or
+              “save files to my PC”.
             </p>
           </div>
           <div className="flex-1 space-y-3 overflow-auto p-4 text-sm">
@@ -3684,6 +3816,23 @@ function App({ user }: { user: User }) {
               <p className="text-xs text-amber-300">
                 Thinking about your question...
               </p>
+            )}
+            {lastFailedChatQuestion && !chatBusy && (
+              <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-xs text-red-200">
+                <p>The last request failed.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const question = lastFailedChatQuestion;
+                    setLastFailedChatQuestion(null);
+                    setChatInput(question);
+                    window.setTimeout(() => void sendChatMessage(), 0);
+                  }}
+                  className="mt-2 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500"
+                >
+                  Retry request
+                </button>
+              </div>
             )}
           </div>
           <form
@@ -3988,7 +4137,10 @@ function AdminPage({ user }: { user: User }) {
     load();
   }, []);
 
-  async function update(id: string, patch: { role?: "USER" | "ADMIN"; isBlocked?: boolean }) {
+  async function update(
+    id: string,
+    patch: { role?: "USER" | "ADMIN"; isBlocked?: boolean },
+  ) {
     setBusyId(id);
     try {
       await api.adminUpdateUser(id, patch);
@@ -4019,12 +4171,9 @@ function AdminPage({ user }: { user: User }) {
   const filtered = users.filter((item) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
-    return [
-      item.githubUsername,
-      item.githubName,
-      item.email,
-      item.role,
-    ].some((value) => (value ?? "").toLowerCase().includes(q));
+    return [item.githubUsername, item.githubName, item.email, item.role].some(
+      (value) => (value ?? "").toLowerCase().includes(q),
+    );
   });
 
   return (
@@ -4059,10 +4208,7 @@ function AdminPage({ user }: { user: User }) {
             <StatCard label="Users" value={stats.users} />
             <StatCard label="Projects" value={stats.projects} />
             <StatCard label="AI requests" value={stats.aiRequests} />
-            <StatCard
-              label="Active sessions"
-              value={stats.activeSessions}
-            />
+            <StatCard label="Active sessions" value={stats.activeSessions} />
           </div>
         )}
         <input
@@ -4132,9 +4278,7 @@ function AdminPage({ user }: { user: User }) {
                     <td className="px-3 py-2">
                       <span
                         className={
-                          item.isBlocked
-                            ? "text-red-300"
-                            : "text-emerald-300"
+                          item.isBlocked ? "text-red-300" : "text-emerald-300"
                         }
                       >
                         {item.isBlocked ? "Blocked" : "Active"}

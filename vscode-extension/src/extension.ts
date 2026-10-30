@@ -212,29 +212,11 @@ class DevForgeCommandsTree implements vscode.TreeDataProvider<vscode.TreeItem> {
       if (!authenticated) {
         return [item("devforge.signIn", "Sign In to DevForge…", "sign-in")];
       }
+      // All processes run from chat; the sidebar only opens chat and manages
+      // the account. Generate/review/modify/tests/error analysis stay available
+      // as commands (chat routes work to them) but are not listed here.
       return [
         item("devforge.openChat", "Open Chat (Ctrl+Alt+D)", "comment"),
-        item(
-          "devforge.selectAiProvider",
-          "AI Provider (Select / API Key)",
-          "gear",
-        ),
-        item("devforge.selectProject", "Select Project", "folder-active"),
-        item("devforge.generateProject", "Generate Project", "add"),
-        item(
-          "devforge.reviewCurrentFile",
-          "Review Current File (Ctrl+Alt+R)",
-          "eye",
-        ),
-        item("devforge.reviewWorkspace", "Review Workspace", "search"),
-        item(
-          "devforge.modifyCurrentFile",
-          "Modify Current File (Ctrl+Alt+M)",
-          "edit",
-        ),
-        item("devforge.explainSelection", "Explain Code (Ctrl+Alt+E)", "book"),
-        item("devforge.generateTests", "Generate Tests", "beaker"),
-        item("devforge.fixCurrentFile", "Fix Errors (Ctrl+Alt+F)", "wrench"),
         item("devforge.clearFindings", "Clear Findings", "clear-all"),
         item("devforge.signOut", "Sign Out", "sign-out"),
       ];
@@ -941,7 +923,10 @@ async function signIn(context: vscode.ExtensionContext): Promise<void> {
     { enableScripts: true, retainContextWhenHidden: true },
   );
   const nonce = getNonce();
-  const environment = getBackendEnvironment() === "local" ? "Local development" : "Netlify hosted";
+  const environment =
+    getBackendEnvironment() === "local"
+      ? "Local development"
+      : "Netlify hosted";
   const logoUri = panel.webview.asWebviewUri(
     vscode.Uri.joinPath(context.extensionUri, "media", "icon.png"),
   );
@@ -961,7 +946,9 @@ const vscode=acquireVsCodeApi();const github=document.getElementById('github');c
     panel.webview.postMessage({ type, text });
   let running = false;
   let panelClosed = false;
-  panel.onDidDispose(() => { panelClosed = true; });
+  panel.onDidDispose(() => {
+    panelClosed = true;
+  });
   const startSignIn = async () => {
     if (running) return;
     running = true;
@@ -971,30 +958,64 @@ const vscode=acquireVsCodeApi();const github=document.getElementById('github');c
         method: "POST",
         headers: { Accept: "application/json" },
       });
-      const data = (await response.json().catch(() => ({}))) as { code?: string; error?: string; message?: string };
+      const data = (await response.json().catch(() => ({}))) as {
+        code?: string;
+        error?: string;
+        message?: string;
+      };
       if (!response.ok || !data.code) {
-        throw new Error(data.message || data.error || "The backend does not support device-pairing sign-in. Check the backend's existing authentication flow.");
+        throw new Error(
+          data.message ||
+            data.error ||
+            "The backend does not support device-pairing sign-in. Check the backend's existing authentication flow.",
+        );
       }
-      const connectUrl = vscode.Uri.parse(`${baseUrl}/connect?code=${encodeURIComponent(data.code)}`);
+      const connectUrl = vscode.Uri.parse(
+        `${baseUrl}/connect?code=${encodeURIComponent(data.code)}`,
+      );
       await vscode.env.openExternal(connectUrl);
-      post("status", "Browser opened. Sign in with GitHub and approve the connection. Waiting for approval…");
+      post(
+        "status",
+        "Browser opened. Sign in with GitHub and approve the connection. Waiting for approval…",
+      );
       const deadline = Date.now() + 10 * 60 * 1000;
       while (Date.now() < deadline && !panelClosed) {
         const result = await fetch(`${baseUrl}/api/auth/pair/poll`, {
           method: "POST",
-          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify({ code: data.code }),
         });
-        const polled = (await result.json().catch(() => ({}))) as { pending?: boolean; token?: string; error?: string; message?: string };
+        const polled = (await result.json().catch(() => ({}))) as {
+          pending?: boolean;
+          token?: string;
+          error?: string;
+          message?: string;
+        };
         if (result.ok && !polled.pending && polled.token) {
           await context.secrets.store(getSessionSecretKey(), polled.token);
           try {
-            const resultMe = await apiRequest<{ user?: { githubUsername?: string | null; githubName?: string | null; email?: string | null } }>(context, "/api/auth/me");
+            const resultMe = await apiRequest<{
+              user?: {
+                githubUsername?: string | null;
+                githubName?: string | null;
+                email?: string | null;
+              };
+            }>(context, "/api/auth/me");
             const user = resultMe.user;
-            const identity = user?.githubUsername ? `@${user.githubUsername}` : user?.email ?? user?.githubName;
-            post("success", `Connected successfully${identity ? ` as ${identity}` : ""}. Opening DevForge chat…`);
+            const identity = user?.githubUsername
+              ? `@${user.githubUsername}`
+              : (user?.email ?? user?.githubName);
+            post(
+              "success",
+              `Connected successfully${identity ? ` as ${identity}` : ""}. Opening DevForge chat…`,
+            );
             refreshCommandsTree();
-            vscode.window.showInformationMessage(`Connected to DevForge${identity ? ` as ${identity}` : ""}. Opening chat…`);
+            vscode.window.showInformationMessage(
+              `Connected to DevForge${identity ? ` as ${identity}` : ""}. Opening chat…`,
+            );
             // After a successful sign-in, jump straight into the chat page.
             setTimeout(() => {
               void vscode.commands.executeCommand("devforge.openChat");
@@ -1006,7 +1027,11 @@ const vscode=acquireVsCodeApi();const github=document.getElementById('github');c
           }
         }
         if (!result.ok && result.status !== 400 && result.status !== 404) {
-          throw new Error(polled.message || polled.error || `Sign-in polling failed (HTTP ${result.status}).`);
+          throw new Error(
+            polled.message ||
+              polled.error ||
+              `Sign-in polling failed (HTTP ${result.status}).`,
+          );
         }
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
@@ -1022,19 +1047,36 @@ const vscode=acquireVsCodeApi();const github=document.getElementById('github');c
     if (message.type === "signIn") await startSignIn();
     if (message.type === "check") {
       try {
-        const response = await fetch(`${baseUrl}/api/auth/me`, { headers: { Accept: "application/json" } });
-        if (response.ok) post("success", "The backend is reachable and already has a valid browser session. Continue with GitHub if you need to connect VS Code.");
-        else post("status", `Backend is reachable (${baseUrl}), but sign-in is required. Choose Continue with GitHub.`);
+        const response = await fetch(`${baseUrl}/api/auth/me`, {
+          headers: { Accept: "application/json" },
+        });
+        if (response.ok)
+          post(
+            "success",
+            "The backend is reachable and already has a valid browser session. Continue with GitHub if you need to connect VS Code.",
+          );
+        else
+          post(
+            "status",
+            `Backend is reachable (${baseUrl}), but sign-in is required. Choose Continue with GitHub.`,
+          );
       } catch (error) {
-        post("error", `Cannot reach backend: ${error instanceof Error ? error.message : String(error)}`);
+        post(
+          "error",
+          `Cannot reach backend: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
   });
 }
 
 function getNonce(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  return Array.from({ length: 32 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  return Array.from(
+    { length: 32 },
+    () => chars[Math.floor(Math.random() * chars.length)],
+  ).join("");
 }
 
 async function signOut(context: vscode.ExtensionContext): Promise<void> {
@@ -1210,20 +1252,54 @@ async function requestAssistant(
   const messages = chunks.map((content) => ({ role: "user", content }));
   // The selected provider is passed through; the server defaults to OpenRouter when omitted.
   const provider = await getSelectedProvider(context);
-  const result = await apiRequest<{ success: boolean; answer?: string }>(
-    context,
-    "/api/assistant/chat",
-    {
-      method: "POST",
-      body: JSON.stringify({ messages, provider }),
-    },
+  // AI requests can fail transiently (network blips, rate limits, 5xx).
+  // Retry those failures automatically with short backoff before surfacing an error.
+  const maxAttempts = 3;
+  let lastCause: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const result = await apiRequest<{ success: boolean; answer?: string }>(
+        context,
+        "/api/assistant/chat",
+        {
+          method: "POST",
+          body: JSON.stringify({ messages, provider }),
+        },
+      );
+      if (typeof result.answer !== "string" || !result.answer.trim())
+        throw new Error("The DevForge assistant endpoint returned no answer.");
+      return result.answer
+        .trim()
+        .replace(/^```(?:\w+)?\s*/i, "")
+        .replace(/\s*```$/, "");
+    } catch (cause) {
+      lastCause = cause;
+      if (attempt >= maxAttempts || !isRetryableAiError(cause)) break;
+      // 500ms / 1500ms backoff before the next attempt.
+      await new Promise((resolve) =>
+        setTimeout(resolve, 500 * 3 ** (attempt - 1)),
+      );
+    }
+  }
+  throw lastCause instanceof Error
+    ? lastCause
+    : new Error("The DevForge assistant request failed.");
+}
+
+/** True for transient failures worth retrying: network errors, timeouts, and 429/5xx. */
+function isRetryableAiError(cause: unknown): boolean {
+  if (cause instanceof TypeError) return true; // fetch network failure
+  const message = cause instanceof Error ? cause.message.toLowerCase() : "";
+  if (!message) return false;
+  return (
+    message.includes("timed out") ||
+    message.includes("timeout") ||
+    message.includes("http 429") ||
+    /http 5\d\d/.test(message) ||
+    message.includes("econnreset") ||
+    message.includes("enotfound") ||
+    message.includes("fetch failed")
   );
-  if (typeof result.answer !== "string" || !result.answer.trim())
-    throw new Error("The DevForge assistant endpoint returned no answer.");
-  return result.answer
-    .trim()
-    .replace(/^```(?:\w+)?\s*/i, "")
-    .replace(/\s*```$/, "");
 }
 
 async function askModel(
@@ -1260,14 +1336,10 @@ async function startProjectRun(
   const result = await apiRequest<{
     success: boolean;
     run?: ProjectRunRef;
-  }>(
-    context,
-    `/api/projects/${encodeURIComponent(project.id)}/${action}`,
-    {
-      method: "POST",
-      body: JSON.stringify({ provider, ...(prompt ? { prompt } : {}) }),
-    },
-  );
+  }>(context, `/api/projects/${encodeURIComponent(project.id)}/${action}`, {
+    method: "POST",
+    body: JSON.stringify({ provider, ...(prompt ? { prompt } : {}) }),
+  });
   if (!result.run?.id)
     throw new Error(`The DevForge ${action} endpoint did not return a run.`);
   return result.run;
@@ -1306,9 +1378,7 @@ async function waitForRun(
 }
 
 /** Fetch the saved project artifacts via GET /api/projects/:id. */
-async function fetchProjectDetail(
-  context: vscode.ExtensionContext,
-): Promise<{
+async function fetchProjectDetail(context: vscode.ExtensionContext): Promise<{
   artifacts: Array<{
     type?: string;
     name?: string;
@@ -1318,7 +1388,9 @@ async function fetchProjectDetail(
   const project = await ensureProject(context);
   const result = await apiRequest<{
     success: boolean;
-    project?: { artifacts?: Array<{ type?: string; name?: string; content?: unknown }> };
+    project?: {
+      artifacts?: Array<{ type?: string; name?: string; content?: unknown }>;
+    };
   }>(context, `/api/projects/${encodeURIComponent(project.id)}`);
   return { artifacts: result.project?.artifacts ?? [] };
 }
@@ -1339,9 +1411,7 @@ async function fetchGeneratedFiles(
         return undefined;
       return { path: entry.path, content: entry.content };
     })
-    .filter(
-      (file): file is { path: string; content: string } => Boolean(file),
-    );
+    .filter((file): file is { path: string; content: string } => Boolean(file));
 }
 
 async function withAiProgress<T>(
@@ -1400,8 +1470,8 @@ async function openChat(
     if(m.type==='modelsLoaded'){modelList.innerHTML='';for(const id of m.models){const o=document.createElement('option');o.value=id;modelList.appendChild(o);}provStatus.textContent=m.models.length+' models loaded';}
     if(m.type==='providerSaved'){provStatus.textContent='Saved ✓';provKey.value='';provSave.disabled=false;}
     if(m.type==='providerError'){provStatus.textContent=m.text;provSave.disabled=false;}
-    if(m.type==='reply'){add('assistant',m.text);send.disabled=false;status.textContent=m.backend;input.focus();}
-    if(m.type==='error'){add('assistant','Error: '+m.text);send.disabled=false;status.textContent=m.backend;}
+    if (m.type==='reply'){add('assistant',m.text);send.disabled=false;status.textContent=m.backend;input.focus();}
+    if(m.type==='error'){const d=add('assistant','Error: '+m.text);const retry=document.createElement('button');retry.textContent='Retry';retry.style.marginTop='6px';retry.addEventListener('click',()=>{d.remove();send.disabled=false;input.value=m.prompt||'';input.focus();if(input.value)send.click();});d.appendChild(retry);messages.scrollTop=messages.scrollHeight;send.disabled=false;status.textContent=m.backend;}
   });
   </script></body></html>`;
   panel.webview.onDidReceiveMessage(
@@ -1475,10 +1545,15 @@ async function openChat(
         return;
       }
       if (message.type !== "send" || typeof message.prompt !== "string") return;
+      // Remember the last request so the webview Retry button can replay it.
+      let lastPrompt = "";
+      let lastIncludeContext = true;
       try {
         const userPrompt = message.prompt.trim();
         if (!userPrompt)
           throw new Error("Enter an instruction before sending.");
+        lastPrompt = userPrompt;
+        lastIncludeContext = message.includeActiveFile !== false;
 
         // Chat goes through the dedicated assistant API; the AI workflow is
         // surfaced step by step in the chat, like Copilot Chat.
@@ -1577,6 +1652,8 @@ async function openChat(
         await panel.webview.postMessage({
           type: "error",
           text,
+          prompt: lastPrompt,
+          includeContext: lastIncludeContext,
           backend: `Assistant request failed · ${getBackendUrl()}`,
         });
       }

@@ -95,11 +95,12 @@ button {
   }
 }
 
-/* Shared translucent panel treatment used throughout the dashboard. */
+/* Shared translucent panel treatment used throughout the dashboard.
+   backdrop-filter blur is very expensive on large panels and made the initial
+   page render slow; a solid translucent background paints far faster. */
 .glass {
-  background: rgba(15, 23, 42, 0.72);
+  background: rgba(15, 23, 42, 0.82);
   border: 1px solid rgba(148, 163, 184, 0.14);
-  backdrop-filter: blur(16px);
 }
 
 /* Landing-page background and accent treatments. */

@@ -497,6 +497,113 @@ function Login() {
 }
 
 // Authenticated project workspace, Local Agent controls, and GitHub tools.
+/**
+ * Detect which DevForge workflow a chat message asks for. All processes run
+ * from chat, so plain wording like "generate a todo app" or "review my code"
+ * maps onto the matching backend operation.
+ */
+function detectChatIntent(
+  text: string,
+): "generate" | "modify" | "review" | "build" | "test" | "save" | "chat" {
+  const value = text.toLowerCase();
+  if (
+    /\b(save|export|download|sync)\b/.test(value) &&
+    /\b(file|folder|pc|computer|local|disk|drive)\b/.test(value)
+  )
+    return "save";
+  if (/\b(build|compile)\b/.test(value)) return "build";
+  if (/\b(test|run tests)\b/.test(value)) return "test";
+  if (/\b(review|audit|find issues|find bugs)\b/.test(value)) return "review";
+  if (/(modify|change|update|refactor|add|fix|improve|edit)\b/.test(value))
+    return "modify";
+  if (/(generate|create|build me|make|scaffold|new project)\b/.test(value))
+    return "generate";
+  return "chat";
+}
+
+/** Remove intent keywords so the rest of the sentence can seed a prompt. */
+function stripIntentKeywords(text: string): string {
+  return text
+    .replace(
+      /^(please\s+)?(devforge[,:]\s*)?(can you\s+)?(now\s+)?(generate|create|modify|update|change|refactor|improve|review|audit)\b/i,
+      "",
+    )
+    .replace(/\b(the\s+)?(project|source code|code|files)\b\s*$/i, "")
+    .trim();
+}
+
+/**
+ * Write generated files straight to a PC folder using the browser's
+ * File System Access API — no Local Agent required. Returns false when the
+ * browser does not support the API or the user cancels the folder picker.
+ */
+async function saveGeneratedFilesToLocalPcGeneric(
+  files: Array<{ path: string; content: string }>,
+  projectName: string,
+): Promise<boolean> {
+  type DirHandle = {
+    getDirectoryHandle: (
+      name: string,
+      options?: { create?: boolean },
+    ) => Promise<DirHandle>;
+    getFileHandle: (
+      name: string,
+      options?: { create?: boolean },
+    ) => Promise<{
+      createWritable: () => Promise<{
+        write: (data: Blob) => Promise<void>;
+        close: () => Promise<void>;
+      }>;
+    }>;
+  };
+  const picker = (
+    window as unknown as {
+      showDirectoryPicker?: (options?: {
+        mode?: string;
+        startIn?: string;
+      }) => Promise<DirHandle>;
+    }
+  ).showDirectoryPicker;
+  if (typeof picker !== "function") return false;
+  let root: DirHandle;
+  try {
+    root = await picker({ mode: "readwrite" });
+  } catch {
+    return false; // user cancelled the folder picker
+  }
+  for (const file of files) {
+    const segments = file.path.replaceAll("\\", "/").split("/");
+    if (
+      !file.path ||
+      file.path.startsWith("/") ||
+      /^[a-zA-Z]:/.test(file.path) ||
+      segments.some(
+        (segment) => !segment || segment === "." || segment === "..",
+      )
+    )
+      continue;
+    let dir = root;
+    for (const segment of segments.slice(0, -1)) {
+      dir = await dir.getDirectoryHandle(segment, { create: true });
+    }
+    const handle = await dir.getFileHandle(segments.at(-1)!, {
+      create: true,
+    });
+    const writable = await handle.createWritable();
+    await writable.write(new Blob([file.content], { type: "text/plain" }));
+    await writable.close();
+  }
+  return files.length > 0;
+}
+
+/** Write all generated files of the selected project into a PC folder. */
+async function saveGeneratedFilesToLocalPcCandidate(
+  files: Array<{ path: string; content: string }>,
+  projectName: string,
+): Promise<boolean> {
+  return saveGeneratedFilesToLocalPcGeneric(files, projectName);
+}
+
 function App({ user }: { user: User }) {
   // Message dialogs and confirmations share one resolver so every action is modal-based.
   type ModalKind = "info" | "success" | "warning" | "error";
@@ -2066,11 +2173,36 @@ function App({ user }: { user: User }) {
     }
   }
 
-  // Send the recent conversation to the assistant without modifying project files.
+  // Write the selected project's generated files to a PC folder without any
+  // Local Agent, using the browser folder picker.
+  async function saveGeneratedFilesToLocalPc(): Promise<boolean> {
+    if (!generatedFiles.length) return false;
+    const ok = await saveGeneratedFilesToLocalPcGeneric(
+      generatedFiles,
+      selected?.name || "devforge-project",
+    );
+    if (ok) {
+      setLogs((current) => [
+        ...current,
+        `Saved ${generatedFiles.length} generated file(s) to a local folder on your PC.`,
+      ]);
+      showModal(
+        "success",
+        "Files saved to PC",
+        `Wrote ${generatedFiles.length} file(s) into the folder you selected.`,
+      );
+    }
+    return ok;
+  }
+
+  // Every AI process runs from chat: plain questions are answered, and
+  // requests like "generate...", "modify...", "review...", or "build/test"
+  // trigger the matching DevForge workflow and report each step in the chat.
   async function sendChatMessage() {
     const question = chatInput.trim();
     if (!selected || !question || chatBusy) return;
 
+    const intent = detectChatIntent(question);
     const nextMessages: ChatMessage[] = [
       ...chatMessages.slice(-11),
       { role: "user", content: question },
@@ -2078,7 +2210,122 @@ function App({ user }: { user: User }) {
     setChatMessages(nextMessages);
     setChatInput("");
     setChatBusy(true);
+    const say = (text: string) =>
+      setChatMessages((current) => [
+        ...current,
+        { role: "assistant", content: text },
+      ]);
     try {
+      if (intent === "generate" || intent === "modify") {
+        const requestText = stripIntentKeywords(question);
+        if (intent === "modify" && !generatedFiles.length) {
+          say(
+            "There are no generated files yet. Describe the project you want and I will generate it first.",
+          );
+          return;
+        }
+        say(
+          intent === "modify"
+            ? `Applying your modification request${requestText ? `: “${requestText}”` : ""}. Steps: plan → generate → save files.`
+            : `Starting project generation${requestText ? `: “${requestText}”` : ""}. Steps: plan → generate → save files.`,
+        );
+        const completedRun = await runGeneration(
+          selected.id,
+          requestText || prompt || selected.description || selected.name,
+          selectedAIProvider,
+          intent,
+        );
+        if (!completedRun) {
+          say(
+            generationError
+              ? `The ${intent} run failed: ${generationError}`
+              : `The ${intent} run did not complete. Check recent activity and retry.`,
+          );
+          return;
+        }
+        const [projectResponse, projectsResponse] = await Promise.all([
+          api.project(selected.id),
+          api.projects(),
+        ]);
+        setSelected(projectResponse.project);
+        setProjects(projectsResponse.projects);
+        setPrompt("");
+        const count = Array.isArray(projectResponse.project.artifacts)
+          ? (
+              projectResponse.project.artifacts.find(
+                (artifact: any) => artifact.type === "CODE",
+              )?.content ?? []
+            ).length
+          : 0;
+        say(
+          `${intent === "modify" ? "Modification" : "Generation"} complete. ${count} file(s) are saved in the project. Use “Save to my PC” in the generated files panel (or ask me to) to write them to a local folder.`,
+        );
+        return;
+      }
+      if (intent === "review") {
+        if (!generatedFiles.length) {
+          say(
+            "Nothing to review yet — generate the project code first, then ask me to review it.",
+          );
+          return;
+        }
+        say("Running an AI code review. Steps: analyze → findings → save.");
+        const completedRun = await runReview(selected.id, selectedAIProvider);
+        if (!completedRun) {
+          say(
+            generationError
+              ? `The review run failed: ${generationError}`
+              : "The review run did not complete. Check recent activity and retry.",
+          );
+          return;
+        }
+        const [projectResponse] = await Promise.all([api.project(selected.id)]);
+        setSelected(projectResponse.project);
+        const artifacts = Array.isArray(projectResponse.project.artifacts)
+          ? projectResponse.project.artifacts
+          : [];
+        const latest = [...artifacts]
+          .reverse()
+          .find((artifact: any) => artifact.type === "REVIEW");
+        const summary = latest?.content?.summary;
+        const findings = Array.isArray(latest?.content?.findings)
+          ? latest.content.findings
+          : [];
+        say(
+          `Review complete: ${findings.length} finding(s).${summary ? `\n\nSummary: ${summary}` : ""}\nFull details are in the Latest AI code review panel.`,
+        );
+        return;
+      }
+      if (intent === "build" || intent === "test") {
+        if (!localAgentInfo) {
+          say(
+            `A Local Agent connection is required to run ${intent === "build" ? "a build" : "tests"} on your PC. Start it with the “Start and connect agent” button, or just ask me for the ${intent === "build" ? "build" : "test"} strategy instead.`,
+          );
+        } else {
+          say(`Starting the local ${intent} workflow…`);
+          await runLocalAction(intent);
+          say(
+            `Local ${intent} finished. Output is in the command console panel; ask me to analyze any errors you see.`,
+          );
+        }
+        // Fall through to the AI answer for follow-up guidance below.
+      }
+      if (intent === "save") {
+        if (!generatedFiles.length) {
+          say("There are no generated files to save yet.");
+          return;
+        }
+        say("Choose a local folder in the browser dialog to save the files…");
+        const saved = await saveGeneratedFilesToLocalPc();
+        say(
+          saved
+            ? `Saved ${generatedFiles.length} file(s) to the folder you selected on your PC.`
+            : "Folder save was cancelled or is not supported in this browser. Use “Download ZIP” instead — it needs no special permission.",
+        );
+        return;
+      }
+
+      // Plain assistant question.
       const response = await api.chat(
         selected.id,
         nextMessages,
@@ -2095,9 +2342,9 @@ function App({ user }: { user: User }) {
           : "Could not get an AI response.";
       setChatMessages((current) => [
         ...current,
-        { role: "assistant", content: `Sorry, I couldn't answer: ${message}` },
+        { role: "assistant", content: `Sorry, that failed: ${message}` },
       ]);
-      showModal("error", "Could not get an AI response", message);
+      showModal("error", "Chat request failed", message);
     } finally {
       setChatBusy(false);
     }
@@ -2939,14 +3186,14 @@ function App({ user }: { user: User }) {
                   className="w-full h-36 rounded-xl bg-slate-950 border border-slate-800 p-3 outline-none focus:border-indigo-500 disabled:opacity-60"
                   placeholder={
                     generatedFiles.length
-                      ? "Describe the software you want to build, or enter a modification request..."
+                      ? "Optional: type in chat or here to generate/modify..."
                       : "Describe the software you want to build..."
                   }
                 />
                 <div className="flex gap-2 mt-3">
                   <button
-                    disabled={isBusy}
-                    onClick={() => void generate()}
+                    disabled={isBusy || !prompt.trim()}
+                    onClick={() => void generate("generate")}
                     className="bg-indigo-600 disabled:opacity-50 rounded-lg px-4 py-2"
                   >
                     {activeOperation === "generate" &&
@@ -2955,24 +3202,10 @@ function App({ user }: { user: User }) {
                       : activeOperation === "generate" &&
                           generationStatus === "RUNNING"
                         ? "Generating..."
-                        : "Generate"}
+                        : generatedFiles.length
+                          ? "Regenerate"
+                          : "Generate"}
                   </button>
-                  {generatedFiles.length > 0 && (
-                    <button
-                      type="button"
-                      disabled={isBusy || !prompt.trim()}
-                      onClick={() => void generate("modify")}
-                      className="rounded-lg border border-indigo-500/50 px-4 py-2 text-indigo-200 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {activeOperation === "modify" &&
-                      generationStatus === "STARTING"
-                        ? "Starting..."
-                        : activeOperation === "modify" &&
-                            generationStatus === "RUNNING"
-                          ? "Applying changes..."
-                          : "Request modification"}
-                    </button>
-                  )}
                   {generatedFiles.length > 0 && (
                     <button
                       type="button"
@@ -2986,57 +3219,17 @@ function App({ user }: { user: User }) {
                         : "Download ZIP"}
                     </button>
                   )}
-                  <button
-                    type="button"
-                    disabled={
-                      !localAgentInfo ||
-                      !generatedFiles.length ||
-                      syncingGeneratedFiles ||
-                      Boolean(localAction)
-                    }
-                    onClick={() => void syncGeneratedFiles()}
-                    className="rounded-lg border border-indigo-500/50 px-4 py-2 text-indigo-200 disabled:cursor-not-allowed disabled:opacity-50"
-                    title={
-                      !localAgentInfo
-                        ? "Start and connect the Local Agent first."
-                        : "Copy the saved generated files into the Local Agent workspace."
-                    }
-                  >
-                    {syncingGeneratedFiles
-                      ? "Syncing to PC..."
-                      : "Sync files to PC"}
-                  </button>
-                  <button
-                    disabled={
-                      Boolean(localAction) ||
-                      !localAgentInfo ||
-                      !generatedFiles.length
-                    }
-                    onClick={() => void runLocalAction("build")}
-                    className="rounded-lg bg-slate-800 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {localAction === "build" ? "Building..." : "Build locally"}
-                  </button>
-                  <button
-                    disabled={
-                      Boolean(localAction) ||
-                      !localAgentInfo ||
-                      !generatedFiles.length
-                    }
-                    onClick={() => void runLocalAction("test")}
-                    className="rounded-lg bg-slate-800 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {localAction === "test" ? "Testing..." : "Test locally"}
-                  </button>
-                  <button
-                    disabled={isBusy || !generatedFiles.length}
-                    onClick={() => void review()}
-                    className="rounded-lg bg-slate-800 px-4 py-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {activeOperation === "review" && isBusy
-                      ? "Reviewing..."
-                      : "AI Review"}
-                  </button>
+                  {generatedFiles.length > 0 && (
+                    <button
+                      type="button"
+                      disabled={isBusy || !generatedFiles.length}
+                      onClick={() => void saveGeneratedFilesToLocalPc()}
+                      className="rounded-lg border border-indigo-500/50 px-4 py-2 text-indigo-200 disabled:cursor-not-allowed disabled:opacity-50"
+                      title="Save the generated files directly into a folder on your PC. No Local Agent required."
+                    >
+                      Save to my PC
+                    </button>
+                  )}
                 </div>
                 <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -3457,15 +3650,17 @@ function App({ user }: { user: User }) {
           <div className="border-b border-slate-800 p-4">
             <div className="font-semibold">AI Assistant</div>
             <p className="mt-1 text-xs text-slate-500">
-              Ask follow-up questions about this project.
+              All processes run from here: “generate a todo app”, “modify the
+              header”, “review my code”, “build”, “test”, or “save files to my
+              PC”.
             </p>
           </div>
           <div className="flex-1 space-y-3 overflow-auto p-4 text-sm">
             {!chatMessages.length && (
               <p className="text-slate-500">
                 {selected
-                  ? "Ask about the project plan, generated code, build errors, or what to do next."
-                  : "Select a project to start asking questions."}
+                  ? "Tell me what to do — generate, modify, review, build, test, or save to your PC. I'll run the whole workflow and report back."
+                  : "Select a project to start chatting."}
               </p>
             )}
             {chatMessages.map((message, index) => (
@@ -3512,7 +3707,7 @@ function App({ user }: { user: User }) {
               rows={3}
               placeholder={
                 selected
-                  ? "Ask a question... (Ctrl+Enter to send)"
+                  ? "e.g. generate a portfolio site, review the code, build, or save files to my PC… (Ctrl+Enter to send)"
                   : "Select a project first"
               }
               className="w-full resize-y rounded-lg border border-slate-700 bg-slate-950 p-3 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-50"

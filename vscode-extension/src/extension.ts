@@ -992,9 +992,13 @@ const vscode=acquireVsCodeApi();const github=document.getElementById('github');c
             const resultMe = await apiRequest<{ user?: { githubUsername?: string | null; githubName?: string | null; email?: string | null } }>(context, "/api/auth/me");
             const user = resultMe.user;
             const identity = user?.githubUsername ? `@${user.githubUsername}` : user?.email ?? user?.githubName;
-            post("success", `Connected successfully${identity ? ` as ${identity}` : ""}. You can close this tab and return to VS Code.`);
+            post("success", `Connected successfully${identity ? ` as ${identity}` : ""}. Opening DevForge chat…`);
             refreshCommandsTree();
-            vscode.window.showInformationMessage(`Connected to DevForge${identity ? ` as ${identity}` : ""}.`);
+            vscode.window.showInformationMessage(`Connected to DevForge${identity ? ` as ${identity}` : ""}. Opening chat…`);
+            // After a successful sign-in, jump straight into the chat page.
+            setTimeout(() => {
+              void vscode.commands.executeCommand("devforge.openChat");
+            }, 600);
             return;
           } catch (error) {
             await context.secrets.delete(getSessionSecretKey());
@@ -1375,17 +1379,27 @@ async function openChat(
   );
   const nonce = String(Date.now());
   panel.webview.html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${panel.webview.cspSource} https:; style-src ${panel.webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><title>DevForge AI</title><style>
-  :root{color-scheme:dark;--bg:var(--vscode-sideBar-background);--panel:var(--vscode-editor-background);--fg:var(--vscode-foreground);--border:var(--vscode-panel-border);--accent:var(--vscode-button-background)}*{box-sizing:border-box}body{margin:0;padding:0;background:var(--bg);color:var(--fg);font:13px var(--vscode-font-family)}header{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)}header img{width:40px;height:40px;object-fit:contain;border-radius:8px}header h1{font-size:15px;margin:0 0 2px}header p{margin:0;opacity:.7;font-size:11px}.wrap{height:calc(100vh - 70px);display:flex;flex-direction:column}.messages{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}.msg{padding:9px 12px;border:1px solid var(--border);border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}.user{background:var(--vscode-textBlockQuote-background);align-self:flex-end;max-width:92%}.assistant{background:var(--panel);align-self:stretch}.steps{background:var(--panel);align-self:stretch;border:1px solid var(--border);border-radius:10px;padding:9px 12px;font-size:12px}.steps .title{font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px}.steps .spin{display:inline-block;width:11px;height:11px;border:2px solid var(--vscode-panel-border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}.steps.done .spin{display:none}.steps .step{display:flex;align-items:center;gap:7px;padding:2px 0;color:var(--vscode-descriptionForeground)}.steps .step .icon{width:13px;text-align:center}.steps .step.running{color:var(--fg)}.steps .step.done{color:var(--vscode-charts-green)}.steps .step.failed{color:var(--vscode-errorForeground)}@keyframes spin{to{transform:rotate(360deg)}}.status{font-size:11px;opacity:.7;padding:0 14px 4px}.compose{padding:10px 12px 12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}textarea{width:100%;resize:vertical;min-height:70px;max-height:220px;color:var(--fg);background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:9px;font:inherit}button{align-self:flex-end;background:var(--accent);color:var(--vscode-button-foreground);border:0;border-radius:5px;padding:7px 14px;cursor:pointer}button:disabled{opacity:.5} .hint{font-size:11px;opacity:.7}
-  </style></head><body><header><img src="${logo}" alt="DevForge AI logo"><div><h1>DevForge AI</h1><p>Copilot-style assistant · dedicated assistant API</p></div></header><div class="wrap"><div id="messages" class="messages"><div class="msg assistant">Hi! I'm DevForge AI. Ask me anything, or describe a feature and I'll run the workflow: plan → generate → save files to your workspace.</div></div><div id="status" class="status">Backend: ${escapeHtml(getBackendUrl())} · POST /api/assistant/chat</div><div class="compose"><textarea id="prompt" placeholder="Ask DevForge AI anything — build a feature, review code, explain, generate tests, or modify files…"></textarea><label class="hint"><input type="checkbox" id="includeContext" checked> Include the active source file as context (sensitive files are excluded)</label><button id="send">Send</button></div></div><script nonce="${nonce}">
+  :root{color-scheme:dark;--bg:var(--vscode-sideBar-background);--panel:var(--vscode-editor-background);--fg:var(--vscode-foreground);--border:var(--vscode-panel-border);--accent:var(--vscode-button-background)}*{box-sizing:border-box}body{margin:0;padding:0;background:var(--bg);color:var(--fg);font:13px var(--vscode-font-family)}header{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)}header img{width:40px;height:40px;object-fit:contain;border-radius:8px}header h1{font-size:15px;margin:0 0 2px}header p{margin:0;opacity:.7;font-size:11px}.wrap{height:calc(100vh - 70px);display:flex;flex-direction:column}.messages{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}.msg{padding:9px 12px;border:1px solid var(--border);border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}.user{background:var(--vscode-textBlockQuote-background);align-self:flex-end;max-width:92%}.assistant{background:var(--panel);align-self:stretch}.steps{background:var(--panel);align-self:stretch;border:1px solid var(--border);border-radius:10px;padding:9px 12px;font-size:12px}.steps .title{font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px}.steps .spin{display:inline-block;width:11px;height:11px;border:2px solid var(--vscode-panel-border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}.steps.done .spin{display:none}.steps .step{display:flex;align-items:center;gap:7px;padding:2px 0;color:var(--vscode-descriptionForeground)}.steps .step .icon{width:13px;text-align:center}.steps .step.running{color:var(--fg)}.steps .step.done{color:var(--vscode-charts-green)}.steps .step.failed{color:var(--vscode-errorForeground)}@keyframes spin{to{transform:rotate(360deg)}}.status{font-size:11px;opacity:.7;padding:0 14px 4px}.settings{border-bottom:1px solid var(--border)}.settings details{padding:0 14px}.settings summary{cursor:pointer;padding:8px 0;font-size:12px;opacity:.85}.settings .setbody{display:flex;flex-direction:column;gap:8px;padding:4px 0 12px}.settings label{display:flex;flex-direction:column;gap:3px;font-size:11px;opacity:.9}.settings select,.settings input{padding:5px 8px;border:1px solid var(--border);border-radius:4px;background:var(--panel);color:var(--fg);font:inherit;font-size:12px}.settings .modelrow{display:flex;gap:6px}.settings .modelrow input{flex:1}.settings .modelrow button{padding:4px 9px;font-size:12px;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);border:0;border-radius:4px;cursor:pointer}.settings .setrow{display:flex;align-items:center;justify-content:space-between;gap:8px}.settings #provStatus{font-size:11px;opacity:.75}.settings #provSave{background:var(--accent);color:var(--vscode-button-foreground);border:0;border-radius:4px;padding:6px 14px;cursor:pointer}.compose{padding:10px 12px 12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}textarea{width:100%;resize:vertical;min-height:70px;max-height:220px;color:var(--fg);background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:9px;font:inherit}button{align-self:flex-end;background:var(--accent);color:var(--vscode-button-foreground);border:0;border-radius:5px;padding:7px 14px;cursor:pointer}button:disabled{opacity:.5} .hint{font-size:11px;opacity:.7}
+  </style></head><body><header><img src="${logo}" alt="DevForge AI logo"><div><h1>DevForge AI</h1><p>Copilot-style assistant · dedicated assistant API</p></div></header><div class="settings"><details><summary>⚙ AI provider &amp; API key</summary><div class="setbody"><label>Provider<select id="provSel"><option value="OPENROUTER">OpenRouter</option><option value="OPENAI">OpenAI</option><option value="CUSTOM">Custom OpenAI-compatible</option></select></label><label>Base URL (Custom only)<input id="provBase" placeholder="https://api.example.com/v1" spellcheck="false"></label><label>API key<input id="provKey" type="password" placeholder="Leave blank to keep saved key" autocomplete="off"></label><label>Model<div class="modelrow"><input id="provModel" list="modelList" placeholder="Model ID" spellcheck="false"><datalist id="modelList"></datalist><button id="loadModels" type="button" title="Load available models">↻</button></div></label><div class="setrow"><span id="provStatus"></span><button id="provSave">Save</button></div></div></details></div><div class="wrap"><div id="messages" class="messages"><div class="msg assistant">Hi! I'm DevForge AI. Ask me anything, or describe a feature and I'll run the workflow: plan → generate → save files to your workspace.</div></div><div id="status" class="status">Backend: ${escapeHtml(getBackendUrl())} · POST /api/assistant/chat</div><div class="compose"><textarea id="prompt" placeholder="Ask DevForge AI anything — build a feature, review code, explain, generate tests, or modify files…"></textarea><label class="hint"><input type="checkbox" id="includeContext" checked> Include the active source file as context (sensitive files are excluded)</label><button id="send">Send</button></div></div><script nonce="${nonce}">
   const vscode=acquireVsCodeApi();const messages=document.getElementById('messages');const input=document.getElementById('prompt');const send=document.getElementById('send');const status=document.getElementById('status');const includeContext=document.getElementById('includeContext');
+  const provSel=document.getElementById('provSel'),provBase=document.getElementById('provBase'),provKey=document.getElementById('provKey'),provModel=document.getElementById('provModel'),provStatus=document.getElementById('provStatus'),provSave=document.getElementById('provSave'),loadModels=document.getElementById('loadModels'),modelList=document.getElementById('modelList');
+  provBase.style.display='none';
+  provSel.addEventListener('change',()=>{provBase.style.display=(provSel.value==='CUSTOM')?'':'none';vscode.postMessage({type:'providerSelected',provider:provSel.value});});
+  loadModels.addEventListener('click',()=>{provStatus.textContent='Loading models…';vscode.postMessage({type:'loadModels',provider:provSel.value,baseUrl:provBase.value.trim()});});
+  provSave.addEventListener('click',()=>{provStatus.textContent='Saving…';provSave.disabled=true;vscode.postMessage({type:'saveProvider',provider:provSel.value,apiKey:provKey.value.trim(),model:provModel.value.trim(),baseUrl:provBase.value.trim()});});
+  vscode.postMessage({type:'providerSelected',provider:provSel.value});
   function add(role,text){const d=document.createElement('div');d.className='msg '+role;d.textContent=text;messages.appendChild(d);messages.scrollTop=messages.scrollHeight;return d;}
   function addSteps(title,names){const d=document.createElement('div');d.className='steps';const t=document.createElement('div');t.className='title';const s=document.createElement('span');s.className='spin';t.appendChild(s);t.appendChild(document.createTextNode(title));d.appendChild(t);const rows=names.map(n=>{const r=document.createElement('div');r.className='step';const i=document.createElement('span');i.className='icon';i.textContent='·';r.appendChild(i);r.appendChild(document.createTextNode(' '+n));d.appendChild(r);return r;});messages.appendChild(d);messages.scrollTop=messages.scrollHeight;return {el:d,rows:rows};}
-  send.addEventListener('click',()=>{const request=input.value.trim();if(!request)return;add('user',request);vscode.postMessage({type:'send',prompt:request,includeActiveFile:includeContext.checked});input.value='';send.disabled=true;status.textContent='Working…';});
+  send.addEventListener('click',()=>{const request=input.value.trim();if(!request)return;add('user',request);vscode.postMessage({type:'send',prompt:request,includeActiveFile:includeContext.checked});input.value='';send.disabled=true;status.textContent='Thinking…';});
   input.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter')send.click();});
   window.addEventListener('message',event=>{const m=event.data;
     if(m.type==='steps'){const b=addSteps(m.title,m.names);window.__steps=m.id;window.__stepBox=b;}
     if(m.type==='step'){const b=window.__stepBox;if(!b)return;const r=b.rows[m.index];if(!r)return;r.className='step '+m.state;const i=r.querySelector('.icon');i.textContent=m.state==='done'?'✔':m.state==='failed'?'✖':m.state==='running'?'▶':'·';messages.scrollTop=messages.scrollHeight;}
     if(m.type==='stepsDone'){const b=window.__stepBox;if(b)b.el.classList.add('done');}
+    if(m.type==='providerState'){provSel.value=m.provider;provBase.style.display=(m.provider==='CUSTOM')?'':'none';provModel.value=m.model||'';provBase.value=m.baseUrl||'';provStatus.textContent=m.configured?'Configured':'Not configured yet';}
+    if(m.type==='modelsLoaded'){modelList.innerHTML='';for(const id of m.models){const o=document.createElement('option');o.value=id;modelList.appendChild(o);}provStatus.textContent=m.models.length+' models loaded';}
+    if(m.type==='providerSaved'){provStatus.textContent='Saved ✓';provKey.value='';provSave.disabled=false;}
+    if(m.type==='providerError'){provStatus.textContent=m.text;provSave.disabled=false;}
     if(m.type==='reply'){add('assistant',m.text);send.disabled=false;status.textContent=m.backend;input.focus();}
     if(m.type==='error'){add('assistant','Error: '+m.text);send.disabled=false;status.textContent=m.backend;}
   });
@@ -1395,7 +1409,71 @@ async function openChat(
       type?: string;
       prompt?: string;
       includeActiveFile?: boolean;
+      provider?: string;
+      apiKey?: string;
+      model?: string;
+      baseUrl?: string;
     }) => {
+      if (message.type === "providerSelected" && message.provider) {
+        try {
+          const providers = await listProviderInfos(context);
+          const info = providers.find((p) => p.provider === message.provider);
+          await panel.webview.postMessage({
+            type: "providerState",
+            provider: message.provider,
+            model: info?.model ?? "",
+            baseUrl: info?.baseUrl ?? "",
+            configured: Boolean(info?.configured),
+          });
+        } catch {
+          // Provider info is best-effort inside the chat page.
+        }
+        return;
+      }
+      if (message.type === "loadModels") {
+        try {
+          const models =
+            message.provider === "CUSTOM"
+              ? await fetchCustomModels(message.baseUrl || "", "")
+              : message.provider === "OPENAI"
+                ? []
+                : await fetchOpenRouterModels();
+          await panel.webview.postMessage({
+            type: "modelsLoaded",
+            models: models.slice(0, 300),
+          });
+        } catch (error) {
+          await panel.webview.postMessage({
+            type: "providerError",
+            text: `Could not load models: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+        return;
+      }
+      if (message.type === "saveProvider") {
+        try {
+          const provider = (message.provider ?? "OPENROUTER") as ProviderId;
+          await saveProviderSettings(context, provider, {
+            ...(message.apiKey ? { apiKey: message.apiKey } : {}),
+            ...(message.model ? { model: message.model } : {}),
+            ...(provider === "CUSTOM" && message.baseUrl
+              ? { baseUrl: message.baseUrl }
+              : {}),
+          });
+          await context.globalState.update(getProviderStateKey(), provider);
+          refreshCommandsTree();
+          await panel.webview.postMessage({
+            type: "providerSaved",
+            provider,
+          });
+        } catch (error) {
+          await panel.webview.postMessage({
+            type: "providerError",
+            text: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return;
+      }
       if (message.type !== "send" || typeof message.prompt !== "string") return;
       try {
         const userPrompt = message.prompt.trim();
@@ -1407,7 +1485,7 @@ async function openChat(
         await panel.webview.postMessage({
           type: "steps",
           id: "chat",
-          title: "Working on it…",
+          title: "Thinking…",
           names: [
             "Collect workspace context",
             "Send to DevForge assistant API",

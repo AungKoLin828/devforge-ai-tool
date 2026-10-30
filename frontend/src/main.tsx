@@ -768,11 +768,6 @@ function App({ user }: { user: User }) {
     useState<LocalWorkspaceFile | null>(null);
   const [workspaceEditorDraft, setWorkspaceEditorDraft] = useState("");
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
-  const [generatedExplorerExpanded, setGeneratedExplorerExpanded] =
-    useState(true);
-  const [generatedExplorerHeight, setGeneratedExplorerHeight] = useState<
-    "min" | "max"
-  >("min");
   const [editorJump, setEditorJump] = useState<{
     line: number;
     column: number | null;
@@ -2487,14 +2482,14 @@ function App({ user }: { user: User }) {
           ? cause.message
           : "Could not get an AI response.";
       setLastFailedChatQuestion(question);
+      // Retry and error reporting stay inside the chat panel; no alert modal.
       setChatMessages((current) => [
         ...current,
         {
           role: "assistant",
-          content: `Sorry, that failed: ${finalMessage}`,
+          content: `Sorry, that failed: ${finalMessage}. Use the Retry button below to send the request again.`,
         },
       ]);
-      showModal("error", "Chat request failed", finalMessage);
     } finally {
       setChatBusy(false);
     }
@@ -2716,82 +2711,63 @@ function App({ user }: { user: User }) {
                 </span>
               </div>
 
-              <div className="mt-6 glass rounded-2xl overflow-hidden">
-                <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setGeneratedExplorerExpanded((expanded) => !expanded)
-                    }
-                    aria-expanded={generatedExplorerExpanded}
-                    aria-controls="generated-explorer-files"
-                    className="flex items-center gap-2 rounded-md px-2 py-1 text-sm font-semibold text-slate-200 transition hover:bg-slate-800"
-                    title={
-                      generatedExplorerExpanded
-                        ? "Minimize generated files list"
-                        : "Expand generated files list"
-                    }
-                  >
-                    <span
-                      className={`inline-block w-4 text-center text-indigo-300 transition-transform ${
-                        generatedExplorerExpanded ? "rotate-0" : "-rotate-90"
-                      }`}
-                      aria-hidden="true"
+              {/* Local Agent connection is the first control on the page. */}
+              <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-100">
+                      Local Agent
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-slate-400">
+                      Connect the agent on this PC to import, edit, build, test,
+                      and sync project files. It stays local.
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => void connectLocalAgent()}
+                      disabled={localAgentConnecting}
+                      className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-indigo-400"
                     >
-                      ▾
-                    </span>
-                    Explorer
-                    <span className="text-xs font-normal text-slate-500">
-                      {generatedFiles.length} files
-                    </span>
-                  </button>
-                  <label className="flex items-center gap-2 text-[11px] text-slate-500">
-                    List height
-                    <select
-                      value={generatedExplorerHeight}
-                      onChange={(event) =>
-                        setGeneratedExplorerHeight(
-                          event.target.value === "max" ? "max" : "min",
-                        )
-                      }
-                      disabled={!generatedExplorerExpanded}
-                      aria-label="Generated Explorer file list height"
-                      className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-300 outline-none focus:border-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <option value="min">Min</option>
-                      <option value="max">Max</option>
-                    </select>
-                  </label>
-                </div>
-                <div
-                  id="generated-explorer-files"
-                  className={`overflow-auto p-4 font-mono text-sm ${
-                    !generatedExplorerExpanded
-                      ? "hidden"
-                      : generatedExplorerHeight === "min"
-                        ? "max-h-[220px]"
-                        : "max-h-[600px]"
-                  }`}
-                >
-                  {generatedFiles.length ? (
-                    generatedFiles.map((file: any, index: number) => (
-                      <div
-                        key={file.path || index}
-                        className="truncate py-1 text-slate-300"
-                        title={file.path}
+                      {localAgentConnecting
+                        ? "Starting and connecting..."
+                        : localAgentInfo
+                          ? "Reconnect agent"
+                          : "Connect agent"}
+                    </button>
+                    {localAgentInfo && (
+                      <button
+                        onClick={() => void disconnectLocalAgent()}
+                        className="rounded-lg border border-red-500/40 px-4 py-2 text-sm text-red-200 hover:border-red-400"
                       >
-                        {file.path}
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-slate-500">
-                      No generated files saved yet.
-                    </div>
-                  )}
+                        Disconnect agent
+                      </button>
+                    )}
+                  </div>
                 </div>
+                {localAgentError && (
+                  <p className="mt-3 text-xs text-amber-300">
+                    {localAgentError}{" "}
+                    <a
+                      href="/guide"
+                      className="underline underline-offset-2 hover:text-amber-200"
+                    >
+                      Open setup guide
+                    </a>
+                  </p>
+                )}
+                {localAgentInfo && (
+                  <p className="mt-3 text-xs text-emerald-300">
+                    Connected to {localAgentInfo.machine} (
+                    {localAgentInfo.platform}). Workspace:{" "}
+                    {localAgentInfo.workspaceRoot}
+                  </p>
+                )}
               </div>
 
-              {/* Workspace files are browsed and edited through the loopback agent only. */}
+              {/* Workspace editor renders only when a workspace folder is
+                  open through the agent; not while idle without a project. */}
+              {workspaceListing && (
               <section
                 className="mt-5 glass overflow-hidden rounded-2xl"
                 aria-label="Local code editor and workspace browser"
@@ -3109,6 +3085,7 @@ function App({ user }: { user: User }) {
                   </p>
                 </div>
               </section>
+              )}
 
               {/* Findings are tied to the code artifact reviewed by the latest run. */}
               {latestReview && (
@@ -3355,53 +3332,10 @@ function App({ user }: { user: User }) {
                     </button>
                   </div>
                 )}
+                {/* GitHub and import tools are inside the AI Project Builder panel below. */}
                 <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                    <p className="flex-1 text-xs leading-5 text-slate-400">
-                      DevForge will start the installed Local Agent and pair
-                      automatically. The agent stays on this PC and keeps
-                      project files local.
-                    </p>
-                    <button
-                      onClick={() => void connectLocalAgent()}
-                      disabled={localAgentConnecting}
-                      className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-indigo-400"
-                    >
-                      {localAgentConnecting
-                        ? "Starting and connecting..."
-                        : localAgentInfo
-                          ? "Reconnect agent"
-                          : "Connect agent"}
-                    </button>
-                    {localAgentInfo && (
-                      <button
-                        onClick={() => void disconnectLocalAgent()}
-                        className="rounded-lg border border-red-500/40 px-4 py-2 text-sm text-red-200 hover:border-red-400"
-                      >
-                        Disconnect agent
-                      </button>
-                    )}
-                  </div>
-                  {localAgentError && (
-                    <p className="mt-3 text-xs text-amber-300">
-                      {localAgentError}{" "}
-                      <a
-                        href="/guide"
-                        className="underline underline-offset-2 hover:text-amber-200"
-                      >
-                        Open setup guide
-                      </a>
-                    </p>
-                  )}
                   {localAgentInfo && (
-                    <p className="mt-3 text-xs text-emerald-300">
-                      Connected to {localAgentInfo.machine} (
-                      {localAgentInfo.platform}). Workspace:{" "}
-                      {localAgentInfo.workspaceRoot}
-                    </p>
-                  )}
-                  {localAgentInfo && (
-                    <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end">
+                    <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end">
                       <label className="flex-1 text-xs text-slate-400">
                         Import a folder from this workspace
                         <select

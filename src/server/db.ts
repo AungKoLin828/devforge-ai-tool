@@ -6,7 +6,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 const url = process.env.DATABASE_URL;
 if (!url) {
   throw new Error(
-    "Database connection is not configured. Set DATABASE_URL in the project-root .env to your Supabase PostgreSQL connection string, then restart the local server.",
+    "Database connection is not configured. Set DATABASE_URL in the project-root .env to your PostgreSQL connection string, then restart the local server.",
   );
 }
 

@@ -30,12 +30,11 @@ You can also use VS Code as the editor for a project on your PC:
 ## Local setup
 
 1. Install Node.js 22 LTS, Git and PostgreSQL.
-2. Copy `.env.example` to `.env` and set `DATABASE_URL` to the PostgreSQL connection string from **Supabase Dashboard → Connect**. For local development, use Supabase's session pooler connection string if a direct connection is not reachable. The app, Prisma CLI, and database check all use this one variable.
+2. Copy `.env.example` to `.env` and replace `YOUR_POSTGRES_PASSWORD` in `DATABASE_URL` with the password for your local PostgreSQL `postgres` role. The default local URL targets `localhost:5432` and a database named `devforge`; URL-encode special characters in the password. The app, Prisma CLI, and database check all use this one variable.
 3. Create a **separate GitHub OAuth App for local development**. Set its Homepage URL to `http://localhost:8888` and its Authorization callback URL to `http://localhost:8888/api/auth/github/callback`. Put its client ID and secret in `GITHUB_LOCAL_CLIENT_ID` and `GITHUB_LOCAL_CLIENT_SECRET` in your local `.env`. Keep production `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `GITHUB_CALLBACK_URL` configured in Netlify; the app selects OAuth credentials based on whether the sign-in request comes from localhost or the deployed host.
 4. Run `npm install`.
-5. Run `npm run prisma:generate`.
-6. If the database is new, apply the checked-in PostgreSQL schema migration with `npm run prisma:deploy`. If you already created the schema manually, make sure the `DATABASE_URL` in `.env` points to that exact database and verify `"User"` exists there before signing in. Do not apply the initial migration to a database where you already manually created its enums and tables; it will try to create those objects again.
-   To verify the exact database selected by the local app without displaying credentials, run `npm run db:check`. It reports the connected database/schema and whether `public."User"` has the columns required by Prisma.
+5. Run `npm run db:setup`. This generates the Prisma client, creates the `devforge` database if it does not exist, and applies the checked-in migrations. The PostgreSQL role must be allowed to create databases.
+6. If you already created the schema tables and enums manually, do not run `db:setup` against that database because the initial migration will try to create them again. Instead, point `DATABASE_URL` at that database and run `npm run db:check`; it reports the selected database/schema and checks whether `public."User"` has the columns required by Prisma.
 7. Run `npm run build`.
 8. Start the local app at `http://localhost:8888` with `npm run dev:netlify`. Always start GitHub sign-in from this same origin. Do not start sign-in on Netlify and then open the localhost callback, or start locally and return to the Netlify callback: the OAuth state cookie is intentionally restricted to the site where login began.
 9. If you are developing the Local Agent from source, run `npm run agent:dev` in a second terminal and keep it open. For normal Windows use, follow the standalone installer section below instead; the installed agent starts on demand without a terminal. The app retrieves the pairing token directly from an updated agent; there is no token to copy.
@@ -90,7 +89,7 @@ If Build/Test reports that only Node.js projects are supported or says the agent
 
 This starter is pinned to Prisma ORM **7.10.0**. `prisma`, `@prisma/client`, and `@prisma/adapter-pg` are intentionally kept on the same exact version. The generated Prisma Client is not committed; `npm run prisma:generate` creates it under `src/generated/prisma/`.
 
-Apply database changes with `npm run prisma:deploy` before starting the app against a new Supabase database. Configure the same Supabase PostgreSQL connection string as `DATABASE_URL` in the environment where the app or Prisma CLI runs. Keep production and local Supabase project URLs separate unless you intentionally want to modify production data.
+For local development, `npm run db:setup` creates the target database if needed and applies migrations with `prisma migrate dev`. For deployment, use `npm run prisma:deploy` with the production PostgreSQL connection string configured in the environment. Keep production and local database URLs separate unless you intentionally want to modify production data.
 
 If you previously installed a broken Prisma package, remove `node_modules` and `package-lock.json`, then run `npm install` before running `npm run prisma:generate`. Do not install Prisma globally.
 

@@ -7,7 +7,7 @@ const connectionString = process.env.DATABASE_URL;
 
 if (!connectionString) {
   console.error(
-    "No database URL configured. Set DATABASE_URL in the project-root .env to your Supabase PostgreSQL connection string.",
+    "No database URL configured. Set DATABASE_URL in the project-root .env to your PostgreSQL connection string.",
   );
   process.exitCode = 1;
 } else {
@@ -42,7 +42,9 @@ if (!connectionString) {
         FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'User'
       `;
-      const actualColumns = new Set(columns.map(({ column_name }) => column_name));
+      const actualColumns = new Set(
+        columns.map(({ column_name }) => column_name),
+      );
       const requiredColumns = [
         "id",
         "githubId",
@@ -76,7 +78,8 @@ if (!connectionString) {
     const pending = [error];
     while (pending.length > 0) {
       current = pending.pop();
-      if (!current || typeof current !== "object" || seen.has(current)) continue;
+      if (!current || typeof current !== "object" || seen.has(current))
+        continue;
       seen.add(current);
       if (!code && typeof current.code === "string") code = current.code;
       if (!message && typeof current.message === "string") {
@@ -109,21 +112,29 @@ if (!connectionString) {
         "PostgreSQL is reachable, but it rejected the DATABASE_URL credentials. Reset the password for the configured database role, then update DATABASE_URL with that exact password.",
       );
     } else {
-      console.error(`Database check failed${code ? ` (${code})` : ""}${message ? `: ${message}` : "."}`);
+      console.error(
+        `Database check failed${code ? ` (${code})` : ""}${message ? `: ${message}` : "."}`,
+      );
     }
     if (
       // Only network-class failures benefit from the additional host/port hint.
       !/authenticationfailed/i.test(adapterErrorName) &&
-      ["ETIMEDOUT", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "P1001"].includes(code)
+      [
+        "ETIMEDOUT",
+        "ECONNREFUSED",
+        "EHOSTUNREACH",
+        "ENETUNREACH",
+        "P1001",
+      ].includes(code)
     ) {
       try {
         const database = new URL(connectionString);
         console.error(
-          `Could not reach ${database.hostname}:${database.port || "5432"}. Check outbound TCP access on this port and allowlist/firewall settings. Supabase's session and transaction poolers commonly use ports 5432 and 6543, respectively.`,
+          `Could not reach ${database.hostname}:${database.port || "5432"}. Check that PostgreSQL is running and accepting connections on this host and port.`,
         );
       } catch {
         console.error(
-          "Check outbound TCP access to the Supabase PostgreSQL host and port configured in DATABASE_URL.",
+          "Check that PostgreSQL is running and that DATABASE_URL has the correct host and port.",
         );
       }
     }

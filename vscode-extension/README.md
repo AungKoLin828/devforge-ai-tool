@@ -1,14 +1,16 @@
-# DevForge AI Developer Tools for VS Code
+# Codevia AI Developer Tools for VS Code
 
-DevForge AI adds a custom chat panel and coding commands to VS Code. Requests to create a new project from chat use the project-generation workflow and copy the generated files into your open workspace. If no workspace is open, VS Code asks you to choose a local destination folder. You review the file list and confirm before files are written; existing files are skipped unless you explicitly choose to overwrite them.
+Codevia AI adds a custom chat panel and coding commands to VS Code. Requests to create a new project from chat use the project-generation workflow and copy the generated files into your open workspace. If no workspace is open, VS Code asks you to choose a local destination folder. You review the file list and confirm before files are written; existing files are skipped unless you explicitly choose to overwrite them.
 
 The extension connects to the hosted DevForge backend by default and does not add or require an AI-provider API key inside the extension. The Local Agent is not required for the extension to save generated files to a folder on your PC.
 
+The Marketplace extension ID is `CodeviaAI.codevia-ai`. Publishing requires access to a VS Code Marketplace publisher named `CodeviaAI`.
+
 ## Choose local or Netlify backend
 
-The extension supports both environments without changing the DevForge web app or Netlify Functions. Open **VS Code Settings** (`Ctrl+,`) and search for **DevForge AI**:
+The extension supports both environments without changing the DevForge web app or Netlify Functions. Open **VS Code Settings** (`Ctrl+,`) and search for **Codevia AI**:
 
-- `DevForge AI Developer Tools: Backend Environment` = `local` or `netlify` (default).
+- `Codevia AI Developer Tools: Backend Environment` = `local` or `netlify` (default).
 - `Local Backend Url` defaults to `http://localhost:8888`.
 - `Netlify Backend Url` defaults to `https://devforge-ai-tool.netlify.app`.
 
@@ -17,7 +19,7 @@ The extension supports both environments without changing the DevForge web app o
 1. Start the DevForge web app from its project root using `npm run dev:netlify`.
 2. Netlify CLI normally serves the app and functions at `http://localhost:8888`. Use that full origin in `Local Backend Url` if your port differs.
 3. Set `Backend Environment` to `local`.
-4. Run **DevForge AI: Sign In to Existing Account**. Sign in to the local app in the browser and copy the local `devforge_session` cookie value from browser DevTools. Local and hosted cookies are stored separately.
+4. Run **Codevia AI: Sign In to Existing Account**. Sign in to the local app in the browser and copy the local `devforge_session` cookie value from browser DevTools. Local and hosted cookies are stored separately.
 
 Do not use the Vite-only `http://localhost:5173` URL unless your local setup also routes `/api/*` to the Netlify Functions. The extension needs the backend routes, not just the frontend dev server. HTTP is permitted only for loopback local development.
 
@@ -25,7 +27,7 @@ Do not use the Vite-only `http://localhost:5173` URL unless your local setup als
 
 1. Keep `Backend Environment` set to `netlify` (the default).
 2. Keep `Netlify Backend Url` set to your deployed site URL.
-3. Run **DevForge AI: Sign In to Existing Account** and copy the `devforge_session` cookie from the hosted site's browser session.
+3. Run **Codevia AI: Sign In to Existing Account** and copy the `devforge_session` cookie from the hosted site's browser session.
 
 When changing environments, sign in separately for each environment. The extension stores the two session cookie values separately. No AI provider API key is configured or stored by this extension; the selected backend must have a valid account session and AI provider configuration.
 
@@ -65,7 +67,7 @@ npm run package
 Install the `.vsix` file produced by `npm run package`:
 
 ```powershell
-code --install-extension .\devforge-ai-developer-tools-0.1.0.vsix --force
+code --install-extension .\codevia-ai-1.0.0.vsix --force
 ```
 
 If the filename differs, use the actual `.vsix` file created by `npm run package`. Reload VS Code after installing.
@@ -76,24 +78,24 @@ This version uses the existing session-based API. Since the current web backend 
 
 1. Open the DevForge website in your normal browser and sign in with GitHub.
 2. In VS Code, press `Ctrl+Shift+P`.
-3. Run **DevForge AI: Sign In to Existing Account**.
+3. Run **Codevia AI: Sign In to Existing Account**.
 4. The browser opens to your configured DevForge site. Make sure you have completed GitHub sign-in there.
 5. Open browser Developer Tools (`F12`). In Chrome/Edge, open **Application** → **Storage** → **Cookies** → your DevForge website. In Firefox, use **Storage** → **Cookies**.
 6. Find the cookie named `devforge_session`. Copy its **Value** only. Do not copy `devforge_oauth`, and do not paste the cookie into chat, source files, settings JSON, or Git.
 7. Return to VS Code and paste the `devforge_session` value into the password input. The extension validates it using `GET /api/auth/me` and stores it in VS Code SecretStorage.
-8. When prompted, run **DevForge AI: Select Project** and select an existing project, or create a new project.
+8. When prompted, run **Codevia AI: Select Project** and select an existing project, or create a new project.
 
 The extension does not read your browser cookies automatically. The cookie handoff is needed because the current backend does not provide a VS Code-specific sign-in callback. Session cookies are credentials: only use your own account, do not share them, and remove them from VS Code when finished on a shared computer.
 
 ### Change project or sign out
 
-- Run **DevForge AI: Select Project** to change the DevForge project associated with extension requests.
-- Run **DevForge AI: Sign Out** to delete the saved session cookie from VS Code SecretStorage and clear the selected project. This does not sign you out of the browser or revoke the server session; use the web app's sign-out flow if you also want to end that session.
+- Run **Codevia AI: Select Project** to change the DevForge project associated with extension requests.
+- Run **Codevia AI: Sign Out** to delete the saved session cookie from VS Code SecretStorage and clear the selected project. This does not sign you out of the browser or revoke the server session; use the web app's sign-out flow if you also want to end that session.
 - If your session expires, repeat the sign-in flow with a fresh cookie value.
 
 ## Features
 
-Open the Command Palette with `Ctrl+Shift+P` and search for `DevForge AI`.
+Open the Command Palette with `Ctrl+Shift+P` and search for `Codevia AI`.
 
 - **Open Chat** — send natural-language instructions to DevForge. Requests to create a new project use the project-generation workflow and save generated files into your workspace or a folder you select.
 - **Generate Project** — request a project structure and source files, preview proposed paths, and confirm whether to skip or overwrite existing files.
@@ -110,7 +112,7 @@ For code-changing operations, inspect the diff and test the result before commit
 ## Local file saving
 
 - The backend generates and stores the project artifact; the extension performs the local file writes. A browser-only project request cannot write to your PC.
-- If chat doesn't create a new project, run **DevForge AI: Generate Project** from the Command Palette to start the dedicated workflow directly.
+- If chat doesn't create a new project, run **Codevia AI: Generate Project** from the Command Palette to start the dedicated workflow directly.
 - The extension writes only to the open workspace folder or the folder you select. It does not need the Local Agent for this.
 - Files are applied only after you confirm. Existing files are protected unless you explicitly choose **Overwrite Existing**.
 
@@ -118,7 +120,7 @@ For code-changing operations, inspect the diff and test the result before commit
 
 ### `Authentication required` or `session expired`
 
-Run **DevForge AI: Sign In to Existing Account** again and paste the current `devforge_session` cookie value. Ensure the cookie came from the exact same DevForge domain configured in Settings.
+Run **Codevia AI: Sign In to Existing Account** again and paste the current `devforge_session` cookie value. Ensure the cookie came from the exact same DevForge domain configured in Settings.
 
 ### `AI provider is not configured`
 
@@ -126,7 +128,7 @@ Open the DevForge web app, configure a provider for your account using the web a
 
 ### `Project not found` or `Forbidden`
 
-Run **DevForge AI: Select Project** and choose a project owned by the signed-in account.
+Run **Codevia AI: Select Project** and choose a project owned by the signed-in account.
 
 ### `Request too large`
 

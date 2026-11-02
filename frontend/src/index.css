@@ -121,7 +121,7 @@ button {
 /* Display the transparent logo at a compact size without cropping its edges. */
 .brand-logo {
   display: inline-flex;
-  width: 5rem;
+  width: 10rem;
   height: 2.75rem;
   align-items: center;
   justify-content: center;

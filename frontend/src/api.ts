@@ -128,7 +128,7 @@ export type LocalGitResult = {
   commit?: string;
 };
 
-/** Sanitized local project snapshot returned for import into DevForge. */
+/** Sanitized local project snapshot returned for import into Codevia AI. */
 export type LocalProjectImport = {
   name: string;
   path: string;
@@ -302,7 +302,7 @@ async function localAgentProjectStream(
             )
           ) {
             throw new Error(
-              "The connected Local Agent is outdated and only supports Node.js projects. Stop the running agent, start the updated agent from the DevForge repository with `npm.cmd run agent:dev`, then reconnect using the new pairing token. The current agent supports additional project types and streamed output.",
+              "The connected Local Agent is outdated and only supports Node.js projects. Stop the running agent, start the updated agent from the Codevia repository with `npm.cmd run agent:dev`, then reconnect using the new pairing token. The current agent supports additional project types and streamed output.",
             );
           }
           throw new Error(error);
@@ -573,7 +573,7 @@ export const api = {
         body: JSON.stringify({ path, status }),
       },
     ),
-  // Detach a GitHub remote from the DevForge project without deleting it.
+  // Detach a GitHub remote from the Codevia project without deleting it.
   disconnectGitHubRepository: (projectId: string) =>
     request<{ success: true }>(
       `/api/projects/${encodeURIComponent(projectId)}/github/disconnect`,

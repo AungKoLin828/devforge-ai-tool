@@ -124,11 +124,11 @@ function parseBuildDiagnostics(result: LocalProjectResult | null) {
   return diagnostics.slice(0, 100);
 }
 
-// Shared logo asset used by the landing page, guide, and dashboard headers.
+// Shared Codevia AI wordmark used by the landing page, guide, and dashboard.
 function BrandWordmark() {
   return (
     <span className="brand-logo">
-      <img src="/DevForgeAI.png" alt="DevForge AI" />
+      <img src="/CodeviaAI.svg" alt="Codevia AI" />
     </span>
   );
 }
@@ -152,7 +152,7 @@ function UserGuide() {
       number: "03",
       title: "Open and edit the project in VS Code",
       description:
-        "For a simple download, choose Download ZIP in the project workspace; no Local Agent is needed. Extract the downloaded archive and open the project folder in VS Code. To sync directly into the DevForge workspace, or use local build/test and GitHub operations, install the Local Agent once, then select Start and connect agent. DevForge does not currently provide a dedicated VS Code extension.",
+        "For a simple download, choose Download ZIP in the project workspace; no Local Agent is needed. Extract the downloaded archive and open the project folder in VS Code. Install the Codevia AI extension from the VS Code Marketplace to use AI tools in your editor. To sync directly into the Codevia workspace or use local build/test and GitHub operations, install the Local Agent once, then select Start and connect agent.",
     },
     {
       number: "04",
@@ -170,7 +170,7 @@ function UserGuide() {
       number: "06",
       title: "Choose the right removal action",
       description:
-        "Remove imported project removes its DevForge copy without deleting local PC files. Delete project permanently removes the DevForge project and its saved artifacts. Disconnect repository removes the GitHub link without deleting the remote repository.",
+        "Remove imported project removes its Codevia copy without deleting local PC files. Delete project permanently removes the Codevia project and its saved artifacts. Disconnect repository removes the GitHub link without deleting the remote repository.",
     },
   ];
 
@@ -180,7 +180,7 @@ function UserGuide() {
         <a
           href="/"
           className="inline-flex items-center"
-          aria-label="DevForge AI home"
+          aria-label="Codevia AI home"
         >
           <BrandWordmark />
         </a>
@@ -197,7 +197,7 @@ function UserGuide() {
           Public user guide
         </p>
         <h1 className="mt-3 text-4xl font-bold tracking-tight text-white sm:text-5xl">
-          Get started with DevForge AI
+          Get started with Codevia AI
         </h1>
         <p className="mt-5 max-w-3xl leading-7 text-slate-300">
           GitHub sign-in is required only when you use the app to create or
@@ -238,7 +238,7 @@ function UserGuide() {
           href="/"
           className="mt-8 inline-flex rounded-xl bg-indigo-600 px-5 py-3 font-semibold text-white transition hover:bg-indigo-500"
         >
-          Go to DevForge AI
+          Go to Codevia AI
         </a>
       </section>
     </main>
@@ -278,7 +278,7 @@ function Login() {
       number: "04",
       title: "Works in VS Code",
       description:
-        "Install the DevForge AI VS Code extension to chat with the assistant, review code, fix errors, and generate tests without leaving the editor. Sign in once with device pairing and everything runs from the DevForge chat panel (Ctrl+Alt+D).",
+        "Install Codevia AI from the VS Code Marketplace to chat with the assistant, review code, fix errors, and generate tests without leaving the editor. Sign in with GitHub in your browser and approve the one-time connection; then open Codevia AI chat with Ctrl+Alt+D.",
     },
   ];
 
@@ -297,7 +297,7 @@ function Login() {
         <a
           href="/"
           className="inline-flex items-center"
-          aria-label="DevForge AI home"
+          aria-label="Codevia AI home"
         >
           <BrandWordmark />
         </a>
@@ -335,7 +335,7 @@ function Login() {
             </span>
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
-            DevForge turns your project brief into a structured plan and
+            Codevia AI turns your project brief into a structured plan and
             generated code, keeps the artifacts in PostgreSQL, and is designed
             to bring your local development workflow into the loop.
           </p>
@@ -433,7 +433,7 @@ function Login() {
             One workspace, from brief to build.
           </h2>
           <p className="mt-3 leading-7 text-slate-400">
-            See what DevForge does today and what is being connected next.
+            See what Codevia AI does today and what is being connected next.
           </p>
         </div>
         <div className="mt-9 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -462,18 +462,18 @@ function Login() {
               Also available for VS Code
             </p>
             <h3 className="mt-2 text-lg font-semibold text-white">
-              DevForge AI Developer Tools extension
+              Codevia AI extension
             </h3>
             <p className="mt-2 text-sm leading-6 text-slate-400">
               Everything runs from chat right inside your editor: generate
               source, review code, analyze errors, create tests, and send build
               requests. Sign in with secure device pairing — no API key or
-              cookie copying needed.
+              After GitHub sign-in, approve the one-time connection in your browser.
             </p>
           </div>
           <div className="flex shrink-0 flex-col gap-2 text-sm">
             <span className="rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 font-mono text-xs text-slate-300">
-              Extensions panel → search “DevForge AI”
+              Extensions panel → search “Codevia AI”
             </span>
             <span className="rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 font-mono text-xs text-slate-300">
               Install the .vsix from the guide
@@ -518,7 +518,7 @@ function Login() {
       <footer className="border-t border-slate-800/80">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-6 py-6 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
           <span>
-            DevForge AI · Your projects stay yours.{" "}
+            Codevia AI · Your projects stay yours.{" "}
             <a
               href="/guide"
               className="ml-2 text-indigo-300 hover:text-indigo-200"
@@ -537,7 +537,7 @@ function Login() {
 
 // Authenticated project workspace, Local Agent controls, and GitHub tools.
 /**
- * Detect which DevForge workflow a chat message asks for. All processes run
+ * Detect which Codevia workflow a chat message asks for. All processes run
  * from chat, so plain wording like "generate a todo app" or "review my code"
  * maps onto the matching backend operation.
  */
@@ -1079,7 +1079,7 @@ function App({ user }: { user: User }) {
   async function create() {
     try {
       const response = await api.createProject({
-        name: "New DevForge Project",
+        name: "New Codevia Project",
         description: "AI generated software project",
         stack: "TypeScript + React + PostgreSQL",
       });
@@ -1153,7 +1153,7 @@ function App({ user }: { user: User }) {
     }
   }
 
-  // Permanently delete a project's DevForge records after explicit confirmation.
+  // Permanently delete a project's Codevia records after explicit confirmation.
   async function deleteProject(project: { id: string; name: string }) {
     const confirmed = await confirmModal(
       "Delete project",
@@ -1195,12 +1195,12 @@ function App({ user }: { user: User }) {
     }
   }
 
-  // Remove only the DevForge copy of an import; source files on the PC are separate.
+  // Remove only the Codevia copy of an import; source files on the PC are separate.
   async function removeImportedProject(project: { id: string; name: string }) {
     const confirmed = await confirmModal(
       "Remove imported project",
-      `Remove "${project.name}" and its imported files, artifacts, and history from DevForge? The original project files on your PC will not be changed or deleted.`,
-      "Remove from DevForge",
+      `Remove "${project.name}" and its imported files, artifacts, and history from Codevia? The original project files on your PC will not be changed or deleted.`,
+      "Remove from Codevia",
     );
     if (!confirmed || removingImportedProjectId || deletingProjectId) return;
 
@@ -1220,12 +1220,12 @@ function App({ user }: { user: User }) {
 
       setLogs((current) => [
         ...current,
-        `Removed imported project "${project.name}" from DevForge. The local PC files were left untouched.`,
+        `Removed imported project "${project.name}" from Codevia. The local PC files were left untouched.`,
       ]);
       showModal(
         "success",
         "Imported project removed",
-        `"${project.name}" and its DevForge copy were removed. The original files on your PC were left untouched.`,
+        `"${project.name}" and its Codevia copy were removed. The original files on your PC were left untouched.`,
       );
     } catch (cause) {
       const message =
@@ -1239,7 +1239,7 @@ function App({ user }: { user: User }) {
     }
   }
 
-  // Clear the DevForge repository link without deleting the GitHub remote.
+  // Clear the Codevia repository link without deleting the GitHub remote.
   async function disconnectGitHubRepository() {
     if (!selected?.githubOwner || !selected.githubRepository || githubBusy) {
       return;
@@ -1248,7 +1248,7 @@ function App({ user }: { user: User }) {
     const fullName = `${selected.githubOwner}/${selected.githubRepository}`;
     const confirmed = await confirmModal(
       "Disconnect GitHub repository",
-      `Disconnect ${fullName} from "${selected.name}" in DevForge? This will not delete the GitHub repository or any files on your PC.`,
+      `Disconnect ${fullName} from "${selected.name}" in Codevia? This will not delete the GitHub repository or any files on your PC.`,
       "Disconnect repository",
     );
     if (!confirmed || githubBusy) return;
@@ -1271,7 +1271,7 @@ function App({ user }: { user: User }) {
       showModal(
         "success",
         "Repository disconnected",
-        `Disconnected ${fullName} from this DevForge project. The GitHub repository and local files were not changed.`,
+        `Disconnected ${fullName} from this Codevia project. The GitHub repository and local files were not changed.`,
       );
     } catch (cause) {
       const message =
@@ -1646,7 +1646,7 @@ function App({ user }: { user: User }) {
     if (
       !(await confirmModal(
         "Import local project",
-        `Import text files from "${source.path}" into your DevForge account? Files are uploaded to the server for storage and AI review. Secret environment files and generated dependency/build folders are excluded; review source files for other credentials before importing.`,
+        `Import text files from "${source.path}" into your Codevia account? Files are uploaded to the server for storage and AI review. Secret environment files and generated dependency/build folders are excluded; review source files for other credentials before importing.`,
         "Import project",
       ))
     ) {
@@ -1710,7 +1710,7 @@ function App({ user }: { user: User }) {
       !(await confirmModal(
         syncBeforeRun ? `Run local ${label}` : `Run ${label} on local edits`,
         syncBeforeRun
-          ? `This will copy the generated files to your PC (overwriting matching files in this DevForge project folder) and run the project's ${label} scripts locally. Project scripts may execute arbitrary code. Continue only if you trust this generated project.`
+          ? `This will copy the generated files to your PC (overwriting matching files in this Codevia project folder) and run the project's ${label} scripts locally. Project scripts may execute arbitrary code. Continue only if you trust this generated project.`
           : `This will run the ${label} scripts against the existing local project files without syncing or overwriting them. Project scripts may execute arbitrary code. Continue only if you trust this project.`,
         `Run ${label}`,
       ))
@@ -1776,7 +1776,7 @@ function App({ user }: { user: User }) {
               )
             ) {
               appendLocalConsole(
-                "[notice] Restart the Local Agent from the updated DevForge source so it can detect build configurations inside application subfolders. If this remains afterward, the generated project needs a supported build configuration.\n",
+                "[notice] Restart the Local Agent from the current source so it can detect build configurations inside application subfolders. If this remains afterward, the generated project needs a supported build configuration.\n",
               );
             }
             if (event.stage.truncated) {
@@ -1847,7 +1847,7 @@ function App({ user }: { user: User }) {
     if (
       !(await confirmModal(
         "Sync files to PC",
-        `Copy ${generatedFiles.length} generated files to ${localAgentInfo.workspaceRoot}\\${localPath.replaceAll("/", "\\")}? Matching files in this DevForge project folder will be overwritten.`,
+        `Copy ${generatedFiles.length} generated files to ${localAgentInfo.workspaceRoot}\\${localPath.replaceAll("/", "\\")}? Matching files in this Codevia project folder will be overwritten.`,
         "Sync files",
       ))
     ) {
@@ -2047,7 +2047,7 @@ function App({ user }: { user: User }) {
       const response = await api.createGitHubRepository(
         selected.id,
         githubNewRepository.trim(),
-        selected.description || `Created with DevForge AI: ${selected.name}`,
+        selected.description || `Created with Codevia AI: ${selected.name}`,
         githubNewRepositoryPrivate,
       );
       setGitHubLocalPath(
@@ -2084,7 +2084,7 @@ function App({ user }: { user: User }) {
     if (
       !(await confirmModal(
         "Clone GitHub repository",
-        `Clone https://github.com/${repository.owner}/${repository.repository} into ${localAgentInfo.workspaceRoot}\\${path.replaceAll("/", "\\")}? The destination must not already exist. Git uses the credentials configured on this PC; DevForge will not send your GitHub token to the Local Agent.`,
+        `Clone https://github.com/${repository.owner}/${repository.repository} into ${localAgentInfo.workspaceRoot}\\${path.replaceAll("/", "\\")}? The destination must not already exist. Git uses the credentials configured on this PC; Codevia will not send your GitHub token to the Local Agent.`,
         "Clone repository",
       ))
     ) {
@@ -2191,7 +2191,7 @@ function App({ user }: { user: User }) {
         initializeRepository
           ? "Initialize and push to GitHub"
           : "Commit and push to GitHub",
-        `${initializeRepository ? `Configure or initialize Git in ${path}, then ` : ""}${generatedFiles.length ? `copy ${generatedFiles.length} saved DevForge files into ${path} (matching files will be overwritten), then ` : ""}stage and commit all changes in ${path} and push them to ${repository.owner}/${repository.repository} (${repository.branch})? Secret environment files and common private keys are blocked. Review your project before publishing.`,
+        `${initializeRepository ? `Configure or initialize Git in ${path}, then ` : ""}${generatedFiles.length ? `copy ${generatedFiles.length} saved Codevia files into ${path} (matching files will be overwritten), then ` : ""}stage and commit all changes in ${path} and push them to ${repository.owner}/${repository.repository} (${repository.branch})? Secret environment files and common private keys are blocked. Review your project before publishing.`,
         initializeRepository ? "Initialize & push" : "Commit & push",
       ))
     ) {
@@ -2216,7 +2216,7 @@ function App({ user }: { user: User }) {
           ...repository,
           path,
           message:
-            githubCommitMessage.trim() || `Sync ${selected.name} from DevForge`,
+            githubCommitMessage.trim() || `Sync ${selected.name} from Codevia`,
         },
       );
       await api.updateGitHubSync(selected.id, result.path, "CLEAN");
@@ -2289,7 +2289,7 @@ function App({ user }: { user: User }) {
 
   // Every AI process runs from chat: plain questions are answered, and
   // requests like "generate...", "modify...", "review...", or "build/test"
-  // trigger the matching DevForge workflow and report each step in the chat.
+  // trigger the matching Codevia workflow and report each step in the chat.
   async function sendChatMessage() {
     const question = chatInput.trim();
     if (!selected || !question || chatBusy) return;
@@ -2623,7 +2623,7 @@ function App({ user }: { user: User }) {
                     disabled={actionDisabled}
                     onClick={() => void removeImportedProject(project)}
                     className="block w-full px-3 pb-1 text-left text-xs text-slate-500 transition hover:text-amber-300 disabled:cursor-wait disabled:opacity-50"
-                    aria-label={`Remove imported ${project.name} from DevForge`}
+                    aria-label={`Remove imported ${project.name} from Codevia`}
                   >
                     {removingImportedProjectId === project.id
                       ? "Removing..."
@@ -3443,7 +3443,7 @@ function App({ user }: { user: User }) {
                                 setGitHubCommitMessage(event.target.value)
                               }
                               disabled={Boolean(githubBusy)}
-                              placeholder={`Sync ${selected.name} from DevForge`}
+                              placeholder={`Sync ${selected.name} from Codevia`}
                               maxLength={200}
                               className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-60"
                             />
@@ -3621,7 +3621,7 @@ function App({ user }: { user: User }) {
                     </p>
                   )}
                   <p className="mt-3 text-xs leading-5 text-slate-500">
-                    Generated files are saved in your DevForge account first.
+                    Generated files are saved in your Codevia account first.
                     Use <strong>Sync files to PC</strong> to copy them into{" "}
                     <code>projects/{selected.id}</code> with the Local Agent, or
                     select <strong>Download ZIP</strong> to save a copy without
@@ -3739,7 +3739,7 @@ function App({ user }: { user: User }) {
                 }`}
               >
                 <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                  {message.role === "user" ? "You" : "DevForge AI"}
+                  {message.role === "user" ? "You" : "Codevia AI"}
                 </div>
                 <p className="whitespace-pre-wrap leading-6">
                   {message.content}
@@ -3981,10 +3981,10 @@ function ConnectExtension({
       <div className="min-h-screen grid place-items-center bg-slate-950 px-4 text-slate-200">
         <div className="w-full max-w-md space-y-4 text-center">
           <h1 className="text-2xl font-semibold">
-            Connect VS Code to DevForge
+            Connect VS Code to Codevia AI
           </h1>
           <p className="text-sm text-slate-400">
-            Sign in with GitHub first. DevForge will then connect VS Code
+            Sign in with GitHub first. Codevia AI will then connect VS Code
             automatically.
           </p>
           <button
@@ -4003,7 +4003,7 @@ function ConnectExtension({
   return (
     <div className="min-h-screen grid place-items-center bg-slate-950 px-4 text-slate-200">
       <div className="w-full max-w-md space-y-4 text-center">
-        <h1 className="text-2xl font-semibold">Connect VS Code to DevForge</h1>
+        <h1 className="text-2xl font-semibold">Connect VS Code to Codevia AI</h1>
         {status === "approved" ? (
           <>
             <p className="text-sm text-emerald-400">
@@ -4114,7 +4114,7 @@ function AdminPage({ user }: { user: User }) {
     <div className="min-h-screen bg-slate-950 text-slate-200">
       <header className="border-b border-slate-800 px-6 py-4 flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-lg font-semibold">DevForge AI — Admin</h1>
+          <h1 className="text-lg font-semibold">Codevia AI — Admin</h1>
           <p className="text-xs text-slate-400">
             Manage users of the web app and the VS Code extension.
           </p>
@@ -4318,7 +4318,7 @@ function Root() {
           aria-live="polite"
         >
           <span className="api-loading-spinner" aria-hidden="true" />
-          <span>Loading DevForge...</span>
+          <span>Loading Codevia AI...</span>
         </div>
       </div>
     );

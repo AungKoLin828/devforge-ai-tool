@@ -1,9 +1,9 @@
 {
-  "name": "devforge-ai-developer-tools",
-  "displayName": "DevForge AI Developer Tools",
-  "description": "DevForge AI coding assistant using either your local DevForge backend or the hosted Netlify backend.",
-  "version": "0.1.0",
-  "publisher": "DevForgeAITools",
+  "name": "codevia-ai",
+  "displayName": "Codevia AI",
+  "description": "Codevia AI coding assistant connected to your DevForge backend.",
+  "version": "1.0.0",
+  "publisher": "CodeviaAI",
   "license": "UNLICENSED",
   "engines": {
     "vscode": "^1.85.0"
@@ -34,77 +34,77 @@
     "commands": [
       {
         "command": "devforge.signIn",
-        "title": "DevForge AI: Sign In to Existing Account",
-        "category": "DevForge AI"
+        "title": "Codevia AI: Sign In to Existing Account",
+        "category": "Codevia AI"
       },
       {
         "command": "devforge.selectProject",
-        "title": "DevForge AI: Select Project",
-        "category": "DevForge AI"
+        "title": "Codevia AI: Select Project",
+        "category": "Codevia AI"
       },
       {
         "command": "devforge.signOut",
-        "title": "DevForge AI: Sign Out",
-        "category": "DevForge AI"
+        "title": "Codevia AI: Sign Out",
+        "category": "Codevia AI"
       },
       {
         "command": "devforge.selectAiProvider",
-        "title": "DevForge AI: Select AI Provider & Configure API Key",
-        "category": "DevForge AI"
+        "title": "Codevia AI: Select AI Provider & Configure API Key",
+        "category": "Codevia AI"
       },
       {
         "command": "devforge.showShortcuts",
-        "title": "DevForge AI: Show Shortcuts",
-        "category": "DevForge AI"
+        "title": "Codevia AI: Show Shortcuts",
+        "category": "Codevia AI"
       },
       {
         "command": "devforge.openChat",
-        "title": "DevForge AI: Open Chat",
-        "category": "DevForge AI"
+        "title": "Codevia AI: Open Chat",
+        "category": "Codevia AI"
       },
       {
         "command": "devforge.generateProject",
-        "title": "DevForge AI: Generate Project",
-        "category": "DevForge AI"
+        "title": "Codevia AI: Generate Project",
+        "category": "Codevia AI"
       },
       {
         "command": "devforge.reviewCurrentFile",
-        "title": "DevForge AI: Review Current File",
-        "category": "DevForge AI"
+        "title": "Codevia AI: Review Current File",
+        "category": "Codevia AI"
       },
       {
         "command": "devforge.reviewWorkspace",
-        "title": "DevForge AI: Review Workspace",
-        "category": "DevForge AI"
+        "title": "Codevia AI: Review Workspace",
+        "category": "Codevia AI"
       },
       {
         "command": "devforge.modifyCurrentFile",
-        "title": "DevForge AI: Modify Current File",
-        "category": "DevForge AI"
+        "title": "Codevia AI: Modify Current File",
+        "category": "Codevia AI"
       },
       {
         "command": "devforge.explainSelection",
-        "title": "DevForge AI: Explain Code / Selection",
-        "category": "DevForge AI"
+        "title": "Codevia AI: Explain Code / Selection",
+        "category": "Codevia AI"
       },
       {
         "command": "devforge.generateTests",
-        "title": "DevForge AI: Generate Tests",
-        "category": "DevForge AI"
+        "title": "Codevia AI: Generate Tests",
+        "category": "Codevia AI"
       },
       {
         "command": "devforge.fixCurrentFile",
-        "title": "DevForge AI: Fix Errors in Current File",
-        "category": "DevForge AI"
+        "title": "Codevia AI: Fix Errors in Current File",
+        "category": "Codevia AI"
       },
       {
         "command": "devforge.clearFindings",
-        "title": "DevForge AI: Clear Findings",
-        "category": "DevForge AI"
+        "title": "Codevia AI: Clear Findings",
+        "category": "Codevia AI"
       }
     ],
     "configuration": {
-      "title": "DevForge AI Developer Tools",
+      "title": "Codevia AI Developer Tools",
       "properties": {
         "devforge.backendEnvironment": {
           "type": "string",
@@ -149,7 +149,7 @@
       "activitybar": [
         {
           "id": "devforgeContainer",
-          "title": "DevForge AI",
+          "title": "Codevia AI",
           "icon": "media/devforge-activitybar.svg"
         }
       ]

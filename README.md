@@ -6,7 +6,9 @@ The public user guide is available at `/guide` and can be read without signing i
 
 ## Use DevForge with VS Code
 
-There is no dedicated DevForge VS Code extension at this time. You can use VS Code as the editor for a project on your PC:
+The DevForge VS Code extension can generate a project and copy its files directly into an open workspace or a local folder you select. Install and configure it using [the extension guide](./vscode-extension/README.md). Project generation through the browser cannot write files directly to your PC; use the extension or download a ZIP and extract it.
+
+You can also use VS Code as the editor for a project on your PC:
 
 1. Sign in to DevForge, create or select a project, and generate its code.
 2. To download without installing or pairing the Local Agent, select **Download ZIP** in the project workspace. Extract the downloaded archive to a folder on your PC.

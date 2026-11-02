@@ -1,12 +1,14 @@
 # DevForge AI Developer Tools for VS Code
 
-DevForge AI adds a custom chat panel and coding commands to VS Code. It connects to the **existing DevForge Netlify backend** and does not add or require an AI-provider API key inside the extension. The extension source is self-contained under `vscode-extension/`; no DevForge web app, Netlify Function, database, or local-agent source is changed by this package.
+DevForge AI adds a custom chat panel and coding commands to VS Code. Requests to create a new project from chat use the project-generation workflow and copy the generated files into your open workspace. If no workspace is open, VS Code asks you to choose a local destination folder. You review the file list and confirm before files are written; existing files are skipped unless you explicitly choose to overwrite them.
+
+The extension connects to the hosted DevForge backend by default and does not add or require an AI-provider API key inside the extension. The Local Agent is not required for the extension to save generated files to a folder on your PC.
 
 ## Choose local or Netlify backend
 
 The extension supports both environments without changing the DevForge web app or Netlify Functions. Open **VS Code Settings** (`Ctrl+,`) and search for **DevForge AI**:
 
-- `DevForge AI Developer Tools: Backend Environment` = `local` or `netlify`.
+- `DevForge AI Developer Tools: Backend Environment` = `local` or `netlify` (default).
 - `Local Backend Url` defaults to `http://localhost:8888`.
 - `Netlify Backend Url` defaults to `https://devforge-ai-tool.netlify.app`.
 
@@ -21,7 +23,7 @@ Do not use the Vite-only `http://localhost:5173` URL unless your local setup als
 
 ### Hosted Netlify deployment
 
-1. Set `Backend Environment` to `netlify`.
+1. Keep `Backend Environment` set to `netlify` (the default).
 2. Keep `Netlify Backend Url` set to your deployed site URL.
 3. Run **DevForge AI: Sign In to Existing Account** and copy the `devforge_session` cookie from the hosted site's browser session.
 
@@ -29,14 +31,15 @@ When changing environments, sign in separately for each environment. The extensi
 
 ## How the connection works
 
-The extension uses existing routes from the hosted DevForge application:
+The extension uses existing routes from the DevForge application:
 
 - `GET /api/auth/me` — verify your existing DevForge session.
 - `GET /api/projects` — list projects in your account.
 - `POST /api/projects` — create a DevForge project if you choose to.
-- `POST /api/projects/:projectId/chat` — send AI prompts to the existing project chat service.
+- `POST /api/assistant/chat` — send general chat prompts.
+- `POST /api/projects/:projectId/generate` and the project run/artifact routes — generate project files and retrieve the saved artifact before copying files to your selected local folder.
 
-It does **not** call a new `/api/vscode/assistant` endpoint. AI provider credentials remain managed by your existing DevForge account/backend. The selected DevForge project must have an AI provider configured in the web app; if no provider is configured, the backend will report that error.
+It does **not** call a new `/api/vscode/assistant` endpoint. AI provider credentials remain managed by your existing DevForge account/backend. Your account must have an AI provider configured; if no provider is configured, the backend will report that error.
 
 ## Requirements
 
@@ -46,6 +49,7 @@ It does **not** call a new `/api/vscode/assistant` endpoint. AI provider credent
 - A valid `devforge_session` session cookie from your own signed-in browser session.
 - At least one DevForge project, or permission to create one.
 - An AI provider configured for your account in the existing DevForge web app.
+- A writable local folder to use as the project destination. Open it in VS Code first, or select one when prompted.
 
 ## Build and install on Windows
 
@@ -58,16 +62,10 @@ npm run compile
 npm run package
 ```
 
-The package filename is derived from `package.json` and version. For this release it should be:
-
-```text
-devforge-ai-developer-tools-0.2.3.vsix
-```
-
-Install it:
+Install the `.vsix` file produced by `npm run package`:
 
 ```powershell
-code --install-extension .\devforge-ai-developer-tools-0.2.3.vsix --force
+code --install-extension .\devforge-ai-developer-tools-0.1.0.vsix --force
 ```
 
 If the filename differs, use the actual `.vsix` file created by `npm run package`. Reload VS Code after installing.
@@ -97,8 +95,8 @@ The extension does not read your browser cookies automatically. The cookie hando
 
 Open the Command Palette with `Ctrl+Shift+P` and search for `DevForge AI`.
 
-- **Open Chat** — send natural-language instructions to the selected project's existing chat endpoint. Optionally include the active source file.
-- **Generate Project** — request a project structure and source files, preview proposed paths, and choose whether to overwrite existing files.
+- **Open Chat** — send natural-language instructions to DevForge. Requests to create a new project use the project-generation workflow and save generated files into your workspace or a folder you select.
+- **Generate Project** — request a project structure and source files, preview proposed paths, and confirm whether to skip or overwrite existing files.
 - **Review Current File** — ask the hosted AI service to review the active source file; findings appear in VS Code's Problems panel.
 - **Review Workspace** — review eligible files from the open workspace, subject to size limits.
 - **Modify Current File** — request a change, inspect the diff, and approve or reject it.
@@ -109,12 +107,12 @@ Open the Command Palette with `Ctrl+Shift+P` and search for `DevForge AI`.
 
 For code-changing operations, inspect the diff and test the result before committing or deploying. AI-generated code may be incorrect.
 
-## Limits of the existing API
+## Local file saving
 
-- Requests use the selected DevForge project's `/chat` route, which requires an authenticated account, project ownership, and a provider configured for that account.
-- The current chat API accepts up to 12 messages, each up to 4,000 characters. The extension splits prompts into bounded message parts and reports when a request is too large.
-- This extension does not add a new server endpoint, change backend authentication, or bypass account/provider checks.
-- Local file modifications and generated files are applied to the workspace only after user confirmation; the extension does not claim the backend itself has written files to your PC.
+- The backend generates and stores the project artifact; the extension performs the local file writes. A browser-only project request cannot write to your PC.
+- If chat doesn't create a new project, run **DevForge AI: Generate Project** from the Command Palette to start the dedicated workflow directly.
+- The extension writes only to the open workspace folder or the folder you select. It does not need the Local Agent for this.
+- Files are applied only after you confirm. Existing files are protected unless you explicitly choose **Overwrite Existing**.
 
 ## Troubleshooting
 

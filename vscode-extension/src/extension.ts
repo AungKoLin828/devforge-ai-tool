@@ -803,7 +803,7 @@ function getBackendUrl(): string {
   const config = vscode.workspace.getConfiguration("devforge");
   const environment = config.get<"local" | "netlify">(
     "backendEnvironment",
-    "local",
+    "netlify",
   );
   const key = environment === "local" ? "localBackendUrl" : "netlifyBackendUrl";
   const fallback =
@@ -816,7 +816,7 @@ function getBackendUrl(): string {
 function getBackendEnvironment(): "local" | "netlify" {
   return vscode.workspace
     .getConfiguration("devforge")
-    .get<"local" | "netlify">("backendEnvironment", "local");
+    .get<"local" | "netlify">("backendEnvironment", "netlify");
 }
 
 function getSessionSecretKey(): string {
@@ -1398,20 +1398,43 @@ async function fetchProjectDetail(context: vscode.ExtensionContext): Promise<{
 /** Read the latest generated code artifact saved on the backend. */
 async function fetchGeneratedFiles(
   context: vscode.ExtensionContext,
+  output: vscode.OutputChannel,
 ): Promise<Array<{ path: string; content: string }>> {
   const detail = await fetchProjectDetail(context);
   const code = [...detail.artifacts]
     .reverse()
     .find((artifact) => artifact.type === "CODE");
   if (!Array.isArray(code?.content)) return [];
-  return (code.content as unknown[])
-    .map((item) => {
-      const entry = item as Record<string, unknown>;
-      if (typeof entry?.path !== "string" || typeof entry?.content !== "string")
-        return undefined;
-      return { path: entry.path, content: entry.content };
-    })
-    .filter((file): file is { path: string; content: string } => Boolean(file));
+  const files: Array<{ path: string; content: string }> = [];
+  let rejected = 0;
+  for (const item of code.content as unknown[]) {
+    if (!item || typeof item !== "object") {
+      rejected++;
+      continue;
+    }
+    const entry = item as Record<string, unknown>;
+    if (typeof entry.path !== "string" || typeof entry.content !== "string") {
+      rejected++;
+      continue;
+    }
+    const path = normalizeGeneratedFilePath(entry.path);
+    if (!path || Buffer.byteLength(entry.content, "utf8") > 200_000) {
+      rejected++;
+      continue;
+    }
+    if (!files.some((file) => file.path.toLowerCase() === path.toLowerCase()))
+      files.push({ path, content: entry.content });
+    if (files.length >= 80) break;
+  }
+  if (rejected) {
+    output.appendLine(
+      `Skipped ${rejected} generated artifact entr${rejected === 1 ? "y" : "ies"} with an invalid path, format, or size.`,
+    );
+    vscode.window.showWarningMessage(
+      `DevForge AI skipped ${rejected} generated file(s) with an invalid path or size.`,
+    );
+  }
+  return files;
 }
 
 async function withAiProgress<T>(
@@ -1554,6 +1577,34 @@ async function openChat(
           throw new Error("Enter an instruction before sending.");
         lastPrompt = userPrompt;
         lastIncludeContext = message.includeActiveFile !== false;
+
+        if (isProjectGenerationRequest(userPrompt)) {
+          const generationStep = async (index: number, state: string) => {
+            await panel.webview.postMessage({ type: "step", index, state });
+          };
+          await panel.webview.postMessage({
+            type: "steps",
+            id: "generate-project",
+            title: "Generating project…",
+            names: [
+              "Prepare local destination",
+              "Generate project",
+              "Save files to your PC",
+            ],
+          });
+          await generationStep(0, "running");
+          await generationStep(0, "done");
+          await generationStep(1, "running");
+          await generateProject(context, output, userPrompt);
+          await generationStep(1, "done");
+          await generationStep(2, "done");
+          await panel.webview.postMessage({ type: "stepsDone" });
+          await panel.webview.postMessage({
+            type: "reply",
+            text: "The project generation workflow finished. Check the VS Code notifications for the save result.",
+          });
+          return;
+        }
 
         // Chat goes through the dedicated assistant API; the AI workflow is
         // surfaced step by step in the chat, like Copilot Chat.
@@ -1773,15 +1824,8 @@ function parseGeneratedFilesPayload(
     const entry = item as Record<string, unknown>;
     if (typeof entry.path !== "string" || typeof entry.content !== "string")
       continue;
-    const path = entry.path.replace(/\\/g, "/").replace(/^\.\//, "");
-    if (
-      !path ||
-      path.startsWith("/") ||
-      /^[a-z]:/i.test(path) ||
-      path.split("/").some((part) => !part || part === ".." || part === ".") ||
-      isUnsafeGeneratedPath(path)
-    )
-      continue;
+    const path = normalizeGeneratedFilePath(entry.path);
+    if (!path) continue;
     if (Buffer.byteLength(entry.content, "utf8") > 200_000) continue;
     if (!files.some((f) => f.path.toLowerCase() === path.toLowerCase()))
       files.push({ path, content: entry.content });
@@ -1790,17 +1834,37 @@ function parseGeneratedFilesPayload(
   return files;
 }
 
+function normalizeGeneratedFilePath(filePath: string): string | undefined {
+  const normalized = filePath.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (
+    !normalized ||
+    normalized.startsWith("/") ||
+    /^[a-z]:/i.test(normalized) ||
+    normalized
+      .split("/")
+      .some((part) => !part || part === ".." || part === ".") ||
+    isUnsafeGeneratedPath(normalized)
+  )
+    return undefined;
+  return normalized;
+}
+
+function isProjectGenerationRequest(prompt: string): boolean {
+  return (
+    /\b(?:create|generate|scaffold)\b[\s\S]{0,60}\b(?:project|app|application|website|web app)\b/i.test(
+      prompt,
+    ) ||
+    /\b(?:build|make|start)\b[\s\S]{0,30}\bnew\s+(?:project|app|application|website|web app)\b/i.test(
+      prompt,
+    )
+  );
+}
+
 async function generateProject(
   context: vscode.ExtensionContext,
   output: vscode.OutputChannel,
   chatInstruction?: string,
 ): Promise<void> {
-  if (!vscode.workspace.workspaceFolders?.length) {
-    vscode.window.showInformationMessage(
-      "Open an empty or existing project folder in VS Code first.",
-    );
-    return;
-  }
   const description =
     chatInstruction?.trim() ||
     (await vscode.window.showInputBox({
@@ -1812,6 +1876,18 @@ async function generateProject(
       ignoreFocusOut: true,
     }));
   if (!description?.trim()) return;
+  let folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+  if (!folder) {
+    const selected = await vscode.window.showOpenDialog({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      openLabel: "Select Project Folder",
+      title: "Choose where DevForge AI should save the generated project",
+    });
+    folder = selected?.[0];
+    if (!folder) return;
+  }
   // Dedicated project-generation API: enqueue a background run, poll its
   // status, then download the generated files from the saved code artifact.
   let run: ProjectRunRef | undefined;
@@ -1832,7 +1908,18 @@ async function generateProject(
   output.appendLine(
     `Generation run ${run.id} completed at ${new Date().toISOString()}.`,
   );
-  const files = await fetchGeneratedFiles(context);
+  let files: Array<{ path: string; content: string }>;
+  try {
+    files = await fetchGeneratedFiles(context, output);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown artifact download error";
+    output.appendLine(`Could not download generated project files: ${message}`);
+    vscode.window.showErrorMessage(
+      `DevForge AI could not download generated project files: ${message}`,
+    );
+    return;
+  }
   if (!files.length) {
     vscode.window.showErrorMessage(
       "The generation run finished but saved no generated files.",
@@ -1845,32 +1932,34 @@ async function generateProject(
     placeHolder: preview.slice(0, 900),
   });
   if (picked !== "Create Files") return;
-  const folder = vscode.workspace.workspaceFolders[0].uri;
-  const overwriteExisting = await vscode.window.showWarningMessage(
-    "Existing files will be skipped unless you explicitly choose to overwrite them. Continue?",
-    "Continue",
-    "Cancel",
-  );
-  if (overwriteExisting !== "Continue") return;
-  const overwrite = await vscode.window.showWarningMessage(
-    "Should existing files be overwritten?",
-    "Skip Existing (safer)",
-    "Overwrite Existing",
-    "Cancel",
-  );
-  if (!overwrite || overwrite === "Cancel") return;
-  let created = 0,
-    skipped = 0;
+  const existing = new Set<string>();
   for (const file of files) {
     const uri = vscode.Uri.joinPath(folder, ...file.path.split("/"));
     try {
       await vscode.workspace.fs.stat(uri);
-      if (overwrite !== "Overwrite Existing") {
-        skipped++;
-        continue;
-      }
+      existing.add(file.path);
     } catch {
-      /* target does not exist */
+      // The target does not exist yet.
+    }
+  }
+  let overwrite = "Skip Existing (safer)";
+  if (existing.size) {
+    const choice = await vscode.window.showWarningMessage(
+      `${existing.size} generated file(s) already exist in ${folder.fsPath}.`,
+      "Skip Existing (safer)",
+      "Overwrite Existing",
+      "Cancel",
+    );
+    if (!choice || choice === "Cancel") return;
+    overwrite = choice;
+  }
+  let created = 0,
+    skipped = 0;
+  for (const file of files) {
+    const uri = vscode.Uri.joinPath(folder, ...file.path.split("/"));
+    if (existing.has(file.path) && overwrite !== "Overwrite Existing") {
+      skipped++;
+      continue;
     }
     try {
       const parent = vscode.Uri.joinPath(
@@ -1890,10 +1979,10 @@ async function generateProject(
   }
   output.show(true);
   output.appendLine(
-    `Project generation finished: ${created} written, ${skipped} skipped/failed.`,
+    `Project generation finished in ${folder.fsPath}: ${created} written, ${skipped} skipped/failed.`,
   );
   vscode.window.showInformationMessage(
-    `DevForge AI generated ${created} file(s); ${skipped} skipped or failed.`,
+    `DevForge AI saved ${created} file(s) to ${folder.fsPath}; ${skipped} skipped or failed.`,
   );
   const readme = files.find((f) => /^README(?:\.md)?$/i.test(f.path));
   if (readme) {

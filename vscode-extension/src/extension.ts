@@ -1896,7 +1896,7 @@ async function openChat(
     if(m.type==='stepTitle'){const b=window.__stepBox;if(b)b.title.textContent=m.title;}
     if(m.type==='stepLabel'){const b=window.__stepBox;if(!b)return;const r=b.rows[m.index];const label=r&&r.querySelector('.label');if(label)label.textContent=m.text;}
     if(m.type==='step'){const b=window.__stepBox;if(!b)return;const r=b.rows[m.index];if(!r)return;r.className='step '+m.state;const i=r.querySelector('.icon');i.textContent=m.state==='done'?'✔':m.state==='failed'?'✖':m.state==='running'?'▶':'·';messages.scrollTop=messages.scrollHeight;}
-    if(m.type==='stepsDone'){const b=window.__stepBox;if(b)b.el.classList.add('done');}
+    if(m.type==='stepsDone'){const b=window.__stepBox;if(b){if(window.__steps==='chat'){b.el.remove();window.__stepBox=null;window.__steps=null;}else b.el.classList.add('done');}}
     if(m.type==='providerState'){provSel.value=m.provider;provBase.style.display=(m.provider==='CUSTOM')?'':'none';provModel.value=m.model||'';provBase.value=m.baseUrl||'';provStatus.textContent=m.configured?'Configured':'Not configured yet';}
     if(m.type==='modelsLoaded'){modelList.innerHTML='';for(const id of m.models){const o=document.createElement('option');o.value=id;modelList.appendChild(o);}provStatus.textContent=m.models.length+' models loaded';}
     if(m.type==='providerSaved'){provStatus.textContent='Saved ✓';provKey.value='';provSave.disabled=false;}

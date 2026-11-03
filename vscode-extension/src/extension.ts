@@ -1020,7 +1020,7 @@ async function signIn(context: vscode.ExtensionContext): Promise<void> {
       ? "Local development"
       : "Netlify hosted";
   const logoUri = panel.webview.asWebviewUri(
-    vscode.Uri.joinPath(context.extensionUri, "media", "icon.png"),
+    vscode.Uri.joinPath(context.extensionUri, "media", "CodeviaAI.png"),
   );
   panel.webview.html = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -1560,7 +1560,7 @@ async function openChat(
     { enableScripts: true, retainContextWhenHidden: true },
   );
   const logo = panel.webview.asWebviewUri(
-    vscode.Uri.joinPath(context.extensionUri, "media", "icon.png"),
+    vscode.Uri.joinPath(context.extensionUri, "media", "CodeviaAI.png"),
   );
   const nonce = String(Date.now());
   panel.webview.html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${panel.webview.cspSource} https:; style-src ${panel.webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><title>Codevia AI</title><style>

@@ -128,7 +128,7 @@ function parseBuildDiagnostics(result: LocalProjectResult | null) {
 function BrandWordmark() {
   return (
     <span className="brand-logo">
-      <img src="/CodeviaAI.svg" alt="Codevia AI" />
+      <img src="/CodeviaAI.png" alt="Codevia AI" />
     </span>
   );
 }

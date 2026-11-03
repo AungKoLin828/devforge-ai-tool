@@ -92,6 +92,9 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("devforge.signIn", () => signIn(context)),
     vscode.commands.registerCommand("devforge.signOut", () => signOut(context)),
+    vscode.commands.registerCommand("devforge.selectBackend", () =>
+      selectBackend(),
+    ),
     vscode.commands.registerCommand("devforge.selectAiProvider", () =>
       selectAiProvider(context),
     ),
@@ -868,7 +871,7 @@ async function apiRequest<T>(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 120_000);
   try {
-    const response = await fetch(`${baseUrl}${path}`, {
+    const response = await fetchBackend(`${baseUrl}${path}`, {
       ...init,
       headers,
       signal: controller.signal,
@@ -884,7 +887,7 @@ async function apiRequest<T>(
       if (response.status === 401 || response.status === 403) {
         if (!allowUnauthenticated)
           throw new Error(
-            "Your DevForge session is missing or expired. Run “Codevia AI: Sign In” and paste the current devforge_session cookie value.",
+            "Your DevForge session is missing or expired. Run “Codevia AI: Sign In” and complete browser pairing again.",
           );
       }
       throw new Error(
@@ -897,6 +900,95 @@ async function apiRequest<T>(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function fetchBackend(
+  url: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: init.signal ?? controller.signal,
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.name === "AbortError" || error instanceof TypeError)
+    ) {
+      const backend = new URL(url);
+      const local = ["localhost", "127.0.0.1", "[::1]"].includes(
+        backend.hostname,
+      );
+      const cause = error as Error & { cause?: unknown };
+      const code =
+        cause.cause && typeof cause.cause === "object" && "code" in cause.cause
+          ? String(cause.cause.code)
+          : undefined;
+      const reason =
+        error.name === "AbortError"
+          ? "The request timed out."
+          : "The connection could not be established.";
+      const nextStep = local
+        ? "Start the local app with `npm run dev:netlify` and check the Local Backend Url setting."
+        : "Check your internet connection and the Netlify Backend Url setting.";
+      throw new Error(
+        `${reason} Could not reach the Codevia backend at ${backend.origin}.${code ? ` Network error: ${code}.` : ""} ${nextStep}`,
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function selectBackend(): Promise<void> {
+  const options = [
+    {
+      label: "Hosted server (Netlify)",
+      description: getConfigString(
+        "netlifyBackendUrl",
+        "https://devforge-ai-tool.netlify.app",
+      ),
+      environment: "netlify" as const,
+    },
+    {
+      label: "Local development server",
+      description: getConfigString(
+        "localBackendUrl",
+        "http://localhost:8888",
+      ),
+      environment: "local" as const,
+    },
+  ];
+  const choice = await vscode.window.showQuickPick(options, {
+    title: "Codevia AI: Select Backend",
+    placeHolder: "Choose the server for Codevia AI requests",
+  });
+  if (!choice) return;
+  const target = vscode.workspace.workspaceFolders?.length
+    ? vscode.ConfigurationTarget.Workspace
+    : vscode.ConfigurationTarget.Global;
+  try {
+    await vscode.workspace
+      .getConfiguration("devforge")
+      .update("backendEnvironment", choice.environment, target);
+    vscode.window.showInformationMessage(
+      `Codevia AI will use the ${choice.environment === "local" ? "local" : "hosted"} backend at ${choice.description}. Sign in to that backend to continue.`,
+    );
+  } catch (error) {
+    vscode.window.showErrorMessage(
+      `Could not select the Codevia AI backend: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+function getConfigString(key: string, fallback: string): string {
+  return String(
+    vscode.workspace.getConfiguration("devforge").get(key, fallback),
+  ).trim();
 }
 
 /**
@@ -954,7 +1046,7 @@ const vscode=acquireVsCodeApi();const github=document.getElementById('github');c
     running = true;
     post("status", "Requesting a one-time sign-in code…");
     try {
-      const response = await fetch(`${baseUrl}/api/auth/pair/start`, {
+      const response = await fetchBackend(`${baseUrl}/api/auth/pair/start`, {
         method: "POST",
         headers: { Accept: "application/json" },
       });
@@ -980,7 +1072,7 @@ const vscode=acquireVsCodeApi();const github=document.getElementById('github');c
       );
       const deadline = Date.now() + 10 * 60 * 1000;
       while (Date.now() < deadline && !panelClosed) {
-        const result = await fetch(`${baseUrl}/api/auth/pair/poll`, {
+        const result = await fetchBackend(`${baseUrl}/api/auth/pair/poll`, {
           method: "POST",
           headers: {
             Accept: "application/json",
@@ -1047,7 +1139,7 @@ const vscode=acquireVsCodeApi();const github=document.getElementById('github');c
     if (message.type === "signIn") await startSignIn();
     if (message.type === "check") {
       try {
-        const response = await fetch(`${baseUrl}/api/auth/me`, {
+        const response = await fetchBackend(`${baseUrl}/api/auth/me`, {
           headers: { Accept: "application/json" },
         });
         if (response.ok)

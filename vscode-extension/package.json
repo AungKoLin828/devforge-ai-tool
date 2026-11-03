@@ -2,7 +2,7 @@
   "name": "codevia-ai",
   "displayName": "Codevia AI",
   "description": "Codevia AI coding assistant connected to your DevForge backend.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "CodeviaAI",
   "license": "UNLICENSED",
   "engines": {
@@ -18,6 +18,7 @@
     "onCommand:devforge.selectAiProvider",
     "onCommand:devforge.selectProject",
     "onCommand:devforge.signOut",
+    "onCommand:devforge.selectBackend",
     "onCommand:devforge.signIn",
     "onCommand:devforge.openChat",
     "onCommand:devforge.generateProject",
@@ -45,6 +46,11 @@
       {
         "command": "devforge.signOut",
         "title": "Codevia AI: Sign Out",
+        "category": "Codevia AI"
+      },
+      {
+        "command": "devforge.selectBackend",
+        "title": "Codevia AI: Select Backend",
         "category": "Codevia AI"
       },
       {
@@ -117,7 +123,7 @@
             "Use the deployed DevForge Netlify site."
           ],
           "default": "netlify",
-          "description": "Choose whether the extension uses your local DevForge backend or the hosted Netlify backend."
+          "description": "Choose whether Codevia AI uses your local development server or the hosted server. You can also use the Select Backend command."
         },
         "devforge.localBackendUrl": {
           "type": "string",

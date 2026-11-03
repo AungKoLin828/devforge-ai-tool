@@ -2,13 +2,13 @@
 
 Codevia AI adds a custom chat panel and coding commands to VS Code. Requests to create a new project from chat use the project-generation workflow and copy the generated files into your open workspace. If no workspace is open, VS Code asks you to choose a local destination folder. You review the file list and confirm before files are written; existing files are skipped unless you explicitly choose to overwrite them.
 
-The extension connects to the hosted DevForge backend by default and does not add or require an AI-provider API key inside the extension. The Local Agent is not required for the extension to save generated files to a folder on your PC.
+The extension connects to the hosted DevForge backend by default and does not add or require an AI-provider API key inside the extension. Use **Codevia AI: Select Backend** to switch between the hosted server and your local development server. The Local Agent is not required for the extension to save generated files to a folder on your PC.
 
 The Marketplace extension ID is `CodeviaAI.codevia-ai`. Publishing requires access to a VS Code Marketplace publisher named `CodeviaAI`.
 
 ## Choose local or Netlify backend
 
-The extension supports both environments without changing the DevForge web app or Netlify Functions. Open **VS Code Settings** (`Ctrl+,`) and search for **Codevia AI**:
+The extension supports both environments without changing the DevForge web app or Netlify Functions. Use **Codevia AI: Select Backend** from the Command Palette, or open **VS Code Settings** (`Ctrl+,`) and search for **Codevia AI**:
 
 - `Codevia AI Developer Tools: Backend Environment` = `local` or `netlify` (default).
 - `Local Backend Url` defaults to `http://localhost:8888`.
@@ -19,7 +19,7 @@ The extension supports both environments without changing the DevForge web app o
 1. Start the DevForge web app from its project root using `npm run dev:netlify`.
 2. Netlify CLI normally serves the app and functions at `http://localhost:8888`. Use that full origin in `Local Backend Url` if your port differs.
 3. Set `Backend Environment` to `local`.
-4. Run **Codevia AI: Sign In to Existing Account**. Sign in to the local app in the browser and copy the local `devforge_session` cookie value from browser DevTools. Local and hosted cookies are stored separately.
+4. Run **Codevia AI: Select Backend** and choose **Local development server**. Run **Codevia AI: Sign In to Existing Account** and complete GitHub sign-in in the browser. The extension stores the local session separately from the hosted session.
 
 Do not use the Vite-only `http://localhost:5173` URL unless your local setup also routes `/api/*` to the Netlify Functions. The extension needs the backend routes, not just the frontend dev server. HTTP is permitted only for loopback local development.
 
@@ -27,9 +27,9 @@ Do not use the Vite-only `http://localhost:5173` URL unless your local setup als
 
 1. Keep `Backend Environment` set to `netlify` (the default).
 2. Keep `Netlify Backend Url` set to your deployed site URL.
-3. Run **Codevia AI: Sign In to Existing Account** and copy the `devforge_session` cookie from the hosted site's browser session.
+3. Run **Codevia AI: Select Backend** and choose **Hosted server (Netlify)**. Run **Codevia AI: Sign In to Existing Account** and complete GitHub sign-in in the browser.
 
-When changing environments, sign in separately for each environment. The extension stores the two session cookie values separately. No AI provider API key is configured or stored by this extension; the selected backend must have a valid account session and AI provider configuration.
+When changing environments, sign in separately for each environment. The extension stores the two sessions separately. No AI provider API key is configured or stored by this extension; the selected backend must have an AI provider configured for your account.
 
 ## How the connection works
 
@@ -48,7 +48,7 @@ It does **not** call a new `/api/vscode/assistant` endpoint. AI provider credent
 - VS Code 1.85 or later.
 - Node.js 20 or later recommended for building.
 - An account on the selected local or hosted DevForge site.
-- A valid `devforge_session` session cookie from your own signed-in browser session.
+- A GitHub account on the selected backend.
 - At least one DevForge project, or permission to create one.
 - An AI provider configured for your account in the existing DevForge web app.
 - A writable local folder to use as the project destination. Open it in VS Code first, or select one when prompted.
@@ -67,31 +67,30 @@ npm run package
 Install the `.vsix` file produced by `npm run package`:
 
 ```powershell
-code --install-extension .\codevia-ai-1.0.0.vsix --force
+code --install-extension .\codevia-ai-1.0.1.vsix --force
 ```
 
 If the filename differs, use the actual `.vsix` file created by `npm run package`. Reload VS Code after installing.
 
 ## First-time setup: connect your existing DevForge account
 
-This version uses the existing session-based API. Since the current web backend has a browser cookie session but no extension-specific OAuth callback/token-exchange endpoint, the extension uses a one-time session-cookie handoff. This avoids changing the web app/backend and avoids an AI-provider API key in the extension.
+The extension uses one-time browser pairing to sign in, so you don't need to copy browser cookies into VS Code. Hosted and local sessions are stored separately.
 
 1. Open the DevForge website in your normal browser and sign in with GitHub.
 2. In VS Code, press `Ctrl+Shift+P`.
 3. Run **Codevia AI: Sign In to Existing Account**.
 4. The browser opens to your configured DevForge site. Make sure you have completed GitHub sign-in there.
-5. Open browser Developer Tools (`F12`). In Chrome/Edge, open **Application** → **Storage** → **Cookies** → your DevForge website. In Firefox, use **Storage** → **Cookies**.
-6. Find the cookie named `devforge_session`. Copy its **Value** only. Do not copy `devforge_oauth`, and do not paste the cookie into chat, source files, settings JSON, or Git.
-7. Return to VS Code and paste the `devforge_session` value into the password input. The extension validates it using `GET /api/auth/me` and stores it in VS Code SecretStorage.
-8. When prompted, run **Codevia AI: Select Project** and select an existing project, or create a new project.
+5. In the browser, sign in with GitHub and approve the one-time Codevia AI connection.
+6. Return to VS Code; the extension stores the session securely in VS Code SecretStorage.
+7. Run **Codevia AI: Select Project** and select an existing project, or create a new project.
 
-The extension does not read your browser cookies automatically. The cookie handoff is needed because the current backend does not provide a VS Code-specific sign-in callback. Session cookies are credentials: only use your own account, do not share them, and remove them from VS Code when finished on a shared computer.
+The pairing code expires after a short time and can only be used once. Sign in again separately after switching between local and hosted backends.
 
 ### Change project or sign out
 
 - Run **Codevia AI: Select Project** to change the DevForge project associated with extension requests.
-- Run **Codevia AI: Sign Out** to delete the saved session cookie from VS Code SecretStorage and clear the selected project. This does not sign you out of the browser or revoke the server session; use the web app's sign-out flow if you also want to end that session.
-- If your session expires, repeat the sign-in flow with a fresh cookie value.
+- Run **Codevia AI: Sign Out** to delete the saved session token from VS Code SecretStorage and clear the selected project. This does not sign you out of the browser or revoke the server session; use the web app's sign-out flow if you also want to end that session.
+- If your session expires, repeat browser pairing for the selected backend.
 
 ## Features
 
@@ -118,9 +117,13 @@ For code-changing operations, inspect the diff and test the result before commit
 
 ## Troubleshooting
 
+### `Could not connect to the Codevia backend`
+
+Run **Codevia AI: Select Backend** and confirm the correct server is selected. For the local backend, start the app with `npm run dev:netlify` and check `Local Backend Url`. For the hosted backend, check `Netlify Backend Url` and confirm your PC can reach the site.
+
 ### `Authentication required` or `session expired`
 
-Run **Codevia AI: Sign In to Existing Account** again and paste the current `devforge_session` cookie value. Ensure the cookie came from the exact same DevForge domain configured in Settings.
+Run **Codevia AI: Sign In to Existing Account** again and complete browser pairing for the selected backend.
 
 ### `AI provider is not configured`
 
@@ -147,11 +150,11 @@ Fix reported TypeScript errors before packaging. Use the filename actually produ
 ## Privacy and security
 
 - No AI-provider API key is bundled or requested by the extension.
-- The session cookie is stored using VS Code SecretStorage. Treat it as a password.
+- The session token is stored using VS Code SecretStorage. Treat it as a password.
 - Source code and prompts sent through chat are processed by the DevForge backend and configured AI provider. Do not send confidential code unless permitted by your organization and provider policy.
 - The extension skips common secret/config files and generated/dependency folders when scanning workspaces, but you should inspect included context before sending it.
-- Never commit the session cookie, `.env` files, API keys, or other credentials.
+- Never commit session tokens, `.env` files, API keys, or other credentials.
 
 ## Scope of this package
 
-This package modifies only the VS Code extension. It does not modify the DevForge web application, Netlify Functions, database schema, or local agent. The browser-cookie handoff is a compatibility workaround for the existing authentication design; a smoother GitHub sign-in inside VS Code would require backend support for an extension callback or token exchange, which this package intentionally does not add.
+This package modifies only the VS Code extension. It does not modify the DevForge web application, Netlify Functions, database schema, or local agent. Sign-in uses one-time browser pairing supported by the selected backend.

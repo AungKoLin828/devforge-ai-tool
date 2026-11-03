@@ -1525,7 +1525,7 @@ async function waitForRun(
   context: vscode.ExtensionContext,
   run: ProjectRunRef,
   onTick?: (status: string) => void | Promise<void>,
-): Promise<void> {
+): Promise<true> {
   const project = await ensureProject(context);
   const deadline = Date.now() + 20 * 60 * 1000;
   let lastStatus = "";
@@ -1543,7 +1543,7 @@ async function waitForRun(
       lastStatus = status;
       await onTick?.(status);
     }
-    if (status === "SUCCESS") return;
+    if (status === "SUCCESS") return true;
     if (status === "FAILED")
       throw new Error(
         result.run?.error || `The DevForge ${run.operation ?? "run"} failed.`,
@@ -1797,6 +1797,7 @@ async function openChat(
   provSave.addEventListener('click',()=>{provStatus.textContent='Saving…';provSave.disabled=true;vscode.postMessage({type:'saveProvider',provider:provSel.value,apiKey:provKey.value.trim(),model:provModel.value.trim(),baseUrl:provBase.value.trim()});});
   vscode.postMessage({type:'providerSelected',provider:provSel.value});
   function add(role,text){const d=document.createElement('div');d.className='msg '+role;d.textContent=text;messages.appendChild(d);messages.scrollTop=messages.scrollHeight;return d;}
+  function addReply(text,retryPrompt){const d=add('assistant',text);if(retryPrompt){const button=document.createElement('button');button.textContent='Retry project workflow';button.style.marginTop='8px';button.addEventListener('click',()=>{button.disabled=true;button.textContent='Retrying…';send.disabled=true;status.textContent='Retrying project workflow…';vscode.postMessage({type:'retryProject',prompt:retryPrompt});});d.appendChild(button);}return d;}
   function addStepRow(box,name){const r=document.createElement('div');r.className='step';const i=document.createElement('span');i.className='icon';i.textContent='·';const label=document.createElement('span');label.className='label';label.textContent=name;r.appendChild(i);r.appendChild(label);box.el.appendChild(r);box.rows.push(r);return r;}
   function addSteps(title,names){const d=document.createElement('div');d.className='steps';const t=document.createElement('div');t.className='title';const s=document.createElement('span');s.className='spin';const text=document.createElement('span');text.className='label';text.textContent=title;t.appendChild(s);t.appendChild(text);d.appendChild(t);const box={el:d,rows:[],title:text};for(const n of names)addStepRow(box,n);messages.appendChild(d);messages.scrollTop=messages.scrollHeight;return box;}
   send.addEventListener('click',()=>{const request=input.value.trim();if(!request)return;add('user',request);vscode.postMessage({type:'send',prompt:request,includeActiveFile:includeContext.checked});input.value='';send.disabled=true;status.textContent='Thinking…';});
@@ -1812,8 +1813,8 @@ async function openChat(
     if(m.type==='modelsLoaded'){modelList.innerHTML='';for(const id of m.models){const o=document.createElement('option');o.value=id;modelList.appendChild(o);}provStatus.textContent=m.models.length+' models loaded';}
     if(m.type==='providerSaved'){provStatus.textContent='Saved ✓';provKey.value='';provSave.disabled=false;}
     if(m.type==='providerError'){provStatus.textContent=m.text;provSave.disabled=false;}
-    if (m.type==='reply'){add('assistant',m.text);send.disabled=false;status.textContent=m.backend;input.focus();}
-    if(m.type==='error'){const d=add('assistant','Error: '+m.text);const retry=document.createElement('button');retry.textContent='Retry';retry.style.marginTop='6px';retry.addEventListener('click',()=>{d.remove();send.disabled=false;input.value=m.prompt||'';input.focus();if(input.value)send.click();});d.appendChild(retry);messages.scrollTop=messages.scrollHeight;send.disabled=false;status.textContent=m.backend;}
+    if (m.type==='reply'){addReply(m.text,m.retryPrompt);send.disabled=false;status.textContent=m.backend||'Ready';input.focus();}
+    if(m.type==='error'){if(m.retryPrompt){addReply('Error: '+m.text,m.retryPrompt);}else{const d=add('assistant','Error: '+m.text);const retry=document.createElement('button');retry.textContent='Retry';retry.style.marginTop='6px';retry.addEventListener('click',()=>{d.remove();send.disabled=false;input.value=m.prompt||'';input.focus();if(input.value)send.click();});d.appendChild(retry);}messages.scrollTop=messages.scrollHeight;send.disabled=false;status.textContent=m.backend;}
   });
   </script></body></html>`;
   panel.webview.onDidReceiveMessage(
@@ -1886,11 +1887,18 @@ async function openChat(
         }
         return;
       }
-      if (message.type !== "send" || typeof message.prompt !== "string") return;
+      const isRetry = message.type === "retryProject";
+      if (
+        (message.type !== "send" && !isRetry) ||
+        typeof message.prompt !== "string"
+      )
+        return;
       // Remember the last request so the webview Retry button can replay it.
       let lastPrompt = "";
       let lastIncludeContext = true;
       let activeStep = 0;
+      const projectRequest =
+        isRetry || isProjectGenerationRequest(message.prompt);
       try {
         const userPrompt = message.prompt.trim();
         if (!userPrompt)
@@ -1898,7 +1906,7 @@ async function openChat(
         lastPrompt = userPrompt;
         lastIncludeContext = message.includeActiveFile !== false;
 
-        if (isProjectGenerationRequest(userPrompt)) {
+        if (projectRequest) {
           await panel.webview.postMessage({
             type: "steps",
             id: "generate-project",
@@ -1953,7 +1961,10 @@ async function openChat(
           await panel.webview.postMessage({ type: "stepsDone" });
           await panel.webview.postMessage({
             type: "reply",
-            text: result ?? "Project generation was cancelled before files were saved.",
+            text:
+              result?.text ??
+              "Project generation was cancelled before files were saved.",
+            ...(result?.retryable ? { retryPrompt: userPrompt } : {}),
           });
           return;
         }
@@ -2190,6 +2201,7 @@ async function openChat(
           text,
           prompt: lastPrompt,
           includeContext: lastIncludeContext,
+          ...(projectRequest ? { retryPrompt: lastPrompt } : {}),
           backend: `Assistant request failed · ${getBackendUrl()}`,
         });
       }
@@ -2326,7 +2338,7 @@ async function generateProject(
     state: string,
     detail?: string,
   ) => Promise<void>,
-): Promise<string | undefined> {
+): Promise<{ text: string; retryable: boolean } | undefined> {
   const description =
     chatInstruction?.trim() ||
     (await vscode.window.showInputBox({
@@ -2361,18 +2373,42 @@ async function generateProject(
       `Codevia AI project generation failed to start: ${message}`,
     );
     await onProgress?.(1, "failed");
-    return `Could not start project generation: ${message}`;
+    return {
+      text: `Could not start project generation: ${message}`,
+      retryable: true,
+    };
   }
-  const completed = await withAiProgress(
-    "Codevia AI generating project in the background…",
-    () =>
-      waitForRun(context, run as ProjectRunRef, async (status) => {
-      await onProgress?.(1, "done", `Background run status: ${status}`);
-      }),
-  );
-  if (completed === undefined) {
+  try {
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Codevia AI generating project in the background…",
+        cancellable: false,
+      },
+      () =>
+        waitForRun(context, run as ProjectRunRef, async (status) => {
+          await onProgress?.(
+            1,
+            status === "SUCCESS" ? "done" : "running",
+            `Background run status: ${status}`,
+          );
+        }),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    output.appendLine(`Project generation run failed: ${message}`);
     await onProgress?.(1, "failed");
-    return "Project generation did not complete. Check the Codevia AI error notification for details.";
+    vscode.window.showErrorMessage(
+      `Codevia AI project generation failed: ${message}`,
+    );
+    return { text: `Project generation failed: ${message}`, retryable: true };
+  }
+  if (!run) {
+    await onProgress?.(1, "failed");
+    return {
+      text: "Project generation did not return a run to monitor.",
+      retryable: true,
+    };
   }
   await onProgress?.(1, "done");
   await onProgress?.(2, "running");
@@ -2391,15 +2427,22 @@ async function generateProject(
       `Codevia AI could not download generated project files: ${message}`,
     );
     await onProgress?.(2, "failed");
-    return undefined;
+    return {
+      text: `Could not download generated files: ${message}`,
+      retryable: true,
+    };
   }
-  await onProgress?.(2, "done");
   if (!files.length) {
+    await onProgress?.(2, "failed");
     vscode.window.showErrorMessage(
       "The generation run finished but saved no generated files.",
     );
-    return "The generation run completed, but the backend returned no generated files.";
+    return {
+      text: "The generation run completed, but the backend returned no generated files.",
+      retryable: true,
+    };
   }
+  await onProgress?.(2, "done");
   const preview = files.map((f) => f.path).join("\n");
   const picked = await vscode.window.showQuickPick(["Create Files", "Cancel"], {
     title: `Create ${files.length} project file(s)?`,
@@ -2407,7 +2450,10 @@ async function generateProject(
   });
   if (picked !== "Create Files") {
     await onProgress?.(3, "failed");
-    return "Project files were generated but not saved because file creation was cancelled.";
+    return {
+      text: "Project files were generated but not saved because file creation was cancelled.",
+      retryable: false,
+    };
   }
   await onProgress?.(3, "running");
   const result = await saveGeneratedFiles(
@@ -2443,7 +2489,12 @@ async function generateProject(
       ? "Codevia AI file saving was cancelled; no files were written."
       : `Codevia AI saved and verified ${result.saved.length} file(s) to ${folder.fsPath}; ${result.skipped.length} skipped, ${result.failed.length} failed.`,
   );
-  return [
+  const retryable =
+    !result.cancelled &&
+    (result.failed.length > 0 ||
+      result.saved.length + result.skipped.length === 0);
+  return {
+    text: [
     result.cancelled ? "File saving was cancelled; no files were written." : "",
     `Project save complete in ${folder.fsPath}: ${result.saved.length} file(s) saved and verified.`,
     result.saved.length
@@ -2463,7 +2514,9 @@ async function generateProject(
       : "",
   ]
     .filter(Boolean)
-    .join("\n\n");
+    .join("\n\n"),
+  retryable,
+  };
 }
 
 async function modifyCurrentFile(

@@ -2,7 +2,7 @@
   "name": "codevia-ai",
   "displayName": "Codevia AI",
   "description": "Codevia AI coding assistant connected to your DevForge backend.",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "publisher": "CodeviaAI",
   "license": "UNLICENSED",
   "engines": {

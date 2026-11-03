@@ -67,7 +67,7 @@ npm run package
 Install the `.vsix` file produced by `npm run package`:
 
 ```powershell
-code --install-extension .\codevia-ai-1.0.4.vsix --force
+code --install-extension .\codevia-ai-1.0.5.vsix --force
 ```
 
 If the filename differs, use the actual `.vsix` file created by `npm run package`. Reload VS Code after installing.
@@ -104,6 +104,7 @@ Open the Command Palette with `Ctrl+Shift+P` and search for `Codevia AI`.
 - **Fix Errors in Current File** — provide error details and review the proposed change before applying.
 - **Clear Findings** — clear DevForge review diagnostics.
 - **Chat file changes** — see assistant progress, save generated files to the open workspace or a folder you choose, verify each saved file, select changed files to review, and retry a failed project workflow.
+- **Chat action requests** — answer destination, create-files, overwrite/skip/cancel, and review prompts directly in the chat. Choosing a local folder opens the native folder picker.
 
 For code-changing operations, inspect the diff and test the result before committing or deploying. AI-generated code may be incorrect.
 

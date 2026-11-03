@@ -1627,11 +1627,18 @@ type GeneratedFileProgress = (
   total: number,
   state: "running" | "done" | "failed",
 ) => Promise<void>;
+type ChatActionOption = { value: string; label: string };
+type ChatActionRequest = (
+  title: string,
+  detail: string,
+  options: ChatActionOption[],
+) => Promise<string | undefined>;
 
 async function saveGeneratedFiles(
   files: GeneratedFile[],
   folder: vscode.Uri,
   onProgress?: GeneratedFileProgress,
+  requestAction?: ChatActionRequest,
 ): Promise<GeneratedFileSaveResult> {
   const result: GeneratedFileSaveResult = {
     saved: [],
@@ -1662,17 +1669,32 @@ async function saveGeneratedFiles(
 
   let overwriteExisting = false;
   if (existing.size) {
-    const choice = await vscode.window.showWarningMessage(
-      `${existing.size} generated file(s) already exist in ${folder.fsPath}.`,
-      "Skip Existing (safer)",
-      "Overwrite Existing",
-      "Cancel",
-    );
-    if (!choice || choice === "Cancel") {
+    const detail = `${existing.size} generated file(s) already exist in ${folder.fsPath}:\n${[...existing].join("\n")}`;
+    const choice = requestAction
+      ? await requestAction("Files already exist", detail, [
+          { value: "skip", label: "Skip Existing" },
+          { value: "overwrite", label: "Overwrite Existing" },
+          { value: "cancel", label: "Cancel" },
+        ])
+      : await vscode.window
+          .showWarningMessage(
+            detail,
+            "Skip Existing (safer)",
+            "Overwrite Existing",
+            "Cancel",
+          )
+          .then((value) =>
+            value === "Overwrite Existing"
+              ? "overwrite"
+              : value === "Skip Existing (safer)"
+                ? "skip"
+                : "cancel",
+          );
+    if (!choice || choice === "cancel" || choice === "Cancel") {
       result.cancelled = true;
       return result;
     }
-    overwriteExisting = choice === "Overwrite Existing";
+    overwriteExisting = choice === "overwrite" || choice === "Overwrite Existing";
   }
 
   for (const [index, file] of files.entries()) {
@@ -1718,9 +1740,22 @@ async function saveGeneratedFiles(
   return result;
 }
 
-async function chooseGeneratedFilesFolder(): Promise<vscode.Uri | undefined> {
+async function chooseGeneratedFilesFolder(
+  requestAction?: ChatActionRequest,
+): Promise<vscode.Uri | undefined> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
   if (workspaceFolder) return workspaceFolder;
+  if (requestAction) {
+    const action = await requestAction(
+      "Choose where to save generated files",
+      "No workspace folder is open. Choose a local folder to save the generated files.",
+      [
+        { value: "choose", label: "Choose Folder" },
+        { value: "cancel", label: "Cancel" },
+      ],
+    );
+    if (action !== "choose") return undefined;
+  }
   const selected = await vscode.window.showOpenDialog({
     canSelectFiles: false,
     canSelectFolders: true,
@@ -1734,19 +1769,35 @@ async function chooseGeneratedFilesFolder(): Promise<vscode.Uri | undefined> {
 async function reviewSavedGeneratedFiles(
   folder: vscode.Uri,
   savedPaths: string[],
+  requestAction?: ChatActionRequest,
 ): Promise<void> {
   if (!savedPaths.length) return;
-  const selected = await vscode.window.showQuickPick(
-    savedPaths.map((path) => ({ label: path })),
-    {
-      canPickMany: true,
-      title: `Review ${savedPaths.length} changed file(s)`,
-      placeHolder: "Select files to open and review, or dismiss to review later",
-    },
-  );
-  for (const item of selected ?? []) {
+  const shouldOpen = requestAction
+    ? (await requestAction(
+        `Review ${savedPaths.length} changed file(s)`,
+        savedPaths.join("\n"),
+        [
+          { value: "open", label: "Open Changed Files" },
+          { value: "done", label: "Review Later" },
+        ],
+      )) === "open"
+    : true;
+  if (!shouldOpen) return;
+  const paths = requestAction
+    ? savedPaths
+    : (
+        (await vscode.window.showQuickPick(
+          savedPaths.map((path) => ({ label: path })),
+          {
+            canPickMany: true,
+            title: `Review ${savedPaths.length} changed file(s)`,
+            placeHolder: "Select files to open and review, or dismiss to review later",
+          },
+        )) ?? []
+      ).map((item) => item.label);
+  for (const path of paths) {
     const document = await vscode.workspace.openTextDocument(
-      vscode.Uri.joinPath(folder, ...item.label.split("/")),
+      vscode.Uri.joinPath(folder, ...path.split("/")),
     );
     await vscode.window.showTextDocument(document, { preview: false });
   }
@@ -1786,6 +1837,40 @@ async function openChat(
     vscode.Uri.joinPath(context.extensionUri, "media", "CodeviaAI.png"),
   );
   const nonce = String(Date.now());
+  const pendingChatActions = new Map<
+    string,
+    (choice: string | undefined) => void
+  >();
+  let actionSequence = 0;
+  const requestChatAction: ChatActionRequest = (title, detail, options) =>
+    new Promise((resolve, reject) => {
+      const id = `${Date.now()}-${actionSequence++}`;
+      pendingChatActions.set(id, resolve);
+      void panel.webview
+        .postMessage({
+          type: "actionRequest",
+          id,
+          title,
+          detail,
+          options,
+        })
+        .then(
+          (posted) => {
+            if (!posted) {
+              pendingChatActions.delete(id);
+              resolve(undefined);
+            }
+          },
+          (error: unknown) => {
+            pendingChatActions.delete(id);
+            reject(error);
+          },
+        );
+    });
+  panel.onDidDispose(() => {
+    for (const resolve of pendingChatActions.values()) resolve(undefined);
+    pendingChatActions.clear();
+  });
   panel.webview.html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${panel.webview.cspSource} https:; style-src ${panel.webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><title>Codevia AI</title><style>
   :root{color-scheme:dark;--bg:var(--vscode-sideBar-background);--panel:var(--vscode-editor-background);--fg:var(--vscode-foreground);--border:var(--vscode-panel-border);--accent:var(--vscode-button-background)}*{box-sizing:border-box}body{margin:0;padding:0;background:var(--bg);color:var(--fg);font:13px var(--vscode-font-family)}header{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)}header img{width:40px;height:40px;object-fit:contain;border-radius:8px}header h1{font-size:15px;margin:0 0 2px}header p{margin:0;opacity:.7;font-size:11px}.wrap{height:calc(100vh - 70px);display:flex;flex-direction:column}.messages{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}.msg{padding:9px 12px;border:1px solid var(--border);border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}.user{background:var(--vscode-textBlockQuote-background);align-self:flex-end;max-width:92%}.assistant{background:var(--panel);align-self:stretch}.steps{background:var(--panel);align-self:stretch;border:1px solid var(--border);border-radius:10px;padding:9px 12px;font-size:12px}.steps .title{font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px}.steps .spin{display:inline-block;width:11px;height:11px;border:2px solid var(--vscode-panel-border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}.steps.done .spin{display:none}.steps .step{display:flex;align-items:center;gap:7px;padding:2px 0;color:var(--vscode-descriptionForeground)}.steps .step .icon{width:13px;text-align:center;flex:none}.steps .step .label{overflow-wrap:anywhere}.steps .step.running{color:var(--fg)}.steps .step.done{color:var(--vscode-charts-green)}.steps .step.failed{color:var(--vscode-errorForeground)}@keyframes spin{to{transform:rotate(360deg)}}.status{font-size:11px;opacity:.7;padding:0 14px 4px}.settings{border-bottom:1px solid var(--border)}.settings details{padding:0 14px}.settings summary{cursor:pointer;padding:8px 0;font-size:12px;opacity:.85}.settings .setbody{display:flex;flex-direction:column;gap:8px;padding:4px 0 12px}.settings label{display:flex;flex-direction:column;gap:3px;font-size:11px;opacity:.9}.settings select{appearance:none;-webkit-appearance:none;background-color:var(--vscode-dropdown-background,var(--panel))!important;color:var(--vscode-dropdown-foreground,var(--fg))!important}.settings select,.settings input{padding:5px 8px;border:1px solid var(--border);border-radius:4px;background:var(--panel);color:var(--fg);font:inherit;font-size:12px}.settings .modelrow{display:flex;gap:6px}.settings .modelrow input{flex:1}input[list]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.8}datalist{background:var(--panel);color:var(--fg)}datalist option{background:var(--vscode-dropdown-background,var(--panel));color:var(--vscode-dropdown-foreground,var(--fg));padding:4px 8px}.settings .modelrow button{padding:4px 9px;font-size:12px;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);border:0;border-radius:4px;cursor:pointer}.settings .setrow{display:flex;align-items:center;justify-content:space-between;gap:8px}.settings #provStatus{font-size:11px;opacity:.75}.settings #provSave{background:var(--accent);color:var(--vscode-button-foreground);border:0;border-radius:4px;padding:6px 14px;cursor:pointer}.compose{padding:10px 12px 12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px}textarea{width:100%;resize:vertical;min-height:70px;max-height:220px;color:var(--fg);background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:9px;font:inherit}button{align-self:flex-end;background:var(--accent);color:var(--vscode-button-foreground);border:0;border-radius:5px;padding:7px 14px;cursor:pointer}button:disabled{opacity:.5} .hint{font-size:11px;opacity:.7}
   </style></head><body><header><img src="${logo}" alt="Codevia AI logo"><div><h1>Codevia AI</h1><p>Copilot-style assistant · dedicated assistant API</p></div></header><div class="settings"><details><summary>⚙ AI provider &amp; API key</summary><div class="setbody"><label>Provider<select id="provSel"><option value="OPENROUTER">OpenRouter</option><option value="OPENAI">OpenAI</option><option value="CUSTOM">Custom OpenAI-compatible</option></select></label><label>Base URL (Custom only)<input id="provBase" placeholder="https://api.example.com/v1" spellcheck="false"></label><label>API key<input id="provKey" type="password" placeholder="Leave blank to keep saved key" autocomplete="off"></label><label>Model<div class="modelrow"><input id="provModel" list="modelList" placeholder="Model ID" spellcheck="false"><datalist id="modelList"></datalist><button id="loadModels" type="button" title="Load available models">↻</button></div></label><div class="setrow"><span id="provStatus"></span><button id="provSave">Save</button></div></div></details></div><div class="wrap"><div id="messages" class="messages"><div class="msg assistant">Hi! I'm Codevia AI. Ask me anything, or describe a feature and I'll run the workflow: plan → generate → save files to your workspace.</div></div><div id="status" class="status">Backend: ${escapeHtml(getBackendUrl())} · POST /api/assistant/chat</div><div class="compose"><textarea id="prompt" placeholder="Ask Codevia AI anything — build a feature, review code, explain, generate tests, or modify files…"></textarea><label class="hint"><input type="checkbox" id="includeContext" checked> Include the active source file as context (sensitive files are excluded)</label><button id="send">Send</button></div></div><script nonce="${nonce}">
@@ -1797,12 +1882,15 @@ async function openChat(
   provSave.addEventListener('click',()=>{provStatus.textContent='Saving…';provSave.disabled=true;vscode.postMessage({type:'saveProvider',provider:provSel.value,apiKey:provKey.value.trim(),model:provModel.value.trim(),baseUrl:provBase.value.trim()});});
   vscode.postMessage({type:'providerSelected',provider:provSel.value});
   function add(role,text){const d=document.createElement('div');d.className='msg '+role;d.textContent=text;messages.appendChild(d);messages.scrollTop=messages.scrollHeight;return d;}
+  function addActionRequest(m){const d=add('assistant','');const title=document.createElement('strong');title.textContent=m.title;const detail=document.createElement('div');detail.style.whiteSpace='pre-wrap';detail.style.marginTop='6px';detail.textContent=m.detail||'';const actions=document.createElement('div');actions.style.display='flex';actions.style.flexWrap='wrap';actions.style.gap='6px';actions.style.marginTop='10px';for(const option of m.options||[]){const button=document.createElement('button');button.type='button';button.textContent=option.label;button.addEventListener('click',()=>{for(const other of actions.querySelectorAll('button'))other.disabled=true;button.textContent=option.label+' ✓';vscode.postMessage({type:'actionResponse',actionId:m.id,choice:option.value});status.textContent='Working…';});actions.appendChild(button);}d.appendChild(title);d.appendChild(detail);d.appendChild(actions);status.textContent='Action required: '+m.title;messages.scrollTop=messages.scrollHeight;}
   function addReply(text,retryPrompt){const d=add('assistant',text);if(retryPrompt){const button=document.createElement('button');button.textContent='Retry project workflow';button.style.marginTop='8px';button.addEventListener('click',()=>{button.disabled=true;button.textContent='Retrying…';send.disabled=true;status.textContent='Retrying project workflow…';vscode.postMessage({type:'retryProject',prompt:retryPrompt});});d.appendChild(button);}return d;}
   function addStepRow(box,name){const r=document.createElement('div');r.className='step';const i=document.createElement('span');i.className='icon';i.textContent='·';const label=document.createElement('span');label.className='label';label.textContent=name;r.appendChild(i);r.appendChild(label);box.el.appendChild(r);box.rows.push(r);return r;}
   function addSteps(title,names){const d=document.createElement('div');d.className='steps';const t=document.createElement('div');t.className='title';const s=document.createElement('span');s.className='spin';const text=document.createElement('span');text.className='label';text.textContent=title;t.appendChild(s);t.appendChild(text);d.appendChild(t);const box={el:d,rows:[],title:text};for(const n of names)addStepRow(box,n);messages.appendChild(d);messages.scrollTop=messages.scrollHeight;return box;}
   send.addEventListener('click',()=>{const request=input.value.trim();if(!request)return;add('user',request);vscode.postMessage({type:'send',prompt:request,includeActiveFile:includeContext.checked});input.value='';send.disabled=true;status.textContent='Thinking…';});
   input.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter')send.click();});
   window.addEventListener('message',event=>{const m=event.data;
+    if(m.type==='actionRequest')addActionRequest(m);
+    if(m.type==='status')status.textContent=m.text;
     if(m.type==='steps'){const b=addSteps(m.title,m.names);window.__steps=m.id;window.__stepBox=b;}
     if(m.type==='stepAdd'){const b=window.__stepBox;if(b){addStepRow(b,m.name);messages.scrollTop=messages.scrollHeight;}}
     if(m.type==='stepTitle'){const b=window.__stepBox;if(b)b.title.textContent=m.title;}
@@ -1821,12 +1909,22 @@ async function openChat(
     async (message: {
       type?: string;
       prompt?: string;
+      actionId?: string;
+      choice?: string;
       includeActiveFile?: boolean;
       provider?: string;
       apiKey?: string;
       model?: string;
       baseUrl?: string;
     }) => {
+      if (message.type === "actionResponse" && message.actionId) {
+        const resolve = pendingChatActions.get(message.actionId);
+        if (resolve) {
+          pendingChatActions.delete(message.actionId);
+          resolve(message.choice);
+        }
+        return;
+      }
       if (message.type === "providerSelected" && message.provider) {
         try {
           const providers = await listProviderInfos(context);
@@ -1956,6 +2054,7 @@ async function openChat(
             output,
             userPrompt,
             generationProgress,
+            requestChatAction,
           );
           await generationProgress(0, result ? "done" : "failed");
           await panel.webview.postMessage({ type: "stepsDone" });
@@ -2085,7 +2184,7 @@ async function openChat(
             title: `Saving and verifying ${generated.length} generated file(s)`,
           });
           await step(2, "running");
-          const folder = await chooseGeneratedFilesFolder();
+          const folder = await chooseGeneratedFilesFolder(requestChatAction);
           if (!folder) {
             await step(2, "failed");
             await panel.webview.postMessage({ type: "stepsDone" });
@@ -2121,6 +2220,7 @@ async function openChat(
               if (state === "done" && stage === "saving")
                 output.appendLine(`Saved generated file: ${path}`);
             },
+            requestChatAction,
           );
           await step(2, result.failed.length ? "failed" : "done");
           await step(3, result.failed.length ? "failed" : "done");
@@ -2133,7 +2233,11 @@ async function openChat(
           }
           await step(4, result.written.length ? "running" : "done");
           if (result.written.length) {
-            await reviewSavedGeneratedFiles(folder, result.written);
+            await reviewSavedGeneratedFiles(
+              folder,
+              result.written,
+              requestChatAction,
+            );
             await step(4, "done");
           }
           output.show(true);
@@ -2338,6 +2442,7 @@ async function generateProject(
     state: string,
     detail?: string,
   ) => Promise<void>,
+  requestAction?: ChatActionRequest,
 ): Promise<{ text: string; retryable: boolean } | undefined> {
   const description =
     chatInstruction?.trim() ||
@@ -2352,14 +2457,7 @@ async function generateProject(
   if (!description?.trim()) return undefined;
   let folder = vscode.workspace.workspaceFolders?.[0]?.uri;
   if (!folder) {
-    const selected = await vscode.window.showOpenDialog({
-      canSelectFiles: false,
-      canSelectFolders: true,
-      canSelectMany: false,
-      openLabel: "Select Project Folder",
-      title: "Choose where Codevia AI should save the generated project",
-    });
-    folder = selected?.[0];
+    folder = await chooseGeneratedFilesFolder(requestAction);
     if (!folder) return undefined;
   }
   await onProgress?.(0, "done");
@@ -2444,11 +2542,20 @@ async function generateProject(
   }
   await onProgress?.(2, "done");
   const preview = files.map((f) => f.path).join("\n");
-  const picked = await vscode.window.showQuickPick(["Create Files", "Cancel"], {
-    title: `Create ${files.length} project file(s)?`,
-    placeHolder: preview.slice(0, 900),
-  });
-  if (picked !== "Create Files") {
+  const createFiles = requestAction
+    ? (await requestAction(
+        `Create ${files.length} project file(s)?`,
+        preview,
+        [
+          { value: "create", label: "Create Files" },
+          { value: "cancel", label: "Cancel" },
+        ],
+      )) === "create"
+    : (await vscode.window.showQuickPick(["Create Files", "Cancel"], {
+        title: `Create ${files.length} project file(s)?`,
+        placeHolder: preview.slice(0, 900),
+      })) === "Create Files";
+  if (!createFiles) {
     await onProgress?.(3, "failed");
     return {
       text: "Project files were generated but not saved because file creation was cancelled.",
@@ -2468,6 +2575,7 @@ async function generateProject(
       if (stage === "saving" && state === "done")
         output.appendLine(`Saved generated file: ${path}`);
     },
+    requestAction,
   );
   for (const failed of result.failed) {
     output.appendLine(
@@ -2477,7 +2585,7 @@ async function generateProject(
   await onProgress?.(3, result.failed.length ? "failed" : "done");
   await onProgress?.(4, result.written.length ? "running" : "done");
   if (result.written.length) {
-    await reviewSavedGeneratedFiles(folder, result.written);
+    await reviewSavedGeneratedFiles(folder, result.written, requestAction);
     await onProgress?.(4, "done");
   }
   output.show(true);

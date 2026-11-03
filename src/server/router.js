@@ -12,6 +12,23 @@ const redirect = (url, status = 302) => new Response(null, {
     status,
     headers: { Location: url },
 });
+function getSafeReturnPath(value, origin) {
+    if (!value ||
+        value.length > 2048 ||
+        !value.startsWith("/") ||
+        value.startsWith("//"))
+        return undefined;
+    try {
+        const target = new URL(value, origin);
+        if (target.origin !== origin.origin)
+            return undefined;
+        const path = `${target.pathname}${target.search}${target.hash}`;
+        return encodeURIComponent(path).length <= 2000 ? path : undefined;
+    }
+    catch {
+        return undefined;
+    }
+}
 function isAIProvider(value) {
     return value === "OPENROUTER" || value === "OPENAI" || value === "CUSTOM";
 }
@@ -53,7 +70,8 @@ export async function handleApi(req) {
             }
             const state = randomToken();
             const secure = url.protocol === "https:" ? " Secure;" : "";
-            const oauthCookie = `devforge_oauth=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600;${secure}`;
+            const returnTo = getSafeReturnPath(url.searchParams.get("returnTo"), url);
+            const oauthCookie = `devforge_oauth=${state}${returnTo ? `.${encodeURIComponent(returnTo)}` : ""}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600;${secure}`;
             const response = redirect(githubLoginUrl(state, oauthConfig));
             response.headers.set("set-cookie", oauthCookie);
             return response;
@@ -62,11 +80,13 @@ export async function handleApi(req) {
             const code = url.searchParams.get("code");
             const state = url.searchParams.get("state");
             const requestCookie = req.headers.get("cookie") || "";
-            const expected = requestCookie
+            const oauthValue = requestCookie
                 .split(";")
                 .map((item) => item.trim())
                 .find((item) => item.startsWith("devforge_oauth="))
                 ?.slice("devforge_oauth=".length);
+            const separator = oauthValue?.indexOf(".") ?? -1;
+            const expected = separator < 0 ? oauthValue : oauthValue?.slice(0, separator);
             if (!code) {
                 return error("GitHub did not return an authorization code. Start sign-in again.", 400);
             }
@@ -78,6 +98,15 @@ export async function handleApi(req) {
             }
             if (state !== expected) {
                 return error("OAuth state did not match. Sign-in started on a different site or an older login attempt was reused. Start again from the same site.", 400);
+            }
+            let returnTo;
+            if (separator >= 0 && oauthValue) {
+                try {
+                    returnTo = getSafeReturnPath(decodeURIComponent(oauthValue.slice(separator + 1)), url);
+                }
+                catch {
+                    returnTo = undefined;
+                }
             }
             let oauthConfig;
             try {
@@ -105,7 +134,11 @@ export async function handleApi(req) {
             return new Response(null, {
                 status: 302,
                 headers: {
-                    Location: localHost ? `${url.origin}/` : process.env.APP_URL || "/",
+                    Location: returnTo
+                        ? new URL(returnTo, url.origin).href
+                        : localHost
+                            ? `${url.origin}/`
+                            : process.env.APP_URL || "/",
                     "Set-Cookie": sessionCookie,
                 },
             });

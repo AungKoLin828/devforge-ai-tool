@@ -7,6 +7,7 @@ const PROVIDER_STATE_KEY_PREFIX = "devforge.selectedAiProvider";
 const WELCOME_SHOWN_KEY = "devforge.welcomeShown";
 const DEFAULT_PROVIDER = "OPENROUTER" as const;
 type ProviderId = "OPENROUTER" | "OPENAI" | "CUSTOM";
+type BackendEnvironment = "local" | "netlify";
 type ProviderInfo = {
   provider: string;
   label: string;
@@ -90,7 +91,15 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.languages.createDiagnosticCollection("devforge-ai");
   context.subscriptions.push(output, diagnostics);
   context.subscriptions.push(
-    vscode.commands.registerCommand("devforge.signIn", () => signIn(context)),
+    vscode.commands.registerCommand("devforge.signIn", () =>
+      chooseSignInBackend(context),
+    ),
+    vscode.commands.registerCommand("devforge.signInLocal", () =>
+      signIn(context, "local"),
+    ),
+    vscode.commands.registerCommand("devforge.signInNetlify", () =>
+      signIn(context, "netlify"),
+    ),
     vscode.commands.registerCommand("devforge.signOut", () => signOut(context)),
     vscode.commands.registerCommand("devforge.selectBackend", () =>
       selectBackend(),
@@ -136,7 +145,7 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.showInformationMessage("Codevia AI findings cleared.");
     }),
   );
-  // Sidebar icon shortcut tree; shows only Sign In until authenticated.
+  // Sidebar shortcuts include sign-in for either backend.
   commandsTree = new CodeviaCommandsTree(context);
   const treeView = vscode.window.createTreeView("devforgeCommandsView", {
     treeDataProvider: commandsTree,
@@ -181,8 +190,8 @@ async function showFirstRunWelcome(
 
 /**
  * Sidebar command tree for the Codevia AI Activity Bar view. Each entry has an
- * icon and runs its command when clicked. Before the user is authenticated
- * only the Sign In entry is shown.
+ * icon and runs its command when clicked. Both backend sign-in commands remain
+ * available so each environment can be connected independently.
  */
 class CodeviaCommandsTree implements vscode.TreeDataProvider<vscode.TreeItem> {
   private emitter = new vscode.EventEmitter<void>();
@@ -213,25 +222,60 @@ class CodeviaCommandsTree implements vscode.TreeDataProvider<vscode.TreeItem> {
         return treeItem;
       };
       if (!authenticated) {
-        return [item("devforge.signIn", "Sign In to Codevia AI…", "sign-in")];
+        return [
+          item(
+            "devforge.signInLocal",
+            "Sign In to Local Backend…",
+            "device-desktop",
+          ),
+          item(
+            "devforge.signInNetlify",
+            "Sign In to Hosted Backend…",
+            "cloud",
+          ),
+          item("devforge.selectBackend", "Select Backend", "server-environment"),
+        ];
       }
       // All processes run from chat; the sidebar only opens chat and manages
       // the account. Generate/review/modify/tests/error analysis stay available
       // as commands (chat routes work to them) but are not listed here.
       return [
         item("devforge.openChat", "Open Chat (Ctrl+Alt+D)", "comment"),
+        item(
+          "devforge.signInLocal",
+          "Sign In to Local Backend…",
+          "device-desktop",
+        ),
+        item(
+          "devforge.signInNetlify",
+          "Sign In to Hosted Backend…",
+          "cloud",
+        ),
+        item("devforge.selectBackend", "Select Backend", "server-environment"),
         item("devforge.clearFindings", "Clear Findings", "clear-all"),
         item("devforge.signOut", "Sign Out", "sign-out"),
       ];
     } catch (error) {
-      // Never let the sidebar render as an error state; fall back to Sign In.
+      // Never let an auth lookup failure hide the direct backend sign-in commands.
       const fallback = new vscode.TreeItem(
-        "Sign In to Codevia AI…",
+        "Sign In to Hosted Backend…",
         vscode.TreeItemCollapsibleState.None,
       );
-      fallback.command = { command: "devforge.signIn", title: "Sign In" };
-      fallback.iconPath = new vscode.ThemeIcon("sign-in");
-      return [fallback];
+      fallback.command = {
+        command: "devforge.signInNetlify",
+        title: "Sign In to Hosted Backend",
+      };
+      fallback.iconPath = new vscode.ThemeIcon("cloud");
+      const local = new vscode.TreeItem(
+        "Sign In to Local Backend…",
+        vscode.TreeItemCollapsibleState.None,
+      );
+      local.command = {
+        command: "devforge.signInLocal",
+        title: "Sign In to Local Backend",
+      };
+      local.iconPath = new vscode.ThemeIcon("device-desktop");
+      return [local, fallback];
     }
   }
 
@@ -802,12 +846,8 @@ type ApiProject = {
   status?: string;
 };
 
-function getBackendUrl(): string {
+function getBackendUrl(environment = getBackendEnvironment()): string {
   const config = vscode.workspace.getConfiguration("devforge");
-  const environment = config.get<"local" | "netlify">(
-    "backendEnvironment",
-    "netlify",
-  );
   const key = environment === "local" ? "localBackendUrl" : "netlifyBackendUrl";
   const fallback =
     environment === "local"
@@ -816,15 +856,15 @@ function getBackendUrl(): string {
   return String(config.get(key, fallback)).trim().replace(/\/+$/, "");
 }
 
-function getBackendEnvironment(): "local" | "netlify" {
+function getBackendEnvironment(): BackendEnvironment {
   return vscode.workspace
     .getConfiguration("devforge")
-    .get<"local" | "netlify">("backendEnvironment", "netlify");
+    .get<BackendEnvironment>("backendEnvironment", "netlify");
 }
 
-function getSessionSecretKey(): string {
+function getSessionSecretKey(environment = getBackendEnvironment()): string {
   // Keep local and hosted sessions separate so switching environments never sends the wrong cookie.
-  return `${SESSION_SECRET_KEY_PREFIX}:${getBackendEnvironment()}`;
+  return `${SESSION_SECRET_KEY_PREFIX}:${environment}`;
 }
 
 function getProjectStateKey(): string {
@@ -975,6 +1015,7 @@ async function selectBackend(): Promise<void> {
     await vscode.workspace
       .getConfiguration("devforge")
       .update("backendEnvironment", choice.environment, target);
+    refreshCommandsTree();
     vscode.window.showInformationMessage(
       `Codevia AI will use the ${choice.environment === "local" ? "local" : "hosted"} backend at ${choice.description}. Sign in to that backend to continue.`,
     );
@@ -991,6 +1032,28 @@ function getConfigString(key: string, fallback: string): string {
   ).trim();
 }
 
+async function chooseSignInBackend(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const options = [
+    {
+      label: "Hosted server (Netlify)",
+      description: getBackendUrl("netlify"),
+      environment: "netlify" as const,
+    },
+    {
+      label: "Local development server",
+      description: getBackendUrl("local"),
+      environment: "local" as const,
+    },
+  ];
+  const choice = await vscode.window.showQuickPick(options, {
+    title: "Codevia AI: Sign In",
+    placeHolder: "Choose the backend to connect (independent of the active backend)",
+  });
+  if (choice) await signIn(context, choice.environment);
+}
+
 /**
  * Automated sign-in via device pairing:
  *  1. The extension asks the backend for a one-time pairing code.
@@ -999,8 +1062,11 @@ function getConfigString(key: string, fallback: string): string {
  *  3. The extension polls the backend and receives the session token, which is
  *     stored in SecretStorage. No cookie copying is ever required.
  */
-async function signIn(context: vscode.ExtensionContext): Promise<void> {
-  const baseUrl = getBackendUrl();
+async function signIn(
+  context: vscode.ExtensionContext,
+  environment = getBackendEnvironment(),
+): Promise<void> {
+  const baseUrl = getBackendUrl(environment);
   if (!isAllowedBackendUrl(baseUrl)) {
     vscode.window.showErrorMessage(
       "Invalid backend URL. Use HTTPS for Netlify or localhost HTTP for local development.",
@@ -1015,10 +1081,8 @@ async function signIn(context: vscode.ExtensionContext): Promise<void> {
     { enableScripts: true, retainContextWhenHidden: true },
   );
   const nonce = getNonce();
-  const environment =
-    getBackendEnvironment() === "local"
-      ? "Local development"
-      : "Netlify hosted";
+  const environmentLabel =
+    environment === "local" ? "Local development" : "Netlify hosted";
   const logoUri = panel.webview.asWebviewUri(
     vscode.Uri.joinPath(context.extensionUri, "media", "CodeviaAI.png"),
   );
@@ -1029,7 +1093,7 @@ async function signIn(context: vscode.ExtensionContext): Promise<void> {
 :root{color-scheme:dark;--bg:#080d18;--panel:#101827;--line:#263449;--muted:#9aa9bd;--text:#edf3ff;--blue:#5b8cff;--cyan:#65d5e8}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -20%,#1c3760 0,transparent 55%),var(--bg);color:var(--text);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh;display:grid;place-items:center;padding:24px}
 .shell{width:100%;max-width:440px}.brand{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:24px}.brand img{width:52px;height:52px;object-fit:contain;border-radius:13px}.brand h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.2px}.brand p{margin:2px 0 0;color:var(--muted);font-size:12px}.card{border:1px solid var(--line);background:linear-gradient(160deg,rgba(20,32,51,.97),rgba(12,19,31,.98));border-radius:18px;padding:28px;box-shadow:0 22px 70px #0006}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:1.7px;color:var(--cyan);font-weight:700}.card h2{font-size:25px;line-height:1.25;margin:9px 0 10px}.desc{color:var(--muted);margin:0 0 22px}.env{display:flex;align-items:center;gap:10px;border:1px solid var(--line);background:#0b1321;border-radius:10px;padding:12px;margin-bottom:18px}.dot{width:9px;height:9px;border-radius:50%;background:#56d6a0;box-shadow:0 0 12px #56d6a066}.env strong{display:block;font-size:13px}.env small{display:block;color:var(--muted);font-size:11px}.btn{width:100%;border:0;border-radius:10px;padding:12px 16px;font:600 14px inherit;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;min-height:45px}.primary{background:linear-gradient(100deg,#4d7cff,#5b9cff);color:white;box-shadow:0 8px 24px #4b7dff35}.primary:hover{filter:brightness(1.08)}.secondary{margin-top:10px;border:1px solid var(--line);background:#121e30;color:var(--text)}.btn:disabled{opacity:.55;cursor:wait}.status{min-height:44px;margin-top:15px;padding:10px 12px;border-radius:9px;background:#0b1320;color:var(--muted);font-size:12px}.status.good{color:#8ee3bd}.status.error{color:#ffb4b4}.foot{color:#74849b;font-size:11px;text-align:center;margin-top:17px}.shield{display:inline-block;margin-right:4px}
-</style></head><body><main class="shell"><div class="brand"><img src="${logoUri}" alt="Codevia AI"><div><h1>Codevia AI</h1><p>Developer tools for VS Code</p></div></div><section class="card"><div class="eyebrow">Secure account connection</div><h2>Sign in to continue</h2><p class="desc">Connect your DevForge account to use AI chat, code review, project generation, and other coding tools from VS Code.</p><div class="env"><span class="dot"></span><div><strong>${escapeHtml(environment)}</strong><small>${escapeHtml(baseUrl)}</small></div></div><button class="btn primary" id="github"><span>↗</span> Continue with GitHub</button><button class="btn secondary" id="retry">Check connection</button><div id="status" class="status" role="status">A browser window will open so you can sign in securely. No AI provider API key is needed in VS Code.</div></section><div class="foot"><span class="shield">◆</span> Your session is stored securely using VS Code SecretStorage.</div></main>
+</style></head><body><main class="shell"><div class="brand"><img src="${logoUri}" alt="Codevia AI"><div><h1>Codevia AI</h1><p>Developer tools for VS Code</p></div></div><section class="card"><div class="eyebrow">Secure account connection</div><h2>Sign in to continue</h2><p class="desc">Connect your DevForge account to use AI chat, code review, project generation, and other coding tools from VS Code.</p><div class="env"><span class="dot"></span><div><strong>${escapeHtml(environmentLabel)}</strong><small>${escapeHtml(baseUrl)}</small></div></div><button class="btn primary" id="github"><span>↗</span> Continue with GitHub</button><button class="btn secondary" id="retry">Check connection</button><div id="status" class="status" role="status">A browser window will open so you can sign in securely. No AI provider API key is needed in VS Code.</div></section><div class="foot"><span class="shield">◆</span> Your session is stored securely using VS Code SecretStorage.</div></main>
 <script nonce="${nonce}">
 const vscode=acquireVsCodeApi();const github=document.getElementById('github');const retry=document.getElementById('retry');const status=document.getElementById('status');function busy(text){github.disabled=true;retry.disabled=true;status.className='status';status.textContent=text;}github.addEventListener('click',()=>{busy('Preparing secure sign-in…');vscode.postMessage({type:'signIn'});});retry.addEventListener('click',()=>{busy('Checking your connection…');vscode.postMessage({type:'check'});});window.addEventListener('message',e=>{const m=e.data||{};if(m.type==='status'){status.className='status';status.textContent=m.text;}if(m.type==='error'){status.className='status error';status.textContent=m.text;github.disabled=false;retry.disabled=false;}if(m.type==='success'){status.className='status good';status.textContent=m.text;github.disabled=false;retry.disabled=false;}});
 </script></body></html>`;
@@ -1087,34 +1151,53 @@ const vscode=acquireVsCodeApi();const github=document.getElementById('github');c
           message?: string;
         };
         if (result.ok && !polled.pending && polled.token) {
-          await context.secrets.store(getSessionSecretKey(), polled.token);
+          const sessionSecretKey = getSessionSecretKey(environment);
+          await context.secrets.store(sessionSecretKey, polled.token);
           try {
-            const resultMe = await apiRequest<{
+            const response = await fetchBackend(`${baseUrl}/api/auth/me`, {
+              headers: {
+                Accept: "application/json",
+                Cookie: `devforge_session=${polled.token}`,
+              },
+            });
+            const resultMe = (await response.json().catch(() => ({}))) as {
+              message?: string;
               user?: {
                 githubUsername?: string | null;
                 githubName?: string | null;
                 email?: string | null;
               };
-            }>(context, "/api/auth/me");
+            };
+            if (!response.ok) {
+              throw new Error(
+                resultMe.message ||
+                  `The ${environmentLabel.toLowerCase()} session could not be verified (HTTP ${response.status}).`,
+              );
+            }
             const user = resultMe.user;
             const identity = user?.githubUsername
               ? `@${user.githubUsername}`
               : (user?.email ?? user?.githubName);
+            const activeBackend = getBackendEnvironment() === environment;
+            const nextStep = activeBackend
+              ? "Opening chat…"
+              : `Select the ${environmentLabel} backend to use this session.`;
             post(
               "success",
-              `Connected successfully${identity ? ` as ${identity}` : ""}. Opening DevForge chat…`,
+              `Connected successfully${identity ? ` as ${identity}` : ""}. ${nextStep}`,
             );
             refreshCommandsTree();
             vscode.window.showInformationMessage(
-              `Connected to DevForge${identity ? ` as ${identity}` : ""}. Opening chat…`,
+              `Connected to ${environmentLabel}${identity ? ` as ${identity}` : ""}. ${nextStep}`,
             );
-            // After a successful sign-in, jump straight into the chat page.
-            setTimeout(() => {
-              void vscode.commands.executeCommand("devforge.openChat");
-            }, 600);
+            if (activeBackend) {
+              setTimeout(() => {
+                void vscode.commands.executeCommand("devforge.openChat");
+              }, 600);
+            }
             return;
           } catch (error) {
-            await context.secrets.delete(getSessionSecretKey());
+            await context.secrets.delete(sessionSecretKey);
             throw error;
           }
         }

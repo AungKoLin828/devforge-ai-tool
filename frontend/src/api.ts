@@ -528,8 +528,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ code }),
     }),
-  login: () => {
-    location.href = "/api/auth/github";
+  login: (returnTo?: string) => {
+    const query = returnTo
+      ? `?returnTo=${encodeURIComponent(returnTo)}`
+      : "";
+    location.href = `/api/auth/github${query}`;
   },
   logout: () => request("/api/auth/logout", { method: "POST" }),
   githubRepositories: () =>

@@ -2,7 +2,7 @@
 
 Codevia AI adds a custom chat panel and coding commands to VS Code. Requests to create a new project from chat use the project-generation workflow and copy the generated files into your open workspace. If no workspace is open, VS Code asks you to choose a local destination folder. You review the file list and confirm before files are written; existing files are skipped unless you explicitly choose to overwrite them.
 
-The extension connects to the hosted DevForge backend by default and does not add or require an AI-provider API key inside the extension. Use **Codevia AI: Select Backend** to switch between the hosted server and your local development server. The Local Agent is not required for the extension to save generated files to a folder on your PC.
+The extension connects to the hosted DevForge backend by default and does not add or require an AI-provider API key inside the extension. It can keep separate sign-ins for both the hosted server and your local development server; use **Codevia AI: Select Backend** to choose which one to use. The Local Agent is not required for the extension to save generated files to a folder on your PC.
 
 The Marketplace extension ID is `CodeviaAI.codevia-ai`. Publishing requires access to a VS Code Marketplace publisher named `CodeviaAI`.
 
@@ -19,7 +19,7 @@ The extension supports both environments without changing the DevForge web app o
 1. Start the DevForge web app from its project root using `npm run dev:netlify`.
 2. Netlify CLI normally serves the app and functions at `http://localhost:8888`. Use that full origin in `Local Backend Url` if your port differs.
 3. Set `Backend Environment` to `local`.
-4. Run **Codevia AI: Select Backend** and choose **Local development server**. Run **Codevia AI: Sign In to Existing Account** and complete GitHub sign-in in the browser. The extension stores the local session separately from the hosted session.
+4. Run **Codevia AI: Sign In to Local Backend** and complete GitHub sign-in in the browser. This stores a local session separately from the hosted session. To use it, run **Codevia AI: Select Backend** and choose **Local development server**.
 
 Do not use the Vite-only `http://localhost:5173` URL unless your local setup also routes `/api/*` to the Netlify Functions. The extension needs the backend routes, not just the frontend dev server. HTTP is permitted only for loopback local development.
 
@@ -27,9 +27,9 @@ Do not use the Vite-only `http://localhost:5173` URL unless your local setup als
 
 1. Keep `Backend Environment` set to `netlify` (the default).
 2. Keep `Netlify Backend Url` set to your deployed site URL.
-3. Run **Codevia AI: Select Backend** and choose **Hosted server (Netlify)**. Run **Codevia AI: Sign In to Existing Account** and complete GitHub sign-in in the browser.
+3. Run **Codevia AI: Sign In to Hosted Backend** and complete GitHub sign-in in the browser. To use it, run **Codevia AI: Select Backend** and choose **Hosted server (Netlify)**.
 
-When changing environments, sign in separately for each environment. The extension stores the two sessions separately. No AI provider API key is configured or stored by this extension; the selected backend must have an AI provider configured for your account.
+You can sign in to both backends once and switch between them without signing in again. The extension stores their sessions, selected projects, and provider choices separately. **Codevia AI: Sign In (Choose Backend)** asks which server to connect to, regardless of which backend is currently selected. The direct local and hosted sign-in commands are also available. No AI provider API key is configured or stored by this extension; each selected backend must have an AI provider configured for your account.
 
 ## How the connection works
 
@@ -67,7 +67,7 @@ npm run package
 Install the `.vsix` file produced by `npm run package`:
 
 ```powershell
-code --install-extension .\codevia-ai-1.0.1.vsix --force
+code --install-extension .\codevia-ai-1.0.2.vsix --force
 ```
 
 If the filename differs, use the actual `.vsix` file created by `npm run package`. Reload VS Code after installing.
@@ -76,20 +76,18 @@ If the filename differs, use the actual `.vsix` file created by `npm run package
 
 The extension uses one-time browser pairing to sign in, so you don't need to copy browser cookies into VS Code. Hosted and local sessions are stored separately.
 
-1. Open the DevForge website in your normal browser and sign in with GitHub.
-2. In VS Code, press `Ctrl+Shift+P`.
-3. Run **Codevia AI: Sign In to Existing Account**.
-4. The browser opens to your configured DevForge site. Make sure you have completed GitHub sign-in there.
-5. In the browser, sign in with GitHub and approve the one-time Codevia AI connection.
-6. Return to VS Code; the extension stores the session securely in VS Code SecretStorage.
-7. Run **Codevia AI: Select Project** and select an existing project, or create a new project.
+1. In VS Code, press `Ctrl+Shift+P`.
+2. Run **Codevia AI: Sign In (Choose Backend)** and select Local or Hosted, or use one of the direct backend sign-in commands. You can connect both environments independently.
+3. In the browser opened for that backend, sign in with GitHub and approve the one-time Codevia AI connection.
+4. Return to VS Code; the extension stores each session separately in VS Code SecretStorage.
+5. Run **Codevia AI: Select Backend** to choose which signed-in backend to use, then run **Codevia AI: Select Project** for that backend.
 
-The pairing code expires after a short time and can only be used once. Sign in again separately after switching between local and hosted backends.
+The pairing code expires after a short time and can only be used once. The local and hosted sessions are independent; signing into one does not replace the other.
 
 ### Change project or sign out
 
 - Run **Codevia AI: Select Project** to change the DevForge project associated with extension requests.
-- Run **Codevia AI: Sign Out** to delete the saved session token from VS Code SecretStorage and clear the selected project. This does not sign you out of the browser or revoke the server session; use the web app's sign-out flow if you also want to end that session.
+- Run **Codevia AI: Sign Out** to delete the saved session token for the currently selected backend and clear its selected project. The other backend's session remains connected. This does not sign you out of the browser or revoke the server session; use the web app's sign-out flow if you also want to end that session.
 - If your session expires, repeat browser pairing for the selected backend.
 
 ## Features
@@ -123,7 +121,7 @@ Run **Codevia AI: Select Backend** and confirm the correct server is selected. F
 
 ### `Authentication required` or `session expired`
 
-Run **Codevia AI: Sign In to Existing Account** again and complete browser pairing for the selected backend.
+Run **Codevia AI: Sign In (Choose Backend)** and complete browser pairing for the backend you want to reconnect.
 
 ### `AI provider is not configured`
 

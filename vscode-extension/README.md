@@ -67,7 +67,7 @@ npm run package
 Install the `.vsix` file produced by `npm run package`:
 
 ```powershell
-code --install-extension .\codevia-ai-1.0.2.vsix --force
+code --install-extension .\codevia-ai-1.0.3.vsix --force
 ```
 
 If the filename differs, use the actual `.vsix` file created by `npm run package`. Reload VS Code after installing.
@@ -103,6 +103,7 @@ Open the Command Palette with `Ctrl+Shift+P` and search for `Codevia AI`.
 - **Generate Tests** — generate a test file and choose where to save it.
 - **Fix Errors in Current File** — provide error details and review the proposed change before applying.
 - **Clear Findings** — clear DevForge review diagnostics.
+- **Chat file changes** — see assistant progress, save generated files to the open workspace or a folder you choose, verify each saved file, and select changed files to review.
 
 For code-changing operations, inspect the diff and test the result before committing or deploying. AI-generated code may be incorrect.
 
@@ -111,7 +112,8 @@ For code-changing operations, inspect the diff and test the result before commit
 - The backend generates and stores the project artifact; the extension performs the local file writes. A browser-only project request cannot write to your PC.
 - If chat doesn't create a new project, run **Codevia AI: Generate Project** from the Command Palette to start the dedicated workflow directly.
 - The extension writes only to the open workspace folder or the folder you select. It does not need the Local Agent for this.
-- Files are applied only after you confirm. Existing files are protected unless you explicitly choose **Overwrite Existing**.
+- Chat-generated files are written to the selected destination. Existing files are skipped unless you choose **Overwrite Existing**; each successful write is read back and verified.
+- The dedicated **Generate Project** command shows a preview and asks before creating the files. Both workflows list every changed file and let you open files to review them.
 
 ## Troubleshooting
 

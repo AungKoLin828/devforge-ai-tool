@@ -1882,13 +1882,18 @@ async function installSavedDependencies(
 
 async function chooseGeneratedFilesFolder(
   requestAction?: ChatActionRequest,
+  alwaysAsk = false,
 ): Promise<vscode.Uri | undefined> {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
-  if (workspaceFolder) return workspaceFolder;
+  if (workspaceFolder && !alwaysAsk) return workspaceFolder;
   if (requestAction) {
     const action = await requestAction(
-      "Choose where to save generated files",
-      "No workspace folder is open. Choose a local folder to save the generated files.",
+      alwaysAsk
+        ? "Choose where to create the project"
+        : "Choose where to save generated files",
+      alwaysAsk
+        ? "Select a local folder for the generated project."
+        : "No workspace folder is open. Choose a local folder to save the generated files.",
       [
         { value: "choose", label: "Choose Folder" },
         { value: "cancel", label: "Cancel" },
@@ -2602,11 +2607,8 @@ async function generateProject(
       ignoreFocusOut: true,
     }));
   if (!description?.trim()) return undefined;
-  let folder = vscode.workspace.workspaceFolders?.[0]?.uri;
-  if (!folder) {
-    folder = await chooseGeneratedFilesFolder(requestAction);
-    if (!folder) return undefined;
-  }
+  const folder = await chooseGeneratedFilesFolder(requestAction, true);
+  if (!folder) return undefined;
   await onProgress?.(0, "done");
   await onProgress?.(1, "running");
   let run: ProjectRunRef | undefined;

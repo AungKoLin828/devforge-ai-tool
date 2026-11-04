@@ -95,7 +95,7 @@ The pairing code expires after a short time and can only be used once. The local
 Open the Command Palette with `Ctrl+Shift+P` and search for `Codevia AI`.
 
 - **Open Chat** — send natural-language instructions to DevForge. Requests to create a new project use the project-generation workflow and save generated files into your workspace or a folder you select.
-- **Generate Project** — request a project structure and source files, preview proposed paths, and confirm whether to skip or overwrite existing files.
+- **Generate Project** — choose a destination folder for each new project, request its structure and source files, preview proposed paths, and confirm whether to skip or overwrite existing files.
 - **Review Current File** — ask the hosted AI service to review the active source file; findings appear in VS Code's Problems panel.
 - **Review Workspace** — review eligible files from the open workspace, subject to size limits.
 - **Modify Current File** — request a change, inspect the diff, and approve or reject it.
@@ -116,6 +116,7 @@ For code-changing operations, inspect the diff and test the result before commit
 - The extension writes only to the open workspace folder or the folder you select. It does not need the Local Agent for this.
 - Chat-generated files are written to the selected destination. Existing files are skipped unless you choose **Overwrite Existing**; each successful write is read back and verified.
 - The dedicated **Generate Project** command shows a preview and asks before creating the files. Both workflows list every changed file and let you open files to review them.
+- Every new project-generation request asks you to choose its destination folder, including when a workspace is already open. The project is generated only after you select a folder.
 - Dependency installation is never run without confirmation. The extension supports root-level JavaScript `package.json` and Python `requirements.txt` files; it does not install dependencies for nested manifests.
 
 ## Troubleshooting

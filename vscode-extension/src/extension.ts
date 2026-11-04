@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { spawn } from "node:child_process";
 
 const DIAGNOSTIC_SOURCE = "Codevia AI";
 const SESSION_SECRET_KEY_PREFIX = "devforge.backendSessionCookie";
@@ -1740,6 +1741,145 @@ async function saveGeneratedFiles(
   return result;
 }
 
+type DependencyInstallCommand = {
+  label: string;
+  executable: string;
+  args: string[];
+};
+
+async function installSavedDependencies(
+  folder: vscode.Uri,
+  savedPaths: string[],
+  output: vscode.OutputChannel,
+  requestAction?: ChatActionRequest,
+): Promise<string | undefined> {
+  const saved = new Set(
+    savedPaths.map((path) => path.replace(/\\/g, "/").replace(/^\.\/+/, "")),
+  );
+  const commands: DependencyInstallCommand[] = [];
+
+  if (saved.has("package.json")) {
+    const hasFile = async (name: string): Promise<boolean> => {
+      try {
+        await vscode.workspace.fs.stat(vscode.Uri.joinPath(folder, name));
+        return true;
+      } catch (error) {
+        if (
+          error instanceof vscode.FileSystemError &&
+          error.code === "FileNotFound"
+        ) {
+          return false;
+        }
+        throw error;
+      }
+    };
+    const packageManager = (await hasFile("pnpm-lock.yaml"))
+      ? "pnpm"
+      : (await hasFile("yarn.lock"))
+        ? "yarn"
+        : (await hasFile("bun.lock")) || (await hasFile("bun.lockb"))
+          ? "bun"
+          : "npm";
+    commands.push({
+      label: `${packageManager} install`,
+      executable: packageManager,
+      args: ["install"],
+    });
+  }
+
+  if (saved.has("requirements.txt")) {
+    const python = process.platform === "win32" ? "py" : "python3";
+    const venvPython =
+      process.platform === "win32"
+        ? ".venv\\Scripts\\python.exe"
+        : ".venv/bin/python";
+    commands.push(
+      {
+        label: `${python} -m venv .venv`,
+        executable: python,
+        args: ["-m", "venv", ".venv"],
+      },
+      {
+        label: `${venvPython} -m pip install -r requirements.txt`,
+        executable: venvPython,
+        args: ["-m", "pip", "install", "-r", "requirements.txt"],
+      },
+    );
+  }
+
+  if (!commands.length) return undefined;
+
+  const detail = commands.map((command) => command.label).join("\n");
+  const choice = requestAction
+    ? await requestAction(
+        "Install project dependencies?",
+        `This will run package-manager commands in ${folder.fsPath}:\n${detail}`,
+        [
+          { value: "install", label: "Install Dependencies" },
+          { value: "skip", label: "Skip" },
+        ],
+      )
+    : await vscode.window.showWarningMessage(
+        `Run dependency installation in ${folder.fsPath}?\n${detail}`,
+        { modal: true },
+        "Install Dependencies",
+        "Skip",
+      );
+  if (choice !== "install" && choice !== "Install Dependencies") {
+    return "Dependency installation was skipped.";
+  }
+
+  output.show(true);
+  output.appendLine(`Installing dependencies in ${folder.fsPath}`);
+  const failures: string[] = [];
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "Codevia AI: Installing project dependencies",
+      cancellable: false,
+    },
+    async (progress) => {
+      for (const command of commands) {
+        progress.report({ message: command.label });
+        output.appendLine(`\n> ${command.label}`);
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const child = spawn(command.executable, command.args, {
+              cwd: folder.fsPath,
+              shell: process.platform === "win32",
+              windowsHide: true,
+            });
+            child.stdout.on("data", (chunk: Buffer) =>
+              output.append(chunk.toString()),
+            );
+            child.stderr.on("data", (chunk: Buffer) =>
+              output.append(chunk.toString()),
+            );
+            child.once("error", reject);
+            child.once("close", (code) => {
+              if (code === 0) resolve();
+              else reject(new Error(`Process exited with code ${code}.`));
+            });
+          });
+          output.appendLine(`\nCompleted: ${command.label}`);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          failures.push(`${command.label}: ${message}`);
+          output.appendLine(`\nFailed: ${command.label}: ${message}`);
+        }
+      }
+    },
+  );
+
+  if (failures.length) {
+    const summary = `Dependency installation failed:\n${failures.join("\n")}\nSee the Codevia AI output channel for process details.`;
+    void vscode.window.showErrorMessage(summary);
+    return summary;
+  }
+  return "Project dependencies were installed successfully. See the Codevia AI output channel for process details.";
+}
+
 async function chooseGeneratedFilesFolder(
   requestAction?: ChatActionRequest,
 ): Promise<vscode.Uri | undefined> {
@@ -2231,6 +2371,12 @@ async function openChat(
               );
             }
           }
+          const dependencySummary = await installSavedDependencies(
+            folder,
+            result.saved,
+            output,
+            requestChatAction,
+          );
           await step(4, result.written.length ? "running" : "done");
           if (result.written.length) {
             await reviewSavedGeneratedFiles(
@@ -2257,6 +2403,7 @@ async function openChat(
             result.failed.length
               ? `Failed files:\n${result.failed.map((item) => `• ${item.path}: ${item.error}`).join("\n")}`
               : "",
+            dependencySummary,
             retryFailure,
           ]
             .filter(Boolean)
@@ -2583,6 +2730,12 @@ async function generateProject(
     );
   }
   await onProgress?.(3, result.failed.length ? "failed" : "done");
+  const dependencySummary = await installSavedDependencies(
+    folder,
+    result.saved,
+    output,
+    requestAction,
+  );
   await onProgress?.(4, result.written.length ? "running" : "done");
   if (result.written.length) {
     await reviewSavedGeneratedFiles(folder, result.written, requestAction);
@@ -2620,6 +2773,7 @@ async function generateProject(
     result.failed.length
       ? `Failed files:\n${result.failed.map((item) => `• ${item.path}: ${item.error}`).join("\n")}`
       : "",
+    dependencySummary ?? "",
   ]
     .filter(Boolean)
     .join("\n\n"),

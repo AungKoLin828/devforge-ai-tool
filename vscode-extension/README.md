@@ -105,6 +105,7 @@ Open the Command Palette with `Ctrl+Shift+P` and search for `Codevia AI`.
 - **Clear Findings** — clear DevForge review diagnostics.
 - **Chat file changes** — see assistant progress, save generated files to the open workspace or a folder you choose, verify each saved file, select changed files to review, and retry a failed project workflow.
 - **Chat action requests** — answer destination, create-files, overwrite/skip/cancel, and review prompts directly in the chat. Choosing a local folder opens the native folder picker.
+- **Dependency installation** — after saving a root `package.json` or `requirements.txt`, choose whether to install dependencies. Install output is shown in the **Codevia AI** Output channel; JavaScript projects use the detected lockfile's package manager (or npm), and Python requirements are installed in a project-local `.venv`.
 
 For code-changing operations, inspect the diff and test the result before committing or deploying. AI-generated code may be incorrect.
 
@@ -115,6 +116,7 @@ For code-changing operations, inspect the diff and test the result before commit
 - The extension writes only to the open workspace folder or the folder you select. It does not need the Local Agent for this.
 - Chat-generated files are written to the selected destination. Existing files are skipped unless you choose **Overwrite Existing**; each successful write is read back and verified.
 - The dedicated **Generate Project** command shows a preview and asks before creating the files. Both workflows list every changed file and let you open files to review them.
+- Dependency installation is never run without confirmation. The extension supports root-level JavaScript `package.json` and Python `requirements.txt` files; it does not install dependencies for nested manifests.
 
 ## Troubleshooting
 

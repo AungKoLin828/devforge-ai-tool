@@ -152,7 +152,7 @@ function UserGuide() {
       number: "03",
       title: "Open and edit the project in VS Code",
       description:
-        "For a simple download, choose Download ZIP in the project workspace; no Local Agent is needed. Extract the downloaded archive and open the project folder in VS Code. Install the Codevia AI extension from the VS Code Marketplace to use AI tools in your editor. To sync directly into the Codevia workspace or use local build/test and GitHub operations, install the Local Agent once, then select Start and connect agent.",
+        "For a simple download, choose Download ZIP in the project workspace; no Local Agent is needed. Extract the downloaded archive and open the project folder in VS Code. Install the Codevia AI extension from the VS Code Marketplace to use AI tools in your editor. On Windows, select Start and connect agent to automatically download the Local Agent installer if needed; review and run it in PowerShell, and the page will connect automatically. Browsers require your approval before downloaded software can run.",
     },
     {
       number: "04",
@@ -1562,22 +1562,60 @@ function App({ user }: { user: User }) {
     try {
       let token = "";
       let lastError: unknown;
-      for (let attempt = 0; attempt < 24; attempt += 1) {
-        try {
-          token = await api.localAgent.pair();
-          break;
-        } catch (cause) {
-          lastError = cause;
-          await new Promise((resolve) => window.setTimeout(resolve, 500));
+      const tryPair = async (attempts: number) => {
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          try {
+            return await api.localAgent.pair();
+          } catch (cause) {
+            lastError = cause;
+            await new Promise((resolve) => window.setTimeout(resolve, 500));
+          }
         }
+        return "";
+      };
+      token = await tryPair(24);
+      if (!token && startAgent && /Win/i.test(navigator.userAgent)) {
+        const installerResponse = await fetch(
+          "/downloads/install-devforge-agent.ps1",
+          { cache: "no-store" },
+        );
+        if (!installerResponse.ok) {
+          throw new Error(
+            `Could not download the Local Agent installer (HTTP ${installerResponse.status}). Open the setup guide and install it manually.`,
+          );
+        }
+        const installer = await installerResponse.blob();
+        const downloadUrl = URL.createObjectURL(installer);
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = "install-devforge-agent.ps1";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 60_000);
+        showModal(
+          "info",
+          "Local Agent installer downloaded",
+          "The Local Agent is not installed on this PC. The installer has been downloaded. Review it, then run it from PowerShell with:\n\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$HOME\\Downloads\\install-devforge-agent.ps1\"\n\nThe installer checks downloaded agent files against pinned SHA-256 hashes, installs the agent for your Windows account, and starts it. Keep this page open; connection will continue automatically.",
+        );
+        setLogs((current) => [
+          ...current,
+          "Local Agent is missing. Downloaded the Windows installer; waiting for you to run it and for the agent to start.",
+        ]);
+        token = await tryPair(600);
+      }
+      if (!token && !/Win/i.test(navigator.userAgent)) {
+        throw new Error(
+          "The Local Agent is not running. Automatic installation is currently supported on Windows; open the Local Agent setup guide to install it for this operating system, then reconnect.",
+        );
       }
       if (!token) {
         throw lastError instanceof Error
           ? new Error(
-              `${lastError.message} Install or update the Local Agent from the User guide, then try again.`,
+              `${lastError.message} The installer may have been cancelled or the agent could not start. Open the Local Agent setup guide and try again.`,
             )
           : new Error(
-              "The Local Agent did not start. Install it from the User guide, then try again.",
+              "The Local Agent did not start. Open the Local Agent setup guide and try again.",
             );
       }
       const result = await api.localAgent.health(token);

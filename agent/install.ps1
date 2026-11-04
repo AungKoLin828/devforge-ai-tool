@@ -128,10 +128,23 @@ $powerShellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\pow
 $protocolCommand = "`"$powerShellPath`" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcherPath`" `"%1`""
 Set-Item -Path $protocolCommandKey -Value $protocolCommand
 
+# Start the agent immediately so the waiting browser can pair without another click.
+Start-Process `
+  -FilePath $powerShellPath `
+  -ArgumentList @(
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-WindowStyle",
+    "Hidden",
+    "-File",
+    "`"$launcherPath`""
+  ) `
+  -WindowStyle Hidden
+
 Write-Host ""
 Write-Host "DevForge Local Agent installed without cloning the DevForge application."
 Write-Host "Agent files: $installRoot"
 Write-Host "Workspace:   $workspace"
 Write-Host ""
-Write-Host "The DevForge app will start and pair the agent when you select Start and connect agent or generate a project."
-Write-Host "If the browser asks to open DevForge Agent, approve it."
+Write-Host "The Local Agent has been started. Return to Codevia AI; the waiting page will pair automatically."

@@ -11,6 +11,7 @@ src/generated/prisma/
 
 # Frontend build
 frontend/dist/
+/frontend/public/downloads/install-devforge-agent.ps1
 
 # TypeScript build metadata
 *.tsbuildinfo

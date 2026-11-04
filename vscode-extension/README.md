@@ -2,7 +2,7 @@
 
 Codevia AI adds a custom chat panel and coding commands to VS Code. Requests to create a new project from chat use the project-generation workflow and copy the generated files into your open workspace. If no workspace is open, VS Code asks you to choose a local destination folder. You review the file list and confirm before files are written; existing files are skipped unless you explicitly choose to overwrite them.
 
-The extension connects to the hosted DevForge backend by default and does not add or require an AI-provider API key inside the extension. It can keep separate sign-ins for both the hosted server and your local development server; use **Codevia AI: Select Backend** to choose which one to use. The Local Agent is not required for the extension to save generated files to a folder on your PC.
+The extension connects to the hosted DevForge backend by default and does not add or require an AI-provider API key inside the extension. It can keep separate sign-ins for both the hosted server and your local development server; after sign-in, that backend becomes active and chat opens automatically. Use **Codevia AI: Select Backend** to switch between signed-in backends. The Local Agent is not required for the extension to save generated files to a folder on your PC.
 
 The Marketplace extension ID is `CodeviaAI.codevia-ai`. Publishing requires access to a VS Code Marketplace publisher named `CodeviaAI`.
 
@@ -18,18 +18,16 @@ The extension supports both environments without changing the DevForge web app o
 
 1. Start the DevForge web app from its project root using `npm run dev:netlify`.
 2. Netlify CLI normally serves the app and functions at `http://localhost:8888`. Use that full origin in `Local Backend Url` if your port differs.
-3. Set `Backend Environment` to `local`.
-4. Run **Codevia AI: Sign In to Local Backend** and complete GitHub sign-in in the browser. This stores a local session separately from the hosted session. To use it, run **Codevia AI: Select Backend** and choose **Local development server**.
+3. Run **Codevia AI: Sign In to Local Backend** and complete GitHub sign-in in the browser. This stores a local session separately from the hosted session, makes the local backend active, and opens chat.
 
 Do not use the Vite-only `http://localhost:5173` URL unless your local setup also routes `/api/*` to the Netlify Functions. The extension needs the backend routes, not just the frontend dev server. HTTP is permitted only for loopback local development.
 
 ### Hosted Netlify deployment
 
-1. Keep `Backend Environment` set to `netlify` (the default).
-2. Keep `Netlify Backend Url` set to your deployed site URL.
-3. Run **Codevia AI: Sign In to Hosted Backend** and complete GitHub sign-in in the browser. To use it, run **Codevia AI: Select Backend** and choose **Hosted server (Netlify)**.
+1. Keep `Netlify Backend Url` set to your deployed site URL.
+2. Run **Codevia AI: Sign In to Hosted Backend** and complete GitHub sign-in in the browser. This makes the hosted backend active and opens chat.
 
-You can sign in to both backends once and switch between them without signing in again. The extension stores their sessions, selected projects, and provider choices separately. **Codevia AI: Sign In (Choose Backend)** asks which server to connect to, regardless of which backend is currently selected. The direct local and hosted sign-in commands are also available. No AI provider API key is configured or stored by this extension; each selected backend must have an AI provider configured for your account.
+You can sign in to both backends once and switch between them without signing in again. The extension stores their sessions, selected projects, and provider choices separately. **Codevia AI: Sign In (Choose Backend)** asks which server to connect to, then makes it active after successful sign-in. The direct local and hosted sign-in commands are also available. No AI provider API key is configured or stored by this extension; each selected backend must have an AI provider configured for your account.
 
 ## How the connection works
 
@@ -79,8 +77,8 @@ The extension uses one-time browser pairing to sign in, so you don't need to cop
 1. In VS Code, press `Ctrl+Shift+P`.
 2. Run **Codevia AI: Sign In (Choose Backend)** and select Local or Hosted, or use one of the direct backend sign-in commands. You can connect both environments independently.
 3. In the browser opened for that backend, sign in with GitHub and approve the one-time Codevia AI connection.
-4. Return to VS Code; the extension stores each session separately in VS Code SecretStorage.
-5. Run **Codevia AI: Select Backend** to choose which signed-in backend to use, then run **Codevia AI: Select Project** for that backend.
+4. Return to VS Code; the extension stores the session in VS Code SecretStorage, selects that backend, and opens chat.
+5. Run **Codevia AI: Select Backend** later to switch between signed-in backends, then run **Codevia AI: Select Project** for the selected backend.
 
 The pairing code expires after a short time and can only be used once. The local and hosted sessions are independent; signing into one does not replace the other.
 
@@ -103,7 +101,7 @@ Open the Command Palette with `Ctrl+Shift+P` and search for `Codevia AI`.
 - **Generate Tests** — generate a test file and choose where to save it.
 - **Fix Errors in Current File** — provide error details and review the proposed change before applying.
 - **Clear Findings** — clear DevForge review diagnostics.
-- **Chat file changes** — see assistant progress, save generated files to the open workspace or a folder you choose, verify each saved file, select changed files to review, and retry a failed project workflow.
+- **Chat progress and local actions** — see the actual request, file-save, verification, and review stages; AI-proposed build/test/inspection commands show live output in chat. The extension asks before running any command and restricts execution to its documented allowlist. Private model reasoning is not exposed.
 - **Chat action requests** — answer destination, create-files, overwrite/skip/cancel, and review prompts directly in the chat. Choosing a local folder opens the native folder picker.
 - **Dependency installation** — after saving a root `package.json` or `requirements.txt`, choose whether to install dependencies. Install output is shown in the **Codevia AI** Output channel; JavaScript projects use the detected lockfile's package manager (or npm), and Python requirements are installed in a project-local `.venv`.
 
@@ -118,6 +116,7 @@ For code-changing operations, inspect the diff and test the result before commit
 - The dedicated **Generate Project** command shows a preview and asks before creating the files. Both workflows list every changed file and let you open files to review them.
 - Every new project-generation request asks you to choose its destination folder, including when a workspace is already open. The project is generated only after you select a folder.
 - Dependency installation is never run without confirmation. The extension supports root-level JavaScript `package.json` and Python `requirements.txt` files; it does not install dependencies for nested manifests.
+- AI-proposed local commands require explicit approval. Workspace commands run in the open workspace; on Windows, the single supported system-install command is `winget install --id OpenJS.NodeJS.LTS --exact`. Other allowed commands are package-manager install/ci and common build/test/lint/check scripts, read-only Git status/diff/log commands, and `pytest`; arbitrary shell commands and command chains are rejected.
 
 ## Troubleshooting
 

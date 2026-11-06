@@ -101,7 +101,7 @@ Open the Command Palette with `Ctrl+Shift+P` and search for `Codevia AI`.
 - **Generate Tests** — generate a test file and choose where to save it.
 - **Fix Errors in Current File** — provide error details and review the proposed change before applying.
 - **Clear Findings** — clear Codevia AI review diagnostics.
-- **Chat progress and local actions** — see the actual request, file-save, verification, and review stages; AI-proposed build/test/inspection commands show live output in chat. The extension asks before running any command and restricts execution to its documented allowlist. Private model reasoning is not exposed.
+- **Chat progress and local actions** — see the actual request, file-save, verification, and review stages; AI-proposed build/test/inspection and package-install commands show live output in chat. The extension asks before running any command and restricts execution to its documented allowlist. Private model reasoning is not exposed.
 - **Chat action requests** — answer destination, create-files, overwrite/skip/cancel, and review prompts directly in the chat. Choosing a local folder opens the native folder picker.
 - **Dependency installation** — after saving a root `package.json` or `requirements.txt`, choose whether to install dependencies. Install output is shown in the **Codevia AI** Output channel; JavaScript projects use the detected lockfile's package manager (or npm), and Python requirements are installed in a project-local `.venv`.
 
@@ -116,7 +116,7 @@ For code-changing operations, inspect the diff and test the result before commit
 - The dedicated **Generate Project** command shows a preview and asks before creating the files. Both workflows list every changed file and let you open files to review them.
 - Every new project-generation request asks you to choose its destination folder, including when a workspace is already open. The project is generated only after you select a folder.
 - Dependency installation is never run without confirmation. The extension supports root-level JavaScript `package.json` and Python `requirements.txt` files; it does not install dependencies for nested manifests.
-- AI-proposed local commands require explicit approval. Workspace commands run in the open workspace; on Windows, the single supported system-install command is `winget install --id OpenJS.NodeJS.LTS --exact`. Other allowed commands are package-manager install/ci and common build/test/lint/check scripts, read-only Git status/diff/log commands, and `pytest`; arbitrary shell commands and command chains are rejected.
+- AI-proposed local commands require explicit approval; nothing runs automatically. Workspace commands run in the open workspace. Dependency commands are supported for JavaScript/TypeScript (`npm`, `pnpm`, `yarn`, `bun`), Python (`pip`), Rust (`cargo`), Go (`go`), .NET (`dotnet`), PHP (`composer`), and Ruby (`gem`/`bundle`). They can install from the project's manifest/lockfile or add a limited number of explicitly named packages, depending on the manager. Common build/test/lint/check scripts, read-only Git status/diff/log commands, and `pytest` are also allowed. On Windows, the only system software install command is `winget install --id OpenJS.NodeJS.LTS --exact`. Arbitrary shell commands, package-manager flags, and command chains are rejected. Package installation downloads third-party code and may run install scripts.
 
 ## Troubleshooting
 

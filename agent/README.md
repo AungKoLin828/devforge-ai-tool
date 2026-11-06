@@ -7,7 +7,7 @@ The agent is a separate local process. It is intentionally bound to `127.0.0.1` 
 ```bash
 npm install
 set DEVFORGE_AGENT_TOKEN=replace-me
-set DEVFORGE_WORKSPACE=C:\DevForge
+set DEVFORGE_WORKSPACE=C:\CodeviaAI
 npm run agent:dev
 ```
 

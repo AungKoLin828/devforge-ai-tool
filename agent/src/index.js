@@ -7,7 +7,7 @@ import { listWorkspaceProjects, listWorkspaceEntries, readLocalProject, readWork
 // Agent settings are local-only; by default it binds to loopback and a random token.
 const port = Number(process.env.DEVFORGE_AGENT_PORT || 45821);
 const token = process.env.DEVFORGE_AGENT_TOKEN || randomBytes(32).toString("hex");
-const root = process.env.DEVFORGE_WORKSPACE || path.join(os.homedir(), "DevForge");
+const root = process.env.DEVFORGE_WORKSPACE || path.join(os.homedir(), "CodeviaAI");
 const allowedOrigins = new Set([
     "http://localhost:8888",
     "http://localhost:5173",

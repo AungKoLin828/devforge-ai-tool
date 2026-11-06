@@ -71,11 +71,11 @@ You do **not** need to clone or download the application source repository, and 
    To choose a different local workspace, pass a folder path:
 
    ```powershell
-   powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -WorkspacePath "$HOME\DevForge"
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -WorkspacePath "$HOME\CodeviaAI"
    ```
 
    `-ExecutionPolicy Bypass` applies only to this installer process; it does not change the machine's PowerShell execution policy. If your organization enforces an execution policy through Group Policy and blocks this command, ask your administrator to approve the installer rather than changing system policy.
-   Choose a folder your Windows account can create and write to. A path directly under another drive, such as `D:\DevForge`, may be blocked by that drive's permissions; use `$HOME\DevForge` or an existing writable folder on that drive instead. The installer checks workspace write access and prints a specific error if permission is denied.
+   Choose a folder your Windows account can create and write to. A path directly under another drive, such as `D:\CodeviaAI`, may be blocked by that drive's permissions; use `$HOME\CodeviaAI` or an existing writable folder on that drive instead. The installer checks workspace write access and prints a specific error if permission is denied.
 
 4. The installer registers a per-user `devforge-agent:` link handler and starts the agent. In the signed-in Codevia AI app, select **Connect agent** or start project generation. If the browser asks whether to open Codevia AI Agent, approve it. The agent starts hidden and pairs automatically; no token copy is needed. Its runtime logs are saved under `%LOCALAPPDATA%\DevForgeAgent`.
 5. To update the standalone agent, rerun the installer from step 2. If an older agent is already running, close its `node` process before using the updated one; the app reports when the running version does not support automatic pairing.

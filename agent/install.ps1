@@ -1,6 +1,6 @@
 param(
   # Use a workspace owned by the current Windows user unless a custom path is supplied.
-  [string]$WorkspacePath = (Join-Path $HOME "DevForge")
+  [string]$WorkspacePath = (Join-Path $HOME "CodeviaAI")
 )
 
 # Stop on download, validation, filesystem, and launcher-creation errors.
@@ -23,7 +23,7 @@ $sourceRoot = Join-Path $installRoot "src"
 $repository = "https://raw.githubusercontent.com/AungKoLin828/devforge-ai-tool/main/agent/src"
 # Pin expected content hashes so a partial or altered download is never installed.
 $expectedHashes = @{
-  "index.js" = "A54E1F7C63BBCCA0C4CDF27272E86D09C9B4181D660F3C0D2392803CC441C4B2"
+  "index.js" = "6C0277E663AEAE6A6E5E7FAD40F29745DC54E6EAAEEC795BF079458133A79721"
   "executor.js" = "FB1059A897334989321F14A0A841D4EB7C32667400B0909B10AD15DAC1C54151"
   "security.js" = "109A76165151907E8433D4AE2F4B5F45C5FFE8750E0E10E94DC97F78F2BEA864"
 }
@@ -40,7 +40,7 @@ catch {
   if ($workspaceProbe -and (Test-Path -LiteralPath $workspaceProbe)) {
     Remove-Item -LiteralPath $workspaceProbe -Force -ErrorAction SilentlyContinue
   }
-  throw "Cannot create or write to workspace '$workspace'. Choose a folder you own, such as '$HOME\DevForge', or create/allow access to the selected folder, then rerun the installer. Original error: $($_.Exception.Message)"
+  throw "Cannot create or write to workspace '$workspace'. Choose a folder you own, such as '$HOME\CodeviaAI', or create/allow access to the selected folder, then rerun the installer. Original error: $($_.Exception.Message)"
 }
 
 foreach ($file in @("index.js", "executor.js", "security.js")) {

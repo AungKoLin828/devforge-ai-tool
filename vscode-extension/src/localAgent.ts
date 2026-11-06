@@ -9,7 +9,7 @@ import * as vscode from "vscode";
 const bridgePort = 45822;
 const agentPort = 45821;
 const agentFiles = {
-  "index.js": "A54E1F7C63BBCCA0C4CDF27272E86D09C9B4181D660F3C0D2392803CC441C4B2",
+  "index.js": "6C0277E663AEAE6A6E5E7FAD40F29745DC54E6EAAEEC795BF079458133A79721",
   "executor.js": "FB1059A897334989321F14A0A841D4EB7C32667400B0909B10AD15DAC1C54151",
   "security.js": "109A76165151907E8433D4AE2F4B5F45C5FFE8750E0E10E94DC97F78F2BEA864",
 };
@@ -235,7 +235,7 @@ async function installAndStartAgent(): Promise<void> {
 
   const installRoot = getInstallRoot();
   const sourceRoot = path.join(installRoot, "src");
-  const workspaceRoot = path.join(os.homedir(), "DevForge");
+  const workspaceRoot = path.join(os.homedir(), "CodeviaAI");
   await fs.mkdir(sourceRoot, { recursive: true });
   await fs.mkdir(workspaceRoot, { recursive: true });
   await Promise.all(

@@ -6,7 +6,7 @@ The extension connects to the hosted Codevia AI backend by default and does not 
 
 The Marketplace extension ID is `CodeviaAI.codevia-ai`. Publishing requires access to a VS Code Marketplace publisher named `CodeviaAI`.
 
-When the extension is open, it also provides a loopback-only helper for the Codevia AI website's **Connect agent** action. The helper accepts requests only from the hosted Codevia AI site or the documented local development origins, verifies downloaded Local Agent files against pinned SHA-256 hashes, creates the default `~/DevForge` workspace, and starts the agent in the background. Node.js 22 LTS or newer is required. The Windows web installer remains available if VS Code or the extension is not running.
+When the extension is open, it also provides a loopback-only helper for the Codevia AI website's **Connect agent** action. The helper accepts requests only from the hosted Codevia AI site or the documented local development origins, verifies downloaded Local Agent files against pinned SHA-256 hashes, creates the default `~/CodeviaAI` workspace, and starts the agent in the background. Node.js 22 LTS or newer is required. The Windows web installer remains available if VS Code or the extension is not running.
 
 ## Choose local or Netlify backend
 

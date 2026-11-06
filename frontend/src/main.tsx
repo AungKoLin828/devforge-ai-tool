@@ -1632,7 +1632,7 @@ function App({ user }: { user: User }) {
         showModal(
           "info",
           "Local Agent installer downloaded",
-          "The Local Agent could not be started automatically. Install and open the Codevia AI VS Code extension to enable background setup, or review the downloaded installer and run it from PowerShell with:\n\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$HOME\\Downloads\\install-codevia-agent.ps1\"\n\nThe installer verifies the downloaded agent files, creates the workspace, and starts the agent. Keep this page open; connection will continue automatically.",
+          "The Local Agent could not be started automatically. Install and open the Codevia AI VS Code extension to enable background setup. Otherwise, run these PowerShell lines first to download the installer to a known path and inspect it:\n\n$installer = Join-Path $env:TEMP \"install-codevia-agent.ps1\"\nInvoke-WebRequest -Uri \"https://raw.githubusercontent.com/AungKoLin828/devforge-ai-tool/main/agent/install.ps1\" -OutFile $installer\nGet-Content $installer\n\nAfter reviewing the script, run this command separately:\n\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer\n\nThe installer verifies the downloaded agent files, creates the workspace, and starts the agent. Keep this page open; connection will continue automatically.",
         );
         setLogs((current) => [
           ...current,

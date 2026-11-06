@@ -152,7 +152,7 @@ function UserGuide() {
       number: "03",
       title: "Open and edit the project in VS Code",
       description:
-        "For a simple download, choose Download ZIP in the project workspace; no Local Agent is needed. Extract the downloaded archive and open the project folder in VS Code. Install the Codevia AI extension from the VS Code Marketplace to use AI tools in your editor. On Windows, select Start and connect agent to automatically download the Local Agent installer if needed; review and run it in PowerShell, and the page will connect automatically. Browsers require your approval before downloaded software can run.",
+        "For a simple download, choose Download ZIP in the project workspace; no Local Agent is needed. Extract the downloaded archive and open the project folder in VS Code. Install and open the Codevia AI extension, then select Connect agent to let the extension install and start the Local Agent in the background. If the extension is not available, download and run the Local Agent installer once.",
     },
     {
       number: "04",
@@ -1553,10 +1553,9 @@ function App({ user }: { user: User }) {
     }
   }
 
-  // Launch the installed Windows agent on demand, then pair through loopback.
+  // Ask the VS Code extension to install/start the agent, then pair through loopback.
   async function connectLocalAgent(startAgent = true, quiet = false) {
     if (localAgentConnecting) return;
-    if (startAgent) window.location.href = "devforge-agent://start";
     setLocalAgentConnecting(true);
     setLocalAgentError(null);
     try {
@@ -1573,7 +1572,44 @@ function App({ user }: { user: User }) {
         }
         return "";
       };
-      token = await tryPair(24);
+      token = await tryPair(2);
+      let bridgeError: string | null = null;
+      let bridgeUnavailable = false;
+      if (!token && startAgent) {
+        try {
+          const response = await fetch("http://127.0.0.1:45822/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "{}",
+          });
+          if (!response.ok) {
+            const result = (await response.json().catch(() => ({}))) as {
+              error?: string;
+            };
+            bridgeError =
+              result.error ||
+              `The VS Code Local Agent helper returned HTTP ${response.status}.`;
+          } else {
+            token = await tryPair(24);
+          }
+        } catch {
+          bridgeUnavailable = true;
+          bridgeError =
+            "The Codevia AI VS Code extension is not available to start the Local Agent.";
+        }
+      }
+      if (!token && startAgent) {
+        window.location.href = "devforge-agent://start";
+        token = await tryPair(24);
+      }
+      if (!token && bridgeError && !bridgeUnavailable) {
+        throw new Error(bridgeError);
+      }
+      if (!token && bridgeError && !/Win/i.test(navigator.userAgent)) {
+        throw new Error(
+          `${bridgeError} Install and open the Codevia AI VS Code extension, then reconnect.`,
+        );
+      }
       if (!token && startAgent && /Win/i.test(navigator.userAgent)) {
         const installerResponse = await fetch(
           "/downloads/install-devforge-agent.ps1",
@@ -1596,23 +1632,23 @@ function App({ user }: { user: User }) {
         showModal(
           "info",
           "Local Agent installer downloaded",
-          "The Local Agent is not installed on this PC. The installer has been downloaded. Review it, then run it from PowerShell with:\n\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$HOME\\Downloads\\install-devforge-agent.ps1\"\n\nThe installer checks downloaded agent files against pinned SHA-256 hashes, installs the agent for your Windows account, and starts it. Keep this page open; connection will continue automatically.",
+          "The Local Agent could not be started automatically. Install and open the Codevia AI VS Code extension to enable background setup, or review the downloaded installer and run it from PowerShell with:\n\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$HOME\\Downloads\\install-devforge-agent.ps1\"\n\nThe installer verifies the downloaded agent files, creates the workspace, and starts the agent. Keep this page open; connection will continue automatically.",
         );
         setLogs((current) => [
           ...current,
-          "Local Agent is missing. Downloaded the Windows installer; waiting for you to run it and for the agent to start.",
+          "Automatic setup was unavailable. Downloaded the Windows installer; waiting for you to run it and for the agent to start.",
         ]);
         token = await tryPair(600);
       }
       if (!token && !/Win/i.test(navigator.userAgent)) {
         throw new Error(
-          "The Local Agent is not running. Automatic installation is currently supported on Windows; open the Local Agent setup guide to install it for this operating system, then reconnect.",
+          "The Local Agent is not running. Install and open the Codevia AI VS Code extension to set it up automatically, or follow the Local Agent setup guide for this operating system, then reconnect.",
         );
       }
       if (!token) {
         throw lastError instanceof Error
           ? new Error(
-              `${lastError.message} The installer may have been cancelled or the agent could not start. Open the Local Agent setup guide and try again.`,
+              `${lastError.message} Automatic setup was unavailable and the agent could not start. Open the Local Agent setup guide and try again.`,
             )
           : new Error(
               "The Local Agent did not start. Open the Local Agent setup guide and try again.",
@@ -3645,10 +3681,10 @@ function App({ user }: { user: User }) {
                   </section>
                   {!localAgentInfo && (
                     <p className="mt-3 text-xs leading-5 text-amber-300">
-                      Select <strong>Connect agent</strong> to start the
-                      installed agent and pair automatically, or ask the AI
-                      Assistant in chat to connect it for you. For first-time
-                      setup, follow the{" "}
+                      Select <strong>Connect agent</strong> to set up and start
+                      the Local Agent through the running VS Code extension, or
+                      ask the AI Assistant in chat to connect it for you. If
+                      the extension is unavailable, follow the{" "}
                       <a
                         href="/guide"
                         className="underline underline-offset-2 hover:text-amber-200"

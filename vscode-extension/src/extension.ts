@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { spawn } from "node:child_process";
+import { startLocalAgentBridge } from "./localAgent.js";
 
 const DIAGNOSTIC_SOURCE = "Codevia AI";
 const SESSION_SECRET_KEY_PREFIX = "devforge.backendSessionCookie";
@@ -90,57 +91,61 @@ export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("Codevia AI");
   const diagnostics =
     vscode.languages.createDiagnosticCollection("devforge-ai");
-  context.subscriptions.push(output, diagnostics);
   context.subscriptions.push(
-    vscode.commands.registerCommand("devforge.signIn", () =>
+    output,
+    diagnostics,
+    startLocalAgentBridge(output),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("codevia.signIn", () =>
       chooseSignInBackend(context),
     ),
-    vscode.commands.registerCommand("devforge.signInLocal", () =>
+    vscode.commands.registerCommand("codevia.signInLocal", () =>
       signIn(context, "local"),
     ),
-    vscode.commands.registerCommand("devforge.signInNetlify", () =>
+    vscode.commands.registerCommand("codevia.signInNetlify", () =>
       signIn(context, "netlify"),
     ),
-    vscode.commands.registerCommand("devforge.signOut", () => signOut(context)),
-    vscode.commands.registerCommand("devforge.selectBackend", () =>
+    vscode.commands.registerCommand("codevia.signOut", () => signOut(context)),
+    vscode.commands.registerCommand("codevia.selectBackend", () =>
       selectBackend(),
     ),
-    vscode.commands.registerCommand("devforge.selectAiProvider", () =>
+    vscode.commands.registerCommand("codevia.selectAiProvider", () =>
       selectAiProvider(context),
     ),
-    vscode.commands.registerCommand("devforge.showShortcuts", () =>
+    vscode.commands.registerCommand("codevia.showShortcuts", () =>
       vscode.commands.executeCommand(
         "workbench.view.extension.devforgeContainer",
       ),
     ),
-    vscode.commands.registerCommand("devforge.selectProject", () =>
+    vscode.commands.registerCommand("codevia.selectProject", () =>
       selectProject(context),
     ),
-    vscode.commands.registerCommand("devforge.openChat", () =>
+    vscode.commands.registerCommand("codevia.openChat", () =>
       openChat(context, output),
     ),
-    vscode.commands.registerCommand("devforge.generateProject", () =>
+    vscode.commands.registerCommand("codevia.generateProject", () =>
       generateProject(context, output),
     ),
-    vscode.commands.registerCommand("devforge.reviewCurrentFile", () =>
+    vscode.commands.registerCommand("codevia.reviewCurrentFile", () =>
       reviewCurrentFile(context, diagnostics, output),
     ),
-    vscode.commands.registerCommand("devforge.reviewWorkspace", () =>
+    vscode.commands.registerCommand("codevia.reviewWorkspace", () =>
       reviewWorkspace(context, diagnostics, output),
     ),
-    vscode.commands.registerCommand("devforge.modifyCurrentFile", () =>
+    vscode.commands.registerCommand("codevia.modifyCurrentFile", () =>
       modifyCurrentFile(context, output, false),
     ),
-    vscode.commands.registerCommand("devforge.explainSelection", () =>
+    vscode.commands.registerCommand("codevia.explainSelection", () =>
       explainSelection(context, output),
     ),
-    vscode.commands.registerCommand("devforge.generateTests", () =>
+    vscode.commands.registerCommand("codevia.generateTests", () =>
       generateTests(context, output),
     ),
-    vscode.commands.registerCommand("devforge.fixCurrentFile", () =>
+    vscode.commands.registerCommand("codevia.fixCurrentFile", () =>
       modifyCurrentFile(context, output, true),
     ),
-    vscode.commands.registerCommand("devforge.clearFindings", () => {
+    vscode.commands.registerCommand("codevia.clearFindings", () => {
       diagnostics.clear();
       output.appendLine("Cleared Codevia AI findings.");
       vscode.window.showInformationMessage("Codevia AI findings cleared.");
@@ -225,36 +230,36 @@ class CodeviaCommandsTree implements vscode.TreeDataProvider<vscode.TreeItem> {
       if (!authenticated) {
         return [
           item(
-            "devforge.signInLocal",
+            "codevia.signInLocal",
             "Sign In to Local Backend…",
             "device-desktop",
           ),
           item(
-            "devforge.signInNetlify",
+            "codevia.signInNetlify",
             "Sign In to Hosted Backend…",
             "cloud",
           ),
-          item("devforge.selectBackend", "Select Backend", "server-environment"),
+          item("codevia.selectBackend", "Select Backend", "server-environment"),
         ];
       }
       // All processes run from chat; the sidebar only opens chat and manages
       // the account. Generate/review/modify/tests/error analysis stay available
       // as commands (chat routes work to them) but are not listed here.
       return [
-        item("devforge.openChat", "Open Chat (Ctrl+Alt+D)", "comment"),
+        item("codevia.openChat", "Open Chat (Ctrl+Alt+D)", "comment"),
         item(
-          "devforge.signInLocal",
+          "codevia.signInLocal",
           "Sign In to Local Backend…",
           "device-desktop",
         ),
         item(
-          "devforge.signInNetlify",
+          "codevia.signInNetlify",
           "Sign In to Hosted Backend…",
           "cloud",
         ),
-        item("devforge.selectBackend", "Select Backend", "server-environment"),
-        item("devforge.clearFindings", "Clear Findings", "clear-all"),
-        item("devforge.signOut", "Sign Out", "sign-out"),
+        item("codevia.selectBackend", "Select Backend", "server-environment"),
+        item("codevia.clearFindings", "Clear Findings", "clear-all"),
+        item("codevia.signOut", "Sign Out", "sign-out"),
       ];
     } catch (error) {
       // Never let an auth lookup failure hide the direct backend sign-in commands.
@@ -263,7 +268,7 @@ class CodeviaCommandsTree implements vscode.TreeDataProvider<vscode.TreeItem> {
         vscode.TreeItemCollapsibleState.None,
       );
       fallback.command = {
-        command: "devforge.signInNetlify",
+        command: "codevia.signInNetlify",
         title: "Sign In to Hosted Backend",
       };
       fallback.iconPath = new vscode.ThemeIcon("cloud");
@@ -272,7 +277,7 @@ class CodeviaCommandsTree implements vscode.TreeDataProvider<vscode.TreeItem> {
         vscode.TreeItemCollapsibleState.None,
       );
       local.command = {
-        command: "devforge.signInLocal",
+        command: "codevia.signInLocal",
         title: "Sign In to Local Backend",
       };
       local.iconPath = new vscode.ThemeIcon("device-desktop");
@@ -1212,7 +1217,7 @@ const vscode=acquireVsCodeApi();const github=document.getElementById('github');c
               `Connected to ${environmentLabel}${identity ? ` as ${identity}` : ""}. ${nextStep}`,
             );
             setTimeout(() => {
-              void vscode.commands.executeCommand("devforge.openChat");
+              void vscode.commands.executeCommand("codevia.openChat");
             }, 600);
             return;
           } catch (error) {

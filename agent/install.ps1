@@ -23,7 +23,7 @@ $sourceRoot = Join-Path $installRoot "src"
 $repository = "https://raw.githubusercontent.com/AungKoLin828/devforge-ai-tool/main/agent/src"
 # Pin expected content hashes so a partial or altered download is never installed.
 $expectedHashes = @{
-  "index.js" = "8EA91B63F4C9EE67F51DFC1B0128A7998E54A9F098060EDE75F551209D11BF3C"
+  "index.js" = "A54E1F7C63BBCCA0C4CDF27272E86D09C9B4181D660F3C0D2392803CC441C4B2"
   "executor.js" = "FB1059A897334989321F14A0A841D4EB7C32667400B0909B10AD15DAC1C54151"
   "security.js" = "109A76165151907E8433D4AE2F4B5F45C5FFE8750E0E10E94DC97F78F2BEA864"
 }

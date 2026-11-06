@@ -2,7 +2,7 @@
   "name": "codevia-ai",
   "displayName": "Codevia AI",
   "description": "AI coding assistant connected to the Codevia AI service.",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "publisher": "CodeviaAI",
   "license": "UNLICENSED",
   "engines": {
@@ -15,108 +15,108 @@
   ],
   "activationEvents": [
     "onStartupFinished",
-    "onCommand:devforge.selectAiProvider",
-    "onCommand:devforge.selectProject",
-    "onCommand:devforge.signOut",
-    "onCommand:devforge.selectBackend",
-    "onCommand:devforge.signIn",
-    "onCommand:devforge.signInLocal",
-    "onCommand:devforge.signInNetlify",
-    "onCommand:devforge.openChat",
-    "onCommand:devforge.generateProject",
-    "onCommand:devforge.reviewCurrentFile",
-    "onCommand:devforge.reviewWorkspace",
-    "onCommand:devforge.modifyCurrentFile",
-    "onCommand:devforge.explainSelection",
-    "onCommand:devforge.generateTests",
-    "onCommand:devforge.fixCurrentFile",
-    "onCommand:devforge.clearFindings"
+    "onCommand:codevia.selectAiProvider",
+    "onCommand:codevia.selectProject",
+    "onCommand:codevia.signOut",
+    "onCommand:codevia.selectBackend",
+    "onCommand:codevia.signIn",
+    "onCommand:codevia.signInLocal",
+    "onCommand:codevia.signInNetlify",
+    "onCommand:codevia.openChat",
+    "onCommand:codevia.generateProject",
+    "onCommand:codevia.reviewCurrentFile",
+    "onCommand:codevia.reviewWorkspace",
+    "onCommand:codevia.modifyCurrentFile",
+    "onCommand:codevia.explainSelection",
+    "onCommand:codevia.generateTests",
+    "onCommand:codevia.fixCurrentFile",
+    "onCommand:codevia.clearFindings"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "devforge.signIn",
+        "command": "codevia.signIn",
         "title": "Codevia AI: Sign In (Choose Backend)",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.signInLocal",
+        "command": "codevia.signInLocal",
         "title": "Codevia AI: Sign In to Local Backend",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.signInNetlify",
+        "command": "codevia.signInNetlify",
         "title": "Codevia AI: Sign In to Hosted Backend",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.selectProject",
+        "command": "codevia.selectProject",
         "title": "Codevia AI: Select Project",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.signOut",
+        "command": "codevia.signOut",
         "title": "Codevia AI: Sign Out",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.selectBackend",
+        "command": "codevia.selectBackend",
         "title": "Codevia AI: Select Backend",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.selectAiProvider",
+        "command": "codevia.selectAiProvider",
         "title": "Codevia AI: Select AI Provider & Configure API Key",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.showShortcuts",
+        "command": "codevia.showShortcuts",
         "title": "Codevia AI: Show Shortcuts",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.openChat",
+        "command": "codevia.openChat",
         "title": "Codevia AI: Open Chat",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.generateProject",
+        "command": "codevia.generateProject",
         "title": "Codevia AI: Generate Project",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.reviewCurrentFile",
+        "command": "codevia.reviewCurrentFile",
         "title": "Codevia AI: Review Current File",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.reviewWorkspace",
+        "command": "codevia.reviewWorkspace",
         "title": "Codevia AI: Review Workspace",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.modifyCurrentFile",
+        "command": "codevia.modifyCurrentFile",
         "title": "Codevia AI: Modify Current File",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.explainSelection",
+        "command": "codevia.explainSelection",
         "title": "Codevia AI: Explain Code / Selection",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.generateTests",
+        "command": "codevia.generateTests",
         "title": "Codevia AI: Generate Tests",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.fixCurrentFile",
+        "command": "codevia.fixCurrentFile",
         "title": "Codevia AI: Fix Errors in Current File",
         "category": "Codevia AI"
       },
       {
-        "command": "devforge.clearFindings",
+        "command": "codevia.clearFindings",
         "title": "Codevia AI: Clear Findings",
         "category": "Codevia AI"
       }
@@ -183,27 +183,27 @@
     },
     "keybindings": [
       {
-        "command": "devforge.openChat",
+        "command": "codevia.openChat",
         "key": "ctrl+alt+d",
         "mac": "cmd+alt+d"
       },
       {
-        "command": "devforge.reviewCurrentFile",
+        "command": "codevia.reviewCurrentFile",
         "key": "ctrl+alt+r",
         "mac": "cmd+alt+r"
       },
       {
-        "command": "devforge.explainSelection",
+        "command": "codevia.explainSelection",
         "key": "ctrl+alt+e",
         "mac": "cmd+alt+e"
       },
       {
-        "command": "devforge.modifyCurrentFile",
+        "command": "codevia.modifyCurrentFile",
         "key": "ctrl+alt+m",
         "mac": "cmd+alt+m"
       },
       {
-        "command": "devforge.fixCurrentFile",
+        "command": "codevia.fixCurrentFile",
         "key": "ctrl+alt+f",
         "mac": "cmd+alt+f"
       }
@@ -211,38 +211,38 @@
     "menus": {
       "editor/context": [
         {
-          "command": "devforge.openChat",
+          "command": "codevia.openChat",
           "group": "navigation@99"
         },
         {
-          "command": "devforge.reviewCurrentFile",
+          "command": "codevia.reviewCurrentFile",
           "when": "editorTextFocus",
           "group": "navigation@100"
         },
         {
-          "command": "devforge.modifyCurrentFile",
+          "command": "codevia.modifyCurrentFile",
           "when": "editorTextFocus",
           "group": "navigation@101"
         },
         {
-          "command": "devforge.explainSelection",
+          "command": "codevia.explainSelection",
           "when": "editorTextFocus",
           "group": "navigation@102"
         },
         {
-          "command": "devforge.generateTests",
+          "command": "codevia.generateTests",
           "when": "editorTextFocus",
           "group": "navigation@103"
         },
         {
-          "command": "devforge.fixCurrentFile",
+          "command": "codevia.fixCurrentFile",
           "when": "editorTextFocus",
           "group": "navigation@104"
         }
       ],
       "explorer/context": [
         {
-          "command": "devforge.reviewWorkspace",
+          "command": "codevia.reviewWorkspace",
           "when": "explorerViewletFocus",
           "group": "navigation@100"
         }

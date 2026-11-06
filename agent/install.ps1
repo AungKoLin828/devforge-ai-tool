@@ -119,7 +119,7 @@ finally {
 $launcherPath = Join-Path $installRoot "Start-DevForgeAgent.ps1"
 Set-Content -LiteralPath $launcherPath -Value $launcher -Encoding utf8
 
-# Register a per-user URL handler so a user gesture in DevForge can start the agent.
+# Register a per-user URL handler so a user gesture in Codevia AI can start the agent.
 $protocolKey = "HKCU:\Software\Classes\devforge-agent"
 $protocolCommandKey = Join-Path $protocolKey "shell\open\command"
 New-Item -Path $protocolCommandKey -Force | Out-Null
@@ -143,7 +143,7 @@ Start-Process `
   -WindowStyle Hidden
 
 Write-Host ""
-Write-Host "DevForge Local Agent installed without cloning the DevForge application."
+Write-Host "Codevia AI Local Agent installed without cloning the Codevia AI application."
 Write-Host "Agent files: $installRoot"
 Write-Host "Workspace:   $workspace"
 Write-Host ""

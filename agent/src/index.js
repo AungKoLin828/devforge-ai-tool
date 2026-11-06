@@ -71,7 +71,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.url === "/pair" && req.method === "GET") {
         if (!origin || !allowedOrigins.has(origin)) {
-            return respond(res, { error: "Pairing requires an approved DevForge origin." }, 403);
+            return respond(res, { error: "Pairing requires an approved Codevia AI origin." }, 403);
         }
         return respond(res, { success: true, token }, 200, origin);
     }
@@ -82,7 +82,7 @@ const server = http.createServer(async (req, res) => {
         if (req.url === "/health" && req.method === "GET") {
             return respond(res, {
                 ok: true,
-                agent: "DevForge Agent",
+                agent: "Codevia AI Agent",
                 machine: os.hostname(),
                 platform: process.platform,
                 workspaceRoot: root,
@@ -210,7 +210,7 @@ const server = http.createServer(async (req, res) => {
     }
 });
 server.listen(port, "127.0.0.1", () => {
-    console.log(`DevForge Local Agent listening on http://127.0.0.1:${port}`);
+    console.log(`Codevia AI Local Agent listening on http://127.0.0.1:${port}`);
     if (process.env.DEVFORGE_AGENT_SILENT !== "1") {
         console.log(`Pairing token: ${token}`);
     }

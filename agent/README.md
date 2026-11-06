@@ -1,4 +1,4 @@
-# DevForge Local Agent
+# Codevia AI Local Agent
 
 The agent is a separate local process. It is intentionally bound to `127.0.0.1` and only operates inside `DEVFORGE_WORKSPACE`.
 

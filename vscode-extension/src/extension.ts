@@ -674,7 +674,7 @@ async function selectAiProvider(
     :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;padding:20px;background:var(--vscode-editor-background);color:var(--vscode-foreground);font:13px var(--vscode-font-family)}h2{margin:0 0 4px;font-size:16px}p.desc{margin:0 0 16px;opacity:.75;font-size:12px}label{display:block;margin:12px 0 4px;font-weight:600}input,select{width:100%;padding:7px 9px;border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:4px;background:var(--vscode-input-background);color:var(--vscode-input-foreground);font:inherit}input[type=password]{letter-spacing:2px}.hint{font-size:11px;opacity:.7;margin-top:4px}.buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}button{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border:0;border-radius:4px;padding:7px 14px;cursor:pointer;font:inherit}button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}button:disabled{opacity:.5;cursor:default}#status{font-size:12px;opacity:.8;margin-top:8px;min-height:16px}.prov{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--vscode-panel-border);border-radius:4px;margin-top:6px;cursor:pointer}.prov:hover{background:var(--vscode-list-hoverBackground)}.prov.sel{background:var(--vscode-list-activeSelectionBackground);color:var(--vscode-list-activeSelectionForeground)}.prov .meta{font-size:11px;opacity:.75}
     </style></head><body>
     <h2>AI provider</h2>
-    <p class="desc">Select the provider to use, then save its API key and model in the same place. Keys are stored encrypted on the DevForge server.</p>
+    <p class="desc">Select the provider to use, then save its API key and model in the same place. Keys are stored encrypted on the Codevia AI server.</p>
     <div id="providers"></div>
     <div id="config">
       <label for="apiKey">API key</label>
@@ -906,7 +906,7 @@ async function apiRequest<T>(
   const baseUrl = getBackendUrl();
   if (!isAllowedBackendUrl(baseUrl))
     throw new Error(
-      "DevForge backend must use HTTPS, except localhost/127.0.0.1 for local development.",
+      "Codevia AI backend must use HTTPS, except localhost/127.0.0.1 for local development.",
     );
   const cookie = await context.secrets.get(getSessionSecretKey());
   const headers = new Headers(init.headers ?? {});
@@ -939,13 +939,13 @@ async function apiRequest<T>(
       if (response.status === 401 || response.status === 403) {
         if (!allowUnauthenticated)
           throw new Error(
-            "Your DevForge session is missing or expired. Run “Codevia AI: Sign In” and complete browser pairing again.",
+            "Your Codevia AI session is missing or expired. Run “Codevia AI: Sign In” and complete browser pairing again.",
           );
       }
       throw new Error(
         errorValue ||
           data.message ||
-          `DevForge API returned HTTP ${response.status} for ${path}`,
+          `Codevia AI API returned HTTP ${response.status} for ${path}`,
       );
     }
     return data as T;
@@ -1100,7 +1100,7 @@ async function signIn(
 :root{color-scheme:dark;--bg:#080d18;--panel:#101827;--line:#263449;--muted:#9aa9bd;--text:#edf3ff;--blue:#5b8cff;--cyan:#65d5e8}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -20%,#1c3760 0,transparent 55%),var(--bg);color:var(--text);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh;display:grid;place-items:center;padding:24px}
 .shell{width:100%;max-width:440px}.brand{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:24px}.brand img{width:52px;height:52px;object-fit:contain;border-radius:13px}.brand h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.2px}.brand p{margin:2px 0 0;color:var(--muted);font-size:12px}.card{border:1px solid var(--line);background:linear-gradient(160deg,rgba(20,32,51,.97),rgba(12,19,31,.98));border-radius:18px;padding:28px;box-shadow:0 22px 70px #0006}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:1.7px;color:var(--cyan);font-weight:700}.card h2{font-size:25px;line-height:1.25;margin:9px 0 10px}.desc{color:var(--muted);margin:0 0 22px}.env{display:flex;align-items:center;gap:10px;border:1px solid var(--line);background:#0b1321;border-radius:10px;padding:12px;margin-bottom:18px}.dot{width:9px;height:9px;border-radius:50%;background:#56d6a0;box-shadow:0 0 12px #56d6a066}.env strong{display:block;font-size:13px}.env small{display:block;color:var(--muted);font-size:11px}.btn{width:100%;border:0;border-radius:10px;padding:12px 16px;font:600 14px inherit;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;min-height:45px}.primary{background:linear-gradient(100deg,#4d7cff,#5b9cff);color:white;box-shadow:0 8px 24px #4b7dff35}.primary:hover{filter:brightness(1.08)}.secondary{margin-top:10px;border:1px solid var(--line);background:#121e30;color:var(--text)}.btn:disabled{opacity:.55;cursor:wait}.status{min-height:44px;margin-top:15px;padding:10px 12px;border-radius:9px;background:#0b1320;color:var(--muted);font-size:12px}.status.good{color:#8ee3bd}.status.error{color:#ffb4b4}.foot{color:#74849b;font-size:11px;text-align:center;margin-top:17px}.shield{display:inline-block;margin-right:4px}
-</style></head><body><main class="shell"><div class="brand"><img src="${logoUri}" alt="Codevia AI"><div><h1>Codevia AI</h1><p>Developer tools for VS Code</p></div></div><section class="card"><div class="eyebrow">Secure account connection</div><h2>Sign in to continue</h2><p class="desc">Connect your DevForge account to use AI chat, code review, project generation, and other coding tools from VS Code.</p><div class="env"><span class="dot"></span><div><strong>${escapeHtml(environmentLabel)}</strong><small>${escapeHtml(baseUrl)}</small></div></div><button class="btn primary" id="github"><span>↗</span> Continue with GitHub</button><button class="btn secondary" id="retry">Check connection</button><div id="status" class="status" role="status">A browser window will open so you can sign in securely. No AI provider API key is needed in VS Code.</div></section><div class="foot"><span class="shield">◆</span> Your session is stored securely using VS Code SecretStorage.</div></main>
+</style></head><body><main class="shell"><div class="brand"><img src="${logoUri}" alt="Codevia AI"><div><h1>Codevia AI</h1><p>Developer tools for VS Code</p></div></div><section class="card"><div class="eyebrow">Secure account connection</div><h2>Sign in to continue</h2><p class="desc">Connect your Codevia AI account to use AI chat, code review, project generation, and other coding tools from VS Code.</p><div class="env"><span class="dot"></span><div><strong>${escapeHtml(environmentLabel)}</strong><small>${escapeHtml(baseUrl)}</small></div></div><button class="btn primary" id="github"><span>↗</span> Continue with GitHub</button><button class="btn secondary" id="retry">Check connection</button><div id="status" class="status" role="status">A browser window will open so you can sign in securely. No AI provider API key is needed in VS Code.</div></section><div class="foot"><span class="shield">◆</span> Your session is stored securely using VS Code SecretStorage.</div></main>
 <script nonce="${nonce}">
 const vscode=acquireVsCodeApi();const github=document.getElementById('github');const retry=document.getElementById('retry');const status=document.getElementById('status');function busy(text){github.disabled=true;retry.disabled=true;status.className='status';status.textContent=text;}github.addEventListener('click',()=>{busy('Preparing secure sign-in…');vscode.postMessage({type:'signIn'});});retry.addEventListener('click',()=>{busy('Checking your connection…');vscode.postMessage({type:'check'});});window.addEventListener('message',e=>{const m=e.data||{};if(m.type==='status'){status.className='status';status.textContent=m.text;}if(m.type==='error'){status.className='status error';status.textContent=m.text;github.disabled=false;retry.disabled=false;}if(m.type==='success'){status.className='status good';status.textContent=m.text;github.disabled=false;retry.disabled=false;}});
 </script></body></html>`;
@@ -1277,7 +1277,7 @@ async function signOut(context: vscode.ExtensionContext): Promise<void> {
   await context.secrets.delete(getSessionSecretKey());
   await context.globalState.update(getProjectStateKey(), undefined);
   vscode.window.showInformationMessage(
-    "DevForge session removed from VS Code SecretStorage. Your DevForge web account is unchanged.",
+    "Codevia AI session removed from VS Code SecretStorage. Your Codevia AI web account is unchanged.",
   );
   refreshCommandsTree();
 }
@@ -1285,13 +1285,13 @@ async function signOut(context: vscode.ExtensionContext): Promise<void> {
 async function requireSession(context: vscode.ExtensionContext): Promise<void> {
   if (!(await context.secrets.get(getSessionSecretKey()))) {
     const action = await vscode.window.showInformationMessage(
-      "Connect your DevForge account to the selected backend.",
+      "Connect your Codevia AI account to the selected backend.",
       "Sign In",
     );
     if (action === "Sign In") await signIn(context);
   }
   if (!(await context.secrets.get(getSessionSecretKey())))
-    throw new Error("Sign in to your DevForge account first.");
+    throw new Error("Sign in to your Codevia AI account first.");
   await apiRequest(context, "/api/auth/me");
 }
 
@@ -1319,25 +1319,25 @@ async function selectProject(
     project,
   }));
   choices.push({
-    label: "$(add) Create a new DevForge project",
-    description: "Create a project in your existing DevForge account",
+    label: "$(add) Create a new Codevia AI project",
+    description: "Create a project in your existing Codevia AI account",
     createNew: true,
   });
   const picked = await vscode.window.showQuickPick(choices, {
-    title: "Choose the DevForge project for this workspace",
+    title: "Choose the Codevia AI project for this workspace",
     placeHolder: "Select a project or create one",
   });
   if (!picked) return undefined;
   if (picked.project) {
     await context.globalState.update(getProjectStateKey(), picked.project.id);
     vscode.window.showInformationMessage(
-      `DevForge project selected: ${picked.project.name}`,
+      `Codevia AI project selected: ${picked.project.name}`,
     );
     return picked.project;
   }
   if (picked.createNew) {
     const name = await vscode.window.showInputBox({
-      title: "Create DevForge project",
+      title: "Create Codevia AI project",
       prompt: "Enter a project name",
       value: vscode.workspace.workspaceFolders?.[0]?.name ?? "VS Code Project",
       ignoreFocusOut: true,
@@ -1359,7 +1359,7 @@ async function selectProject(
     );
     await context.globalState.update(getProjectStateKey(), created.project.id);
     vscode.window.showInformationMessage(
-      `Created and selected DevForge project: ${created.project.name}`,
+      `Created and selected Codevia AI project: ${created.project.name}`,
     );
     return created.project;
   }
@@ -1407,7 +1407,7 @@ async function ensureProject(
   );
   await context.globalState.update(getProjectStateKey(), created.project.id);
   vscode.window.showInformationMessage(
-    `DevForge default project created: ${created.project.name}`,
+    `Codevia AI default project created: ${created.project.name}`,
   );
   refreshCommandsTree();
   return created.project;
@@ -1441,7 +1441,7 @@ async function requestAssistant(
     chunks.push(prompt.slice(i, i + chunkSize));
   if (chunks.length > 12)
     throw new Error(
-      `This request is too large for the DevForge assistant API (${chunks.length} message parts; maximum 12). Reduce the workspace/file size and retry.`,
+      `This request is too large for the Codevia AI assistant API (${chunks.length} message parts; maximum 12). Reduce the workspace/file size and retry.`,
     );
   const messages = chunks.map((content) => ({ role: "user", content }));
   // The selected provider is passed through; the server defaults to OpenRouter when omitted.
@@ -1461,7 +1461,7 @@ async function requestAssistant(
         },
       );
       if (typeof result.answer !== "string" || !result.answer.trim())
-        throw new Error("The DevForge assistant endpoint returned no answer.");
+        throw new Error("The Codevia AI assistant endpoint returned no answer.");
       return result.answer
         .trim()
         .replace(/^```(?:\w+)?\s*/i, "")
@@ -1477,7 +1477,7 @@ async function requestAssistant(
   }
   throw lastCause instanceof Error
     ? lastCause
-    : new Error("The DevForge assistant request failed.");
+    : new Error("The Codevia AI assistant request failed.");
 }
 
 type LocalCommandRequest = {
@@ -1724,7 +1724,7 @@ async function startProjectRun(
     body: JSON.stringify({ provider, ...(prompt ? { prompt } : {}) }),
   });
   if (!result.run?.id)
-    throw new Error(`The DevForge ${action} endpoint did not return a run.`);
+    throw new Error(`The Codevia AI ${action} endpoint did not return a run.`);
   return result.run;
 }
 
@@ -1754,10 +1754,10 @@ async function waitForRun(
     if (status === "SUCCESS") return true;
     if (status === "FAILED")
       throw new Error(
-        result.run?.error || `The DevForge ${run.operation ?? "run"} failed.`,
+        result.run?.error || `The Codevia AI ${run.operation ?? "run"} failed.`,
       );
   }
-  throw new Error("The DevForge background run timed out. Try again later.");
+  throw new Error("The Codevia AI background run timed out. Try again later.");
 }
 
 /** Fetch the saved project artifacts via GET /api/projects/:id. */

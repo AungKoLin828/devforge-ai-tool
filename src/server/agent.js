@@ -12,7 +12,7 @@ export async function registerAgent(userId, input) {
     const agent = await prisma.localAgent.create({
         data: {
             userId,
-            agentName: String(input.agentName || "DevForge Agent"),
+            agentName: String(input.agentName || "Codevia AI Agent"),
             machineName: input.machineName,
             platform: input.platform,
             architecture: input.architecture,

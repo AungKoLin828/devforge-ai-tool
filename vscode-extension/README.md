@@ -2,13 +2,13 @@
 
 Codevia AI adds a custom chat panel and coding commands to VS Code. Requests to create a new project from chat use the project-generation workflow and copy the generated files into your open workspace. If no workspace is open, VS Code asks you to choose a local destination folder. You review the file list and confirm before files are written; existing files are skipped unless you explicitly choose to overwrite them.
 
-The extension connects to the hosted DevForge backend by default and does not add or require an AI-provider API key inside the extension. It can keep separate sign-ins for both the hosted server and your local development server; after sign-in, that backend becomes active and chat opens automatically. Use **Codevia AI: Select Backend** to switch between signed-in backends. The Local Agent is not required for the extension to save generated files to a folder on your PC.
+The extension connects to the hosted Codevia AI backend by default and does not add or require an AI-provider API key inside the extension. It can keep separate sign-ins for both the hosted server and your local development server; after sign-in, that backend becomes active and chat opens automatically. Use **Codevia AI: Select Backend** to switch between signed-in backends. The Local Agent is not required for the extension to save generated files to a folder on your PC.
 
 The Marketplace extension ID is `CodeviaAI.codevia-ai`. Publishing requires access to a VS Code Marketplace publisher named `CodeviaAI`.
 
 ## Choose local or Netlify backend
 
-The extension supports both environments without changing the DevForge web app or Netlify Functions. Use **Codevia AI: Select Backend** from the Command Palette, or open **VS Code Settings** (`Ctrl+,`) and search for **Codevia AI**:
+The extension supports both environments without changing the Codevia AI web app or Netlify Functions. Use **Codevia AI: Select Backend** from the Command Palette, or open **VS Code Settings** (`Ctrl+,`) and search for **Codevia AI**:
 
 - `Codevia AI Developer Tools: Backend Environment` = `local` or `netlify` (default).
 - `Local Backend Url` defaults to `http://localhost:8888`.
@@ -16,7 +16,7 @@ The extension supports both environments without changing the DevForge web app o
 
 ### Local development
 
-1. Start the DevForge web app from its project root using `npm run dev:netlify`.
+1. Start the Codevia AI web app from its project root using `npm run dev:netlify`.
 2. Netlify CLI normally serves the app and functions at `http://localhost:8888`. Use that full origin in `Local Backend Url` if your port differs.
 3. Run **Codevia AI: Sign In to Local Backend** and complete GitHub sign-in in the browser. This stores a local session separately from the hosted session, makes the local backend active, and opens chat.
 
@@ -31,24 +31,24 @@ You can sign in to both backends once and switch between them without signing in
 
 ## How the connection works
 
-The extension uses existing routes from the DevForge application:
+The extension uses existing routes from the Codevia AI application:
 
-- `GET /api/auth/me` — verify your existing DevForge session.
+- `GET /api/auth/me` — verify your existing Codevia AI session.
 - `GET /api/projects` — list projects in your account.
-- `POST /api/projects` — create a DevForge project if you choose to.
+- `POST /api/projects` — create a Codevia AI project if you choose to.
 - `POST /api/assistant/chat` — send general chat prompts.
 - `POST /api/projects/:projectId/generate` and the project run/artifact routes — generate project files and retrieve the saved artifact before copying files to your selected local folder.
 
-It does **not** call a new `/api/vscode/assistant` endpoint. AI provider credentials remain managed by your existing DevForge account/backend. Your account must have an AI provider configured; if no provider is configured, the backend will report that error.
+It does **not** call a new `/api/vscode/assistant` endpoint. AI provider credentials remain managed by your existing Codevia AI account/backend. Your account must have an AI provider configured; if no provider is configured, the backend will report that error.
 
 ## Requirements
 
 - VS Code 1.85 or later.
 - Node.js 20 or later recommended for building.
-- An account on the selected local or hosted DevForge site.
+- An account on the selected local or hosted Codevia AI site.
 - A GitHub account on the selected backend.
-- At least one DevForge project, or permission to create one.
-- An AI provider configured for your account in the existing DevForge web app.
+- At least one Codevia AI project, or permission to create one.
+- An AI provider configured for your account in the existing Codevia AI web app.
 - A writable local folder to use as the project destination. Open it in VS Code first, or select one when prompted.
 
 ## Build and install on Windows
@@ -70,7 +70,7 @@ code --install-extension .\codevia-ai-1.0.5.vsix --force
 
 If the filename differs, use the actual `.vsix` file created by `npm run package`. Reload VS Code after installing.
 
-## First-time setup: connect your existing DevForge account
+## First-time setup: connect your existing Codevia AI account
 
 The extension uses one-time browser pairing to sign in, so you don't need to copy browser cookies into VS Code. Hosted and local sessions are stored separately.
 
@@ -84,7 +84,7 @@ The pairing code expires after a short time and can only be used once. The local
 
 ### Change project or sign out
 
-- Run **Codevia AI: Select Project** to change the DevForge project associated with extension requests.
+- Run **Codevia AI: Select Project** to change the Codevia AI project associated with extension requests.
 - Run **Codevia AI: Sign Out** to delete the saved session token for the currently selected backend and clear its selected project. The other backend's session remains connected. This does not sign you out of the browser or revoke the server session; use the web app's sign-out flow if you also want to end that session.
 - If your session expires, repeat browser pairing for the selected backend.
 
@@ -92,7 +92,7 @@ The pairing code expires after a short time and can only be used once. The local
 
 Open the Command Palette with `Ctrl+Shift+P` and search for `Codevia AI`.
 
-- **Open Chat** — send natural-language instructions to DevForge. Requests to create a new project use the project-generation workflow and save generated files into your workspace or a folder you select.
+- **Open Chat** — send natural-language instructions to Codevia AI. Requests to create a new project use the project-generation workflow and save generated files into your workspace or a folder you select.
 - **Generate Project** — choose a destination folder for each new project, request its structure and source files, preview proposed paths, and confirm whether to skip or overwrite existing files.
 - **Review Current File** — ask the hosted AI service to review the active source file; findings appear in VS Code's Problems panel.
 - **Review Workspace** — review eligible files from the open workspace, subject to size limits.
@@ -100,7 +100,7 @@ Open the Command Palette with `Ctrl+Shift+P` and search for `Codevia AI`.
 - **Explain Code / Selection** — explain the selected code or the active file.
 - **Generate Tests** — generate a test file and choose where to save it.
 - **Fix Errors in Current File** — provide error details and review the proposed change before applying.
-- **Clear Findings** — clear DevForge review diagnostics.
+- **Clear Findings** — clear Codevia AI review diagnostics.
 - **Chat progress and local actions** — see the actual request, file-save, verification, and review stages; AI-proposed build/test/inspection commands show live output in chat. The extension asks before running any command and restricts execution to its documented allowlist. Private model reasoning is not exposed.
 - **Chat action requests** — answer destination, create-files, overwrite/skip/cancel, and review prompts directly in the chat. Choosing a local folder opens the native folder picker.
 - **Dependency installation** — after saving a root `package.json` or `requirements.txt`, choose whether to install dependencies. Install output is shown in the **Codevia AI** Output channel; JavaScript projects use the detected lockfile's package manager (or npm), and Python requirements are installed in a project-local `.venv`.
@@ -130,7 +130,7 @@ Run **Codevia AI: Sign In (Choose Backend)** and complete browser pairing for th
 
 ### `AI provider is not configured`
 
-Open the DevForge web app, configure a provider for your account using the web app's existing settings, and retry. No provider key should be entered into VS Code.
+Open the Codevia AI web app, configure a provider for your account using the web app's existing settings, and retry. No provider key should be entered into VS Code.
 
 ### `Project not found` or `Forbidden`
 
@@ -154,10 +154,10 @@ Fix reported TypeScript errors before packaging. Use the filename actually produ
 
 - No AI-provider API key is bundled or requested by the extension.
 - The session token is stored using VS Code SecretStorage. Treat it as a password.
-- Source code and prompts sent through chat are processed by the DevForge backend and configured AI provider. Do not send confidential code unless permitted by your organization and provider policy.
+- Source code and prompts sent through chat are processed by the Codevia AI backend and configured AI provider. Do not send confidential code unless permitted by your organization and provider policy.
 - The extension skips common secret/config files and generated/dependency folders when scanning workspaces, but you should inspect included context before sending it.
 - Never commit session tokens, `.env` files, API keys, or other credentials.
 
 ## Scope of this package
 
-This package modifies only the VS Code extension. It does not modify the DevForge web application, Netlify Functions, database schema, or local agent. Sign-in uses one-time browser pairing supported by the selected backend.
+This package modifies only the VS Code extension. It does not modify the Codevia AI web application, Netlify Functions, database schema, or local agent. Sign-in uses one-time browser pairing supported by the selected backend.

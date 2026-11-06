@@ -55,7 +55,7 @@ You do **not** need to clone or download the application source repository, and 
 2. Open PowerShell and download the small installer script:
 
    ```powershell
-   $installer = Join-Path $env:TEMP "install-devforge-agent.ps1"
+   $installer = Join-Path $env:TEMP "install-codevia-agent.ps1"
    Invoke-WebRequest `
      -Uri "https://raw.githubusercontent.com/AungKoLin828/devforge-ai-tool/main/agent/install.ps1" `
      -OutFile $installer

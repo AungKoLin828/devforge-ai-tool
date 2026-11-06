@@ -6,5 +6,5 @@ const target = new URL("../frontend/public/downloads/", import.meta.url);
 await mkdir(target, { recursive: true });
 await copyFile(
   source,
-  new URL("install-devforge-agent.ps1", target),
+  new URL("install-codevia-agent.ps1", target),
 );

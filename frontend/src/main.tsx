@@ -1612,7 +1612,7 @@ function App({ user }: { user: User }) {
       }
       if (!token && startAgent && /Win/i.test(navigator.userAgent)) {
         const installerResponse = await fetch(
-          "/downloads/install-devforge-agent.ps1",
+          "/downloads/install-codevia-agent.ps1",
           { cache: "no-store" },
         );
         if (!installerResponse.ok) {
@@ -1624,7 +1624,7 @@ function App({ user }: { user: User }) {
         const downloadUrl = URL.createObjectURL(installer);
         const link = document.createElement("a");
         link.href = downloadUrl;
-        link.download = "install-devforge-agent.ps1";
+        link.download = "install-codevia-agent.ps1";
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -1632,7 +1632,7 @@ function App({ user }: { user: User }) {
         showModal(
           "info",
           "Local Agent installer downloaded",
-          "The Local Agent could not be started automatically. Install and open the Codevia AI VS Code extension to enable background setup, or review the downloaded installer and run it from PowerShell with:\n\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$HOME\\Downloads\\install-devforge-agent.ps1\"\n\nThe installer verifies the downloaded agent files, creates the workspace, and starts the agent. Keep this page open; connection will continue automatically.",
+          "The Local Agent could not be started automatically. Install and open the Codevia AI VS Code extension to enable background setup, or review the downloaded installer and run it from PowerShell with:\n\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$HOME\\Downloads\\install-codevia-agent.ps1\"\n\nThe installer verifies the downloaded agent files, creates the workspace, and starts the agent. Keep this page open; connection will continue automatically.",
         );
         setLogs((current) => [
           ...current,

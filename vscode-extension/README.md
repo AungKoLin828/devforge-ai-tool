@@ -61,13 +61,14 @@ Open PowerShell:
 cd C:\devforge-ai-tool\vscode-extension
 npm install
 npm run compile
+npm test
 npm run package
 ```
 
 Install the `.vsix` file produced by `npm run package`:
 
 ```powershell
-code --install-extension .\codevia-ai-1.0.5.vsix --force
+code --install-extension .\codevia-ai-1.0.8.vsix --force
 ```
 
 If the filename differs, use the actual `.vsix` file created by `npm run package`. Reload VS Code after installing.

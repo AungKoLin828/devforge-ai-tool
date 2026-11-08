@@ -2,7 +2,7 @@
   "name": "codevia-ai",
   "displayName": "Codevia AI",
   "description": "AI coding assistant connected to the Codevia AI service.",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "publisher": "CodeviaAI",
   "license": "UNLICENSED",
   "engines": {

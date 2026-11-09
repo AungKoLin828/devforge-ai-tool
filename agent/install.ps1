@@ -87,7 +87,7 @@ try {
   }
 
   `$node = Get-Command node -ErrorAction Stop
-  `$env:DEVFORGE_WORKSPACE = '$escapedWorkspace'
+  `$env:CODEVIA_WORKSPACE = '$escapedWorkspace'
   `$env:DEVFORGE_AGENT_SILENT = '1'
   `$entryPoint = Join-Path `$PSScriptRoot 'src\index.js'
   `$stdout = Join-Path `$PSScriptRoot 'agent.stdout.log'

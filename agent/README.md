@@ -1,13 +1,13 @@
 # Codevia AI Local Agent
 
-The agent is a separate local process. It is intentionally bound to `127.0.0.1` and only operates inside `DEVFORGE_WORKSPACE`.
+The agent is a separate local process. It is intentionally bound to `127.0.0.1` and only operates inside `CODEVIA_WORKSPACE`.
 
 ## Run
 
 ```bash
 npm install
-set DEVFORGE_AGENT_TOKEN=replace-me
-set DEVFORGE_WORKSPACE=C:\CodeviaAI
+set CODEVIA_AGENT_TOKEN=replace-me
+set CODEVIA_WORKSPACE=C:\CodeviaAI
 npm run agent:dev
 ```
 

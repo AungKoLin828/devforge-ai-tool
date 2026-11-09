@@ -249,10 +249,10 @@ async function installAndStartAgent(): Promise<void> {
     detached: true,
     env: {
       ...process.env,
-      DEVFORGE_AGENT_PORT: String(agentPort),
-      DEVFORGE_AGENT_TOKEN: randomBytes(32).toString("hex"),
+      CODEVIA_AGENT_PORT: String(agentPort),
+      CODEVIA_AGENT_TOKEN: randomBytes(32).toString("hex"),
       DEVFORGE_AGENT_SILENT: "1",
-      DEVFORGE_WORKSPACE: workspaceRoot,
+      CODEVIA_WORKSPACE: workspaceRoot,
     },
     stdio: "ignore",
     windowsHide: true,

@@ -116,6 +116,14 @@ export async function githubUser(token: string) {
 
 /** Create or update the local user record from a GitHub profile. */
 export async function upsertGithubUser(token: string, profile: any) {
+  const configuredAdmin = process.env.ADMIN_GITHUB_USERNAME
+    ?.trim()
+    .replace(/^@/, "")
+    .toLowerCase();
+  const isConfiguredAdmin =
+    !!configuredAdmin &&
+    profile.login.toLowerCase() === configuredAdmin;
+
   return prisma.user.upsert({
     where: { githubId: profile.id },
     update: {
@@ -124,6 +132,7 @@ export async function upsertGithubUser(token: string, profile: any) {
       email: profile.email,
       avatarUrl: profile.avatarUrl,
       githubAccessTokenEnc: encrypt(token),
+      ...(isConfiguredAdmin ? { role: "ADMIN" as const } : {}),
     },
     create: {
       githubId: profile.id,
@@ -132,6 +141,7 @@ export async function upsertGithubUser(token: string, profile: any) {
       email: profile.email,
       avatarUrl: profile.avatarUrl,
       githubAccessTokenEnc: encrypt(token),
+      ...(isConfiguredAdmin ? { role: "ADMIN" as const } : {}),
     },
   });
 }

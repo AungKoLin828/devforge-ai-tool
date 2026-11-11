@@ -13,6 +13,7 @@
     "prisma:studio": "prisma studio",
     "db:check": "tsx scripts/check-database.mjs",
     "db:setup": "npm run prisma:generate && tsx scripts/setup-local-database.mjs && prisma migrate dev",
+    "set-admin": "node scripts/set-admin.mjs",
     "lint": "tsc --noEmit",
     "agent:dev": "tsx agent/src/index.ts"
   },

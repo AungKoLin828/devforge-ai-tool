@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:netlify": "netlify dev",
+    "dev:netlify": "netlify dev --internal-disable-edge-functions",
     "build": "npm run prisma:generate && tsc -b && node scripts/copy-agent-installer.mjs && vite build",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

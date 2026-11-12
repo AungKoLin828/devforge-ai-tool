@@ -127,6 +127,7 @@ export async function upsertGithubUser(token, profile) {
 async function githubApi(token, endpoint, init = {}) {
     const response = await fetch(`https://api.github.com${endpoint}`, {
         ...init,
+        redirect: "error",
         headers: {
             Accept: "application/vnd.github+json",
             Authorization: `Bearer ${token}`,
@@ -140,6 +141,100 @@ async function githubApi(token, endpoint, init = {}) {
         throw new Error(`GitHub API request failed (${response.status}): ${detail}`);
     }
     return result;
+}
+const KNOWLEDGE_FILE_EXTENSIONS = new Set([
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cs",
+    ".css",
+    ".go",
+    ".h",
+    ".html",
+    ".java",
+    ".js",
+    ".json",
+    ".jsx",
+    ".kt",
+    ".md",
+    ".mdx",
+    ".php",
+    ".py",
+    ".rb",
+    ".rs",
+    ".rst",
+    ".scss",
+    ".sh",
+    ".sql",
+    ".swift",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".txt",
+    ".xml",
+    ".yaml",
+    ".yml",
+]);
+const EXCLUDED_GITHUB_PATHS = /(^|\/)(?:\.git|\.next|\.nuxt|\.venv|build|coverage|dist|node_modules|out|target|vendor)(\/|$)|(^|\/)\.env(?:\.|$)|(?:^|\/)(?:id_rsa|id_ed25519|credentials|secrets?)(?:\.|$)|\.(?:pem|p12|pfx|key)$/i;
+function isKnowledgeFile(path) {
+    const extension = path.match(/\.[^.\/]+$/)?.[0].toLowerCase();
+    return Boolean(extension &&
+        KNOWLEDGE_FILE_EXTENSIONS.has(extension) &&
+        !EXCLUDED_GITHUB_PATHS.test(path));
+}
+/** Fetch a bounded, text-only snapshot from a GitHub repository the user can access. */
+export async function fetchGitHubKnowledgeFiles(userId, owner, repository, branch) {
+    const token = await githubTokenForUser(userId);
+    const repoPath = repositoryPath(owner, repository);
+    const metadata = await githubApi(token, repoPath, { signal: AbortSignal.timeout(15000) });
+    const ref = branch || metadata.default_branch;
+    const tree = await githubApi(token, `${repoPath}/git/trees/${encodeURIComponent(ref)}?recursive=1`, { signal: AbortSignal.timeout(15000) });
+    if (tree.truncated) {
+        throw new Error("GitHub repository tree is too large to index in one import.");
+    }
+    const candidates = tree.tree.filter((entry) => entry.type === "blob" &&
+        isKnowledgeFile(entry.path) &&
+        typeof entry.size === "number" &&
+        entry.size > 0 &&
+        entry.size <= 100_000);
+    if (candidates.length > 100) {
+        throw new Error("GitHub import is limited to 100 text files per repository.");
+    }
+    const files = [];
+    let totalBytes = 0;
+    for (let index = 0; index < candidates.length; index += 10) {
+        const batch = candidates.slice(index, index + 10);
+        const results = await Promise.all(batch.map(async (entry) => {
+            const blob = await githubApi(token, `${repoPath}/git/blobs/${encodeURIComponent(entry.sha)}`, { signal: AbortSignal.timeout(15000) });
+            if (blob.encoding !== "base64") {
+                throw new Error(`GitHub returned an unsupported encoding for ${entry.path}.`);
+            }
+            const bytes = Buffer.from(blob.content, "base64");
+            if (bytes.includes(0))
+                return null;
+            let content;
+            try {
+                content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+            }
+            catch {
+                return null;
+            }
+            return { path: entry.path, content, bytes: bytes.byteLength };
+        }));
+        for (const result of results) {
+            if (!result)
+                continue;
+            totalBytes += result.bytes;
+            if (totalBytes > 512 * 1024) {
+                throw new Error("GitHub repository text exceeds the 512 KB import limit.");
+            }
+            files.push({ path: result.path, content: result.content });
+        }
+    }
+    if (!files.length) {
+        throw new Error("GitHub repository contains no supported text files to index.");
+    }
+    return { files, branch: ref };
 }
 // Decrypt the OAuth token only for server-side GitHub API requests.
 async function githubTokenForUser(userId) {

@@ -30,6 +30,7 @@ import {
   type EditorDiagnostic,
 } from "./features/workspace/buildDiagnostics";
 import { ConnectExtension } from "./features/local-agent/ConnectExtension";
+import { KnowledgeBasePanel } from "./features/knowledge-base/KnowledgeBasePanel";
 
 // Shared Codevia AI wordmark used by the landing page, guide, and dashboard.
 function BrandWordmark() {
@@ -78,6 +79,12 @@ function UserGuide() {
       title: "Choose the right removal action",
       description:
         "Remove imported project removes its Codevia copy without deleting local PC files. Delete project permanently removes the Codevia project and its saved artifacts. Disconnect repository removes the GitHub link without deleting the remote repository.",
+    },
+    {
+      number: "07",
+      title: "Search project knowledge with RAG",
+      description:
+        "Open Knowledge Base in the project chat to index saved project files, text documents, public HTTPS pages, or repositories available to your GitHub account. Project chat retrieves relevant passages and cites its sources.",
     },
   ];
 
@@ -187,6 +194,12 @@ function Login() {
       description:
         "Install Codevia AI from the VS Code Marketplace to chat with the assistant, review code, fix errors, and generate tests without leaving the editor. Sign in with GitHub in your browser and approve the one-time connection; then open Codevia AI chat with Ctrl+Alt+D.",
     },
+    {
+      number: "05",
+      title: "Ask with project knowledge",
+      description:
+        "Index your saved files, documents, public web pages, or GitHub repositories. Project chat retrieves relevant passages using embeddings and PostgreSQL full-text search, then cites the sources.",
+    },
   ];
 
   const roadmap = [
@@ -196,6 +209,7 @@ function Login() {
     ["03", "Local project import, build and test", "Available"],
     ["04", "GitHub synchronization", "Available"],
     ["05", "More AI providers", "Available"],
+    ["06", "Project knowledge base with citations", "Available"],
   ];
 
   return (
@@ -645,6 +659,7 @@ function App({ user }: { user: User }) {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
+  const [knowledgeBaseOpen, setKnowledgeBaseOpen] = useState(false);
   // Keep the last failed chat question so the Retry button can replay it.
   const [lastFailedChatQuestion, setLastFailedChatQuestion] = useState<
     string | null
@@ -2424,7 +2439,11 @@ function App({ user }: { user: User }) {
       );
       setChatMessages((current) => [
         ...current,
-        { role: "assistant", content: response.answer },
+        {
+          role: "assistant",
+          content: response.answer,
+          citations: response.citations,
+        },
       ]);
     } catch (cause) {
       const message =
@@ -2449,7 +2468,11 @@ function App({ user }: { user: User }) {
             );
             setChatMessages((current) => [
               ...current,
-              { role: "assistant", content: response.answer },
+              {
+                role: "assistant",
+                content: response.answer,
+                citations: response.citations,
+              },
             ]);
             setChatBusy(false);
             return;
@@ -3695,7 +3718,17 @@ function App({ user }: { user: User }) {
         {/* Project Q&A is separate from file modification and run activity. */}
         <aside className="border-l border-slate-800 flex min-h-0 flex-col">
           <div className="border-b border-slate-800 p-4">
-            <div className="font-semibold">AI Assistant</div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="font-semibold">AI Assistant</div>
+              <button
+                type="button"
+                onClick={() => setKnowledgeBaseOpen(true)}
+                disabled={!selected}
+                className="rounded-lg border border-indigo-500/40 px-2.5 py-1.5 text-xs font-medium text-indigo-200 hover:border-indigo-400 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Knowledge Base
+              </button>
+            </div>
             <p className="mt-1 text-xs text-slate-500">
               All processes run from here: “generate a todo app”, “modify
               the header”, “review my code”, “build”, “test”, or
@@ -3725,6 +3758,38 @@ function App({ user }: { user: User }) {
                 <p className="whitespace-pre-wrap leading-6">
                   {message.content}
                 </p>
+                {message.citations?.length ? (
+                  <div className="mt-3 border-t border-slate-700 pt-2">
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-indigo-300">
+                      Knowledge sources
+                    </p>
+                    <ol className="space-y-1 text-xs">
+                      {message.citations.map((citation, citationIndex) => (
+                        <li key={citation.id}>
+                          <span className="mr-1 text-slate-500">
+                            [{citationIndex + 1}]
+                          </span>
+                          {citation.uri.startsWith("https://") ? (
+                            <a
+                              href={citation.uri}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-indigo-300 underline underline-offset-2 hover:text-indigo-200"
+                            >
+                              {citation.sourceName}
+                              {citation.path ? ` · ${citation.path}` : ""}
+                            </a>
+                          ) : (
+                            <span className="text-slate-400">
+                              {citation.sourceName}
+                              {citation.path ? ` · ${citation.path}` : ""}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}
               </div>
             ))}
             {chatBusy && (
@@ -3805,11 +3870,19 @@ function App({ user }: { user: User }) {
       </div>
 
       <footer className="min-h-9 border-t border-slate-800 px-4 py-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-slate-500">
-        <span>IDE · Terminal · Build · Test · Review · Git · GitHub</span>
+        <span>IDE · Terminal · Build · Test · Review · RAG · Git · GitHub</span>
         <span>
           © {new Date().getFullYear()} Aung Ko Lin. All rights reserved.
         </span>
       </footer>
+      {selected && knowledgeBaseOpen && (
+        <KnowledgeBasePanel
+          key={selected.id}
+          projectId={selected.id}
+          provider={selectedAIProvider}
+          onClose={() => setKnowledgeBaseOpen(false)}
+        />
+      )}
       {/* All confirmation, status, warning, and error messages use this modal. */}
       {modal && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/75 p-4 backdrop-blur-sm">

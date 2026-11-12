@@ -28,6 +28,16 @@ import {
   type Provider,
 } from "./ai.js";
 import {
+  addKnowledgeDocument,
+  addKnowledgeGitHub,
+  addKnowledgeUrl,
+  deleteKnowledgeSource,
+  indexProjectArtifacts,
+  listKnowledgeSources,
+  RagInputError,
+  searchKnowledge,
+} from "./rag.js";
+import {
   create,
   chatWithAssistant,
   chatWithProject,
@@ -474,6 +484,84 @@ export async function handleApi(req: Request) {
       const projectId = match[1];
       const action = match[2];
 
+      if (action === "rag/sources" && req.method === "GET") {
+        return json({
+          success: true,
+          sources: await listKnowledgeSources(projectId, user.id),
+        });
+      }
+
+      if (
+        action === "rag/documents" ||
+        action === "rag/urls" ||
+        action === "rag/github" ||
+        action === "rag/index" ||
+        action === "rag/search"
+      ) {
+        if (req.method !== "POST") return error("Method not allowed", 405);
+        const requestBody = await body<{
+          name?: unknown;
+          content?: unknown;
+          url?: unknown;
+          query?: unknown;
+          provider?: unknown;
+        }>(req);
+        const provider = requestBody.provider || "OPENROUTER";
+        if (!isAIProvider(provider)) {
+          return error("Unsupported AI provider", 400);
+        }
+
+        if (action === "rag/documents") {
+          return json({
+            success: true,
+            source: await addKnowledgeDocument(projectId, user.id, {
+              name: requestBody.name,
+              content: requestBody.content,
+              provider,
+            }),
+          }, 201);
+        }
+        if (action === "rag/urls") {
+          return json({
+            success: true,
+            source: await addKnowledgeUrl(projectId, user.id, {
+              url: requestBody.url,
+              provider,
+            }),
+          }, 201);
+        }
+        if (action === "rag/github") {
+          return json({
+            success: true,
+            source: await addKnowledgeGitHub(projectId, user.id, {
+              url: requestBody.url,
+              provider,
+            }),
+          }, 201);
+        }
+        if (action === "rag/index") {
+          return json({
+            success: true,
+            source: await indexProjectArtifacts(projectId, user.id, provider),
+          });
+        }
+        return json({
+          success: true,
+          ...(await searchKnowledge(
+            projectId,
+            user.id,
+            requestBody.query,
+            provider,
+          )),
+        });
+      }
+
+      const ragSourceMatch = action?.match(/^rag\/sources\/([^/]+)$/);
+      if (ragSourceMatch && req.method === "DELETE") {
+        await deleteKnowledgeSource(projectId, ragSourceMatch[1], user.id);
+        return json({ success: true });
+      }
+
       // GitHub routes update only DevForge's link metadata, never the remote itself.
       if (action === "github/connect" && req.method === "POST") {
         await owner(projectId, user.id);
@@ -801,6 +889,9 @@ export async function handleApi(req: Request) {
 
     return error("Not found", 404);
   } catch (caught) {
+    if (caught instanceof RagInputError) {
+      return error(caught.message, 400);
+    }
     if (caught instanceof AuthError) {
       return error(caught.message, caught.status);
     }
@@ -808,13 +899,12 @@ export async function handleApi(req: Request) {
     const { code, message: originalMessage } = getErrorInfo(caught);
     let message = originalMessage || "Internal server error";
 
-    if (
-      code === "P2021" ||
-      code === "42P01" ||
-      message.includes('The table `public.User` does not exist')
-    ) {
+    if (code === "P2021" || code === "42P01") {
       message =
-        'The configured database is missing public."User". Verify the target with `npm run db:check`. Apply `npm run prisma:deploy` only if the database is empty; for a manually created or partially initialized schema, add the missing tables without rerunning the full initial migration.';
+        `The configured database is missing a required table${originalMessage ? `: ${originalMessage}` : ""}. Verify the selected database with \`npm run db:check\` and apply checked-in migrations with \`npm run prisma:deploy\`.`;
+    } else if (message.includes('The table `public.User` does not exist')) {
+      message =
+        'The configured database is missing public."User". Verify the target with `npm run db:check` and apply the checked-in migrations with `npm run prisma:deploy`.';
     } else if (
       code === "ETIMEDOUT" ||
       code === "ECONNREFUSED" ||
@@ -829,6 +919,25 @@ export async function handleApi(req: Request) {
 
     if (message === "Forbidden") return error(message, 403);
     if (message === "Project not found") return error(message, 404);
+
+    if (
+      [
+        "Public URL",
+        "Public URLs",
+        "Public document",
+        "Enter a valid public HTTPS URL",
+        "GitHub repository",
+        "GitHub import",
+        "Document ",
+        "Knowledge source",
+        "Project knowledge",
+        "Search query",
+        "Embedding batches",
+        "Use a repository URL",
+      ].some((prefix) => message.startsWith(prefix))
+    ) {
+      return error(message, 400);
+    }
 
     if (message.includes("already running")) {
       return error(message, 409);

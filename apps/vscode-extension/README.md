@@ -58,7 +58,7 @@ It does **not** call a new `/api/vscode/assistant` endpoint. AI provider credent
 Open PowerShell:
 
 ```powershell
-cd C:\devforge-ai-tool\vscode-extension
+cd C:\devforge-ai-tool\apps\vscode-extension
 npm install
 npm run compile
 npm test
@@ -146,7 +146,7 @@ Review fewer workspace files or reduce the active file's size. Do not include `.
 ### Compilation errors
 
 ```powershell
-cd C:\devforge-ai-tool\vscode-extension
+cd C:\devforge-ai-tool\apps\vscode-extension
 npm install
 npm run compile
 ```

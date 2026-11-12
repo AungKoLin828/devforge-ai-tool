@@ -32,6 +32,13 @@ enum ArtifactType {
   TEST
 }
 
+enum KnowledgeSourceKind {
+  DOCUMENT
+  URL
+  GITHUB
+  PROJECT
+}
+
 enum AgentStatus {
   DISCONNECTED
   CONNECTED
@@ -193,6 +200,8 @@ model Project {
   user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   localAgent       LocalAgent?       @relation(fields: [localAgentId], references: [id], onDelete: SetNull)
   artifacts        Artifact[]
+  knowledgeSources KnowledgeSource[]
+  knowledgeChunks  KnowledgeChunk[]
   runs             ProjectRun[]
   agentJobs        AgentJob[]
   gitRepositories  GitRepository[]
@@ -230,6 +239,37 @@ model Artifact {
 
   @@index([projectId])
   @@index([projectId, type, createdAt])
+}
+
+model KnowledgeSource {
+  id            String              @id @default(cuid())
+  projectId     String
+  kind              KnowledgeSourceKind
+  embeddingProvider AIProviderType
+  embeddingModel    String
+  name              String
+  uri               String
+  lastIndexedAt     DateTime            @default(now())
+  createdAt         DateTime            @default(now())
+  project           Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  chunks            KnowledgeChunk[]
+
+  @@unique([projectId, uri])
+  @@index([projectId, createdAt])
+}
+
+model KnowledgeChunk {
+  id        String          @id @default(cuid())
+  projectId String
+  sourceId  String
+  content   String          @db.Text
+  embedding Json?
+  metadata  Json?
+  createdAt DateTime        @default(now())
+  project   Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  source    KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, sourceId])
 }
 
 model ProjectRun {

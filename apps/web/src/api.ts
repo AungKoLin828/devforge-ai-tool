@@ -44,10 +44,31 @@ export type AIProviderInfo = {
   baseUrl: string;
 };
 
+export type RagCitation = {
+  id: string;
+  sourceName: string;
+  uri: string;
+  excerpt: string;
+  path?: string;
+};
+
+export type RagSource = {
+  id: string;
+  kind: "DOCUMENT" | "URL" | "GITHUB" | "PROJECT";
+  embeddingProvider: AIProvider;
+  embeddingModel: string;
+  name: string;
+  uri: string;
+  createdAt: string;
+  lastIndexedAt: string;
+  chunkCount: number;
+};
+
 /** One turn in the short project-question conversation sent to the API. */
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
+  citations?: RagCitation[];
 };
 
 /** Basic health details returned when the browser pairs with a local agent. */
@@ -621,10 +642,52 @@ export const api = {
       body: JSON.stringify({ prompt }),
     }),
   chat: (id: string, messages: ChatMessage[], provider: AIProvider) =>
-    request<{ success: true; answer: string }>(`/api/projects/${id}/chat`, {
+    request<{ success: true; answer: string; citations: RagCitation[] }>(
+      `/api/projects/${id}/chat`,
+      {
       method: "POST",
       body: JSON.stringify({ messages, provider }),
-    }),
+      },
+    ),
+  rag: {
+    sources: (id: string) =>
+      request<{ success: true; sources: RagSource[] }>(
+        `/api/projects/${encodeURIComponent(id)}/rag/sources`,
+      ),
+    addDocument: (
+      id: string,
+      input: { name: string; content: string; provider: AIProvider },
+    ) =>
+      request<{ success: true; source: RagSource }>(
+        `/api/projects/${encodeURIComponent(id)}/rag/documents`,
+        { method: "POST", body: JSON.stringify(input) },
+      ),
+    addUrl: (id: string, url: string, provider: AIProvider) =>
+      request<{ success: true; source: RagSource }>(
+        `/api/projects/${encodeURIComponent(id)}/rag/urls`,
+        { method: "POST", body: JSON.stringify({ url, provider }) },
+      ),
+    addGitHub: (id: string, url: string, provider: AIProvider) =>
+      request<{ success: true; source: RagSource }>(
+        `/api/projects/${encodeURIComponent(id)}/rag/github`,
+        { method: "POST", body: JSON.stringify({ url, provider }) },
+      ),
+    indexProject: (id: string, provider: AIProvider) =>
+      request<{ success: true; source: RagSource }>(
+        `/api/projects/${encodeURIComponent(id)}/rag/index`,
+        { method: "POST", body: JSON.stringify({ provider }) },
+      ),
+    deleteSource: (id: string, sourceId: string) =>
+      request<{ success: true }>(
+        `/api/projects/${encodeURIComponent(id)}/rag/sources/${encodeURIComponent(sourceId)}`,
+        { method: "DELETE" },
+      ),
+    search: (id: string, query: string, provider: AIProvider) =>
+      request<{ success: true; results: RagCitation[] }>(
+        `/api/projects/${encodeURIComponent(id)}/rag/search`,
+        { method: "POST", body: JSON.stringify({ query, provider }) },
+      ),
+  },
   history: (id: string) => request<any>(`/api/projects/${id}/history`),
   agent: () => request<any>("/api/agent"),
   providers: () =>

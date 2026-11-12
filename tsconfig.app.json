@@ -15,5 +15,5 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["frontend/src", "shared"]
+  "include": ["apps/web/src", "packages/shared"]
 }

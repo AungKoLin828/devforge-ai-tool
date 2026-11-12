@@ -1,5 +1,5 @@
-// Limit utility-class scanning to the app's HTML entry and frontend source files.
+// Limit utility-class scanning to the web app's HTML entry and source files.
 export default {
-  content: ["./frontend/index.html", "./frontend/src/**/*.{js,ts,jsx,tsx}"],
+  content: ["./apps/web/index.html", "./apps/web/src/**/*.{js,ts,jsx,tsx}"],
   theme: { extend: {} },
 };

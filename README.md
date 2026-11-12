@@ -6,7 +6,7 @@ The public user guide is available at `/guide` and can be read without signing i
 
 ## Use Codevia AI with VS Code
 
-The Codevia AI VS Code extension can generate a project and copy its files directly into an open workspace or a local folder you select. Install and configure it using [the extension guide](./vscode-extension/README.md). Project generation through the browser cannot write files directly to your PC; use the extension or download a ZIP and extract it.
+The Codevia AI VS Code extension can generate a project and copy its files directly into an open workspace or a local folder you select. Install and configure it using [the extension guide](./apps/vscode-extension/README.md). Project generation through the browser cannot write files directly to your PC; use the extension or download a ZIP and extract it.
 
 You can also use VS Code as the editor for a project on your PC:
 
@@ -21,11 +21,28 @@ You can also use VS Code as the editor for a project on your PC:
 ## Important architecture
 
 - Netlify hosts the browser and API functions.
-- PostgreSQL stores metadata, plans, generated-code artifacts, jobs, audit logs and usage. Local working copies and synced repositories live on GitHub or the developer's PC.
+- PostgreSQL stores metadata, plans, generated-code artifacts, project knowledge chunks and embeddings, jobs, audit logs and usage. Local working copies and synced repositories live on GitHub or the developer's PC.
 - The Local Agent runs separately on the developer machine, is restricted to a workspace root, and runs generated project scripts only after user confirmation.
 - AI credentials are server-side only.
 - GitHub OAuth is the only authentication path in this baseline.
 - Netlify Functions are not used as a shell executor.
+
+## Project knowledge base (RAG)
+
+Open **Knowledge Base** in a selected project's chat to add Markdown/text files, paste notes, import a public HTTPS page, import a repository accessible to your GitHub account, or index the latest saved project code. Project chat retrieves relevant passages using PostgreSQL full-text ranking and cosine similarity over provider embeddings, then returns source citations with its answer. The panel also lets you test retrieval and remove indexed sources.
+
+Knowledge is private to the owning project. Importing a source sends its text to the selected AI provider for embeddings; chat sends retrieved passages to that provider. Import only content you are authorized to share, and check source text for credentials before indexing; secret-like paths are skipped but file contents are not automatically redacted. URL imports require HTTPS, reject private/local addresses and redirects, and are size-limited; query strings are removed from saved citation URLs. GitHub snapshots use the signed-in GitHub account, skip secret/build/dependency paths, and are refreshed by importing the same repository again. Each source is limited to 100 text files, 512 KB and 180 chunks; a project can contain up to 5,000 chunks.
+
+Embeddings use an OpenAI-compatible `/embeddings` endpoint. `RAG_EMBEDDING_MODEL` defaults to `text-embedding-3-small` for OpenAI-compatible providers and `openai/text-embedding-3-small` for OpenRouter; set it in the server environment when your provider requires a different model. If the selected provider does not expose a compatible embeddings endpoint, indexing and RAG chat return an explicit provider error. Re-index sources after changing embedding provider/model. Semantic vectors are scanned in the application, so the 5,000-chunk project cap keeps retrieval bounded without requiring the PostgreSQL `vector` extension.
+
+## Repository layout
+
+- `apps/web` contains the React/Vite web application.
+- `apps/vscode-extension` contains the separately packaged VS Code extension.
+- `packages/shared` contains protocol contracts available for reuse across project components.
+- `packages/rag-engine` contains reusable text chunking and hybrid rank fusion.
+- `agent`, `netlify/functions`, and `src/server` retain the existing Local Agent and API implementation; the rest of the AI/RAG modules have not yet been split into separate packages.
+- The root `package.json` continues to manage the web/backend build and deployment tooling.
 
 ## Local setup
 
@@ -36,7 +53,7 @@ You can also use VS Code as the editor for a project on your PC:
 5. Run `npm run db:setup`. This generates the Prisma client, creates the `devforge` database if it does not exist, and applies the checked-in migrations. The PostgreSQL role must be allowed to create databases.
 6. If you already created the schema tables and enums manually, do not run `db:setup` against that database because the initial migration will try to create them again. Instead, point `DATABASE_URL` at that database and run `npm run db:check`; it reports the selected database/schema and checks whether `public."User"` has the columns required by Prisma.
    After at least one account has signed in, grant it the admin role with `npm run set-admin -- <githubUsername-or-email>`. Alternatively, set `ADMIN_GITHUB_USERNAME` in `.env` and run `npm run set-admin`; the command uses `DIRECT_URL` when configured, otherwise `DATABASE_URL`. Run `npm run set-admin` without either value to list existing users.
-7. Run `npm run build`.
+7. For a database that was already set up before adding new migrations, run `npm run prisma:deploy` against the intended database to apply them. Then run `npm run build`.
 8. Start the local app at `http://localhost:8888` with `npm run dev:netlify`. Always start GitHub sign-in from this same origin. Do not start sign-in on Netlify and then open the localhost callback, or start locally and return to the Netlify callback: the OAuth state cookie is intentionally restricted to the site where login began.
 9. Install and open the Codevia AI VS Code extension before connecting. It provides the local setup helper, verifies downloaded files, creates the default workspace, and starts the agent in the background. Node.js 22 LTS or newer is required. If you are developing the Local Agent from source, run `npm run agent:dev` in a second terminal instead. The app retrieves the pairing token directly from the agent; there is no token to copy.
    For GitHub synchronization, install Git and sign in to GitHub on that PC using Git Credential Manager (or another Git credential helper). Codevia AI uses its encrypted GitHub OAuth token only for repository listing/creation; the token is never sent to the Local Agent.

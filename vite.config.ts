@@ -1,9 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Build the React client from frontend/ into the deployment's static output folder.
+// Build the React client from apps/web/ into the deployment's static output folder.
 export default defineConfig({
   plugins: [react()],
-  root: "frontend",
+  root: "apps/web",
   build: { outDir: "dist", emptyOutDir: true },
 });

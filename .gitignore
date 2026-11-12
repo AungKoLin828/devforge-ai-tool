@@ -10,8 +10,8 @@ node_modules/
 src/generated/prisma/
 
 # Frontend build
-frontend/dist/
-#/frontend/public/downloads/install-codevia-agent.ps1
+apps/web/dist/
+#/apps/web/public/downloads/install-codevia-agent.ps1
 
 # TypeScript build metadata
 *.tsbuildinfo

@@ -1,6 +1,6 @@
 [build]
   command = "node scripts/netlify-build.mjs"
-  publish = "frontend/dist"
+  publish = "apps/web/dist"
 
 [build.environment]
   NODE_VERSION = "22"

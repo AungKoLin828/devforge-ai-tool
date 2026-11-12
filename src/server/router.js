@@ -128,18 +128,12 @@ export async function handleApi(req) {
                 email: user.email,
                 avatarUrl: user.avatarUrl,
             });
-            const localHost = url.hostname === "localhost" ||
-                url.hostname === "127.0.0.1" ||
-                url.hostname === "[::1]" ||
-                url.hostname === "::1";
             return new Response(null, {
                 status: 302,
                 headers: {
                     Location: returnTo
                         ? new URL(returnTo, url.origin).href
-                        : localHost
-                            ? `${url.origin}/`
-                            : process.env.APP_URL || "/",
+                        : `${url.origin}/`,
                     "Set-Cookie": sessionCookie,
                 },
             });

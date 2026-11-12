@@ -1,5 +1,6 @@
 import { prisma } from "./db.js";
 import { decrypt, encrypt } from "./crypto.js";
+import { fetchGitHubJson } from "./github-http.js";
 // Require deployment variables at the point where the related flow is used.
 const required = (n) => {
     const v = process.env[n];
@@ -75,23 +76,34 @@ export async function githubUser(token) {
     const h = {
         Authorization: `Bearer ${token}`,
         Accept: "application/vnd.github+json",
+        "User-Agent": "CodeviaAI",
+        "X-GitHub-Api-Version": "2022-11-28",
     };
-    const [u, e] = await Promise.all([
-        fetch("https://api.github.com/user", { headers: h }),
-        fetch("https://api.github.com/user/emails", { headers: h }),
-    ]);
-    const user = (await u.json());
-    const emails = (await e.json());
-    const email = user.email ||
-        emails.find((x) => x.primary)?.email ||
-        emails[0]?.email ||
-        null;
+    const user = await fetchGitHubJson("/user", { headers: h });
+    if ((typeof user.id !== "string" && typeof user.id !== "number") ||
+        typeof user.login !== "string") {
+        throw new Error("GitHub profile response is missing the account ID or username");
+    }
+    let email = typeof user.email === "string" ? user.email : null;
+    if (!email) {
+        try {
+            const emails = await fetchGitHubJson("/user/emails", { headers: h });
+            const primary = emails.find((item) => item.primary === true && typeof item.email === "string");
+            const fallback = emails.find((item) => typeof item.email === "string");
+            email =
+                (typeof primary?.email === "string" ? primary.email : null) ??
+                    (typeof fallback?.email === "string" ? fallback.email : null);
+        }
+        catch (cause) {
+            console.warn("Could not retrieve the optional GitHub account email; continuing sign-in without it.", cause instanceof Error ? cause.message : String(cause));
+        }
+    }
     return {
         id: String(user.id),
         login: user.login,
-        name: user.name,
+        name: typeof user.name === "string" ? user.name : null,
         email,
-        avatarUrl: user.avatar_url,
+        avatarUrl: typeof user.avatar_url === "string" ? user.avatar_url : null,
     };
 }
 /** Create or update the local user record from a GitHub profile. */

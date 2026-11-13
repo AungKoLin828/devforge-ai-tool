@@ -1,5 +1,8 @@
 import { Prisma } from "../generated/prisma/client.js";
-import { chunkFiles, type KnowledgeFile } from "../../packages/rag-engine/chunking.js";
+import {
+  chunkFiles,
+  type KnowledgeFile,
+} from "../../packages/rag-engine/chunking.js";
 import {
   cosineSimilarity,
   reciprocalRankFusion,
@@ -25,8 +28,7 @@ const MAX_SOURCE_BYTES = 512 * 1024;
 const MAX_SOURCE_CHUNKS = 180;
 const MAX_PROJECT_CHUNKS = 5000;
 const MAX_ACTIVE_RAG_JOBS = 3;
-const RAG_BACKGROUND_FUNCTION_PATH =
-  "/.netlify/functions/rag-index-background";
+const RAG_BACKGROUND_FUNCTION_PATH = "/.netlify/functions/rag-index-background";
 const EXCLUDED_PROJECT_PATH =
   /(^|\/)(?:\.git|\.next|\.nuxt|\.venv|build|coverage|dist|node_modules|out|target|vendor)(\/|$)|(^|\/)\.env(?:$|\.(?:local|production|development|secret))|(?:^|\/)(?:id_rsa|id_ed25519|credentials|secrets?)(?:\.|$)|\.(?:pem|p12|pfx|key)$/i;
 
@@ -42,7 +44,9 @@ function validateRagIndexInput(input: unknown): RagIndexInput {
     return parseRagIndexInput(input);
   } catch (cause) {
     throw new RagInputError(
-      cause instanceof Error ? cause.message : "Invalid knowledge indexing request.",
+      cause instanceof Error
+        ? cause.message
+        : "Invalid knowledge indexing request.",
     );
   }
 }
@@ -78,7 +82,7 @@ async function dispatchRagIndexJob(
   projectId: string,
   userId: string,
 ) {
-  const secret = process.env.DEVFORGE_BACKGROUND_SECRET;
+  const secret = process.env.CODEVIA_BACKGROUND_SECRET;
   const baseUrl =
     process.env.URL || process.env.DEPLOY_PRIME_URL || process.env.APP_URL;
   if (!secret || !baseUrl) {
@@ -192,7 +196,9 @@ export async function enqueueRagIndexJob(
   await assertAIProviderConfigured(userId, input.provider);
   const serializedInput = JSON.stringify(input);
   if (Buffer.byteLength(serializedInput, "utf8") > MAX_SOURCE_BYTES + 4096) {
-    throw new RagInputError("Knowledge indexing request exceeds the upload limit.");
+    throw new RagInputError(
+      "Knowledge indexing request exceeds the upload limit.",
+    );
   }
 
   const run = await prisma.$transaction(async (tx) => {
@@ -318,15 +324,14 @@ function normalizeFiles(files: KnowledgeFile[]) {
       .slice(0, 512),
     content: file.content,
   }));
-  const cleanFiles = normalizedFiles
-    .filter(
-      (file) =>
-        file.path &&
-        !EXCLUDED_PROJECT_PATH.test(file.path) &&
-        typeof file.content === "string" &&
-        file.content.trim() &&
-        !file.content.includes("\0"),
-    );
+  const cleanFiles = normalizedFiles.filter(
+    (file) =>
+      file.path &&
+      !EXCLUDED_PROJECT_PATH.test(file.path) &&
+      typeof file.content === "string" &&
+      file.content.trim() &&
+      !file.content.includes("\0"),
+  );
   if (cleanFiles.length > 100) {
     throw new RagInputError("Knowledge source is limited to 100 text files.");
   }
@@ -341,7 +346,9 @@ function normalizeFiles(files: KnowledgeFile[]) {
   for (const file of uniqueFiles) {
     totalBytes += Buffer.byteLength(file.content, "utf8");
     if (totalBytes > MAX_SOURCE_BYTES) {
-      throw new RagInputError("Knowledge source exceeds the 512 KB import limit.");
+      throw new RagInputError(
+        "Knowledge source exceeds the 512 KB import limit.",
+      );
     }
   }
   return uniqueFiles;
@@ -358,7 +365,9 @@ async function saveKnowledgeSource(input: {
 }) {
   const files = normalizeFiles(input.files);
   if (!files.length) {
-    throw new RagInputError("Knowledge source contains no supported text files.");
+    throw new RagInputError(
+      "Knowledge source contains no supported text files.",
+    );
   }
 
   const chunks = chunkFiles(files);
@@ -510,13 +519,15 @@ export async function addKnowledgeDocument(
 ) {
   await owner(projectId, userId);
   if (typeof input.name !== "string") {
-    throw new RagInputError("Document name must be between 1 and 200 characters.");
+    throw new RagInputError(
+      "Document name must be between 1 and 200 characters.",
+    );
   }
-  const name = input.name
-    .replace(/[\u0000-\u001f]/g, " ")
-    .trim();
+  const name = input.name.replace(/[\u0000-\u001f]/g, " ").trim();
   if (!name || name.length > 200) {
-    throw new RagInputError("Document name must be between 1 and 200 characters.");
+    throw new RagInputError(
+      "Document name must be between 1 and 200 characters.",
+    );
   }
   if (typeof input.content !== "string" || !input.content.trim()) {
     throw new RagInputError("Document content is required.");
@@ -525,7 +536,9 @@ export async function addKnowledgeDocument(
   let path = name;
   if (input.path !== undefined) {
     if (typeof input.path !== "string" || input.path.length > 512) {
-      throw new RagInputError("Document path must be a relative path of 512 characters or fewer.");
+      throw new RagInputError(
+        "Document path must be a relative path of 512 characters or fewer.",
+      );
     }
     path = input.path.replaceAll("\\", "/").trim();
     if (
@@ -556,7 +569,9 @@ export async function addKnowledgeUrl(
 ) {
   await owner(projectId, userId);
   if (typeof input.url !== "string" || input.url.length > 2048) {
-    throw new RagInputError("Enter a public HTTPS URL of 2,048 characters or fewer.");
+    throw new RagInputError(
+      "Enter a public HTTPS URL of 2,048 characters or fewer.",
+    );
   }
   const text = await fetchPublicText(input.url.trim());
   const url = new URL(input.url.trim());
@@ -566,7 +581,10 @@ export async function addKnowledgeUrl(
     projectId,
     userId,
     kind: "URL",
-    name: `${url.hostname}${url.pathname === "/" ? "" : url.pathname}`.slice(0, 200),
+    name: `${url.hostname}${url.pathname === "/" ? "" : url.pathname}`.slice(
+      0,
+      200,
+    ),
     uri: url.toString(),
     files: [{ path: url.pathname || url.hostname, content: text }],
     provider: input.provider,
@@ -591,7 +609,9 @@ function parseGitHubRepositoryUrl(value: unknown) {
     url.search ||
     url.hash
   ) {
-    throw new RagInputError("GitHub source must be an HTTPS github.com repository URL.");
+    throw new RagInputError(
+      "GitHub source must be an HTTPS github.com repository URL.",
+    );
   }
   const parts = url.pathname.split("/").filter(Boolean);
   if (
@@ -603,16 +623,24 @@ function parseGitHubRepositoryUrl(value: unknown) {
     parts[1] === "." ||
     parts[1] === ".."
   ) {
-    throw new RagInputError("GitHub source URL must identify an owner and repository.");
+    throw new RagInputError(
+      "GitHub source URL must identify an owner and repository.",
+    );
   }
   let branch: string | undefined;
   if (parts.length > 2) {
     if (parts[2] !== "tree" || parts.length < 4) {
-      throw new RagInputError("Use a repository URL or a GitHub tree URL with a branch.");
+      throw new RagInputError(
+        "Use a repository URL or a GitHub tree URL with a branch.",
+      );
     }
     branch = parts.slice(3).join("/");
   }
-  return { owner: parts[0], repository: parts[1].replace(/\.git$/i, ""), branch };
+  return {
+    owner: parts[0],
+    repository: parts[1].replace(/\.git$/i, ""),
+    branch,
+  };
 }
 
 export async function addKnowledgeGitHub(
@@ -621,8 +649,11 @@ export async function addKnowledgeGitHub(
   input: { url: unknown; provider: Provider },
 ) {
   await owner(projectId, userId);
-  const { owner: repositoryOwner, repository, branch } =
-    parseGitHubRepositoryUrl(input.url);
+  const {
+    owner: repositoryOwner,
+    repository,
+    branch,
+  } = parseGitHubRepositoryUrl(input.url);
   const snapshot = await fetchGitHubKnowledgeFiles(
     userId,
     repositoryOwner,
@@ -757,11 +788,19 @@ export async function searchKnowledge(
   settings?: EffectiveRagSettings,
 ) {
   await owner(projectId, userId);
-  if (typeof queryValue !== "string" || !queryValue.trim() || queryValue.length > 4000) {
-    throw new RagInputError("Search query must be between 1 and 4,000 characters.");
+  if (
+    typeof queryValue !== "string" ||
+    !queryValue.trim() ||
+    queryValue.length > 4000
+  ) {
+    throw new RagInputError(
+      "Search query must be between 1 and 4,000 characters.",
+    );
   }
   const query = queryValue.trim();
-  const sourceCount = await prisma.knowledgeSource.count({ where: { projectId } });
+  const sourceCount = await prisma.knowledgeSource.count({
+    where: { projectId },
+  });
   if (!sourceCount) return { results: [] as RagCitation[] };
 
   const compatibleChunks = await prisma.knowledgeChunk.count({
@@ -799,45 +838,45 @@ export async function searchKnowledge(
   `);
   const chunks = queryVector
     ? await prisma.knowledgeChunk.findMany({
-    where: {
-      projectId,
-      source: {
-        embeddingProvider: provider,
-        embeddingModel: embeddingModel(provider),
-      },
-    },
-    orderBy: { createdAt: "desc" },
-    take: MAX_PROJECT_CHUNKS,
-    select: {
-      id: true,
-      content: true,
-      embedding: true,
-      metadata: true,
-      source: { select: { name: true, uri: true } },
-    },
+        where: {
+          projectId,
+          source: {
+            embeddingProvider: provider,
+            embeddingModel: embeddingModel(provider),
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        take: MAX_PROJECT_CHUNKS,
+        select: {
+          id: true,
+          content: true,
+          embedding: true,
+          metadata: true,
+          source: { select: { name: true, uri: true } },
+        },
       })
     : [];
 
   const semantic = queryVector
     ? chunks
-    .flatMap((chunk) => {
-      const vector = getVector(chunk.embedding);
-      if (!vector) return [];
-      return [
-        {
-          item: {
-            id: chunk.id,
-            content: chunk.content,
-            sourceName: chunk.source.name,
-            sourceUri: chunk.source.uri,
-            metadata: chunk.metadata,
-          },
-          score: cosineSimilarity(queryVector, vector),
-        },
-      ];
-    })
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 40)
+        .flatMap((chunk) => {
+          const vector = getVector(chunk.embedding);
+          if (!vector) return [];
+          return [
+            {
+              item: {
+                id: chunk.id,
+                content: chunk.content,
+                sourceName: chunk.source.name,
+                sourceUri: chunk.source.uri,
+                metadata: chunk.metadata,
+              },
+              score: cosineSimilarity(queryVector, vector),
+            },
+          ];
+        })
+        .sort((left, right) => right.score - left.score)
+        .slice(0, 40)
     : [];
 
   const lexicalRanked: RankedKnowledge<SearchChunk>[] = lexical.map(
@@ -874,17 +913,15 @@ export async function searchKnowledge(
           strategy === "vector" ? [] : filteredSemantic,
           topK,
         )
-  ).map(
-    (chunk) => ({
-      id: chunk.id,
-      sourceName: chunk.sourceName,
-      uri: chunk.sourceUri,
-      excerpt: chunk.content.slice(0, 1200),
-      ...(getChunkPath(chunk.metadata)
-        ? { path: getChunkPath(chunk.metadata) }
-        : {}),
-      ...getChunkLineRange(chunk.metadata),
-    }),
-  );
+  ).map((chunk) => ({
+    id: chunk.id,
+    sourceName: chunk.sourceName,
+    uri: chunk.sourceUri,
+    excerpt: chunk.content.slice(0, 1200),
+    ...(getChunkPath(chunk.metadata)
+      ? { path: getChunkPath(chunk.metadata) }
+      : {}),
+    ...getChunkLineRange(chunk.metadata),
+  }));
   return { results };
 }

@@ -18,7 +18,7 @@ export default async (req: Request, _context: Context) => {
     });
   }
 
-  const expectedSecret = process.env.DEVFORGE_BACKGROUND_SECRET;
+  const expectedSecret = process.env.CODEVIA_BACKGROUND_SECRET;
   const suppliedSecret = req.headers.get("x-devforge-background-secret");
 
   if (!expectedSecret || !suppliedSecret || suppliedSecret !== expectedSecret) {

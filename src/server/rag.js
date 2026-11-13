@@ -1,11 +1,8 @@
 import { Prisma } from "../generated/prisma/client.js";
-import { chunkFiles } from "../../packages/rag-engine/chunking.js";
-import {
-  cosineSimilarity,
-  reciprocalRankFusion,
-} from "../../packages/rag-engine/retrieval.js";
-import { parseRagIndexInput } from "../../packages/rag-engine/job-input.js";
-import { assertAIProviderConfigured, embed, embeddingModel } from "./ai.js";
+import { chunkFiles, } from "../../packages/rag-engine/chunking.js";
+import { cosineSimilarity, reciprocalRankFusion, } from "../../packages/rag-engine/retrieval.js";
+import { parseRagIndexInput, } from "../../packages/rag-engine/job-input.js";
+import { assertAIProviderConfigured, embed, embeddingModel, } from "./ai.js";
 import { fetchGitHubKnowledgeFiles } from "./github.js";
 import { fetchPublicText } from "./knowledge-fetch.js";
 import { prisma } from "./db.js";
@@ -15,676 +12,608 @@ const MAX_SOURCE_CHUNKS = 180;
 const MAX_PROJECT_CHUNKS = 5000;
 const MAX_ACTIVE_RAG_JOBS = 3;
 const RAG_BACKGROUND_FUNCTION_PATH = "/.netlify/functions/rag-index-background";
-const EXCLUDED_PROJECT_PATH =
-  /(^|\/)(?:\.git|\.next|\.nuxt|\.venv|build|coverage|dist|node_modules|out|target|vendor)(\/|$)|(^|\/)\.env(?:$|\.(?:local|production|development|secret))|(?:^|\/)(?:id_rsa|id_ed25519|credentials|secrets?)(?:\.|$)|\.(?:pem|p12|pfx|key)$/i;
+const EXCLUDED_PROJECT_PATH = /(^|\/)(?:\.git|\.next|\.nuxt|\.venv|build|coverage|dist|node_modules|out|target|vendor)(\/|$)|(^|\/)\.env(?:$|\.(?:local|production|development|secret))|(?:^|\/)(?:id_rsa|id_ed25519|credentials|secrets?)(?:\.|$)|\.(?:pem|p12|pfx|key)$/i;
 export class RagInputError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "RagInputError";
-  }
+    constructor(message) {
+        super(message);
+        this.name = "RagInputError";
+    }
 }
 function validateRagIndexInput(input) {
-  try {
-    return parseRagIndexInput(input);
-  } catch (cause) {
-    throw new RagInputError(
-      cause instanceof Error
-        ? cause.message
-        : "Invalid knowledge indexing request.",
-    );
-  }
+    try {
+        return parseRagIndexInput(input);
+    }
+    catch (cause) {
+        throw new RagInputError(cause instanceof Error
+            ? cause.message
+            : "Invalid knowledge indexing request.");
+    }
 }
 export async function listRagIndexJobs(projectId, userId) {
-  await owner(projectId, userId);
-  return prisma.projectRun.findMany({
-    where: { projectId, operation: "SYNC" },
-    orderBy: { createdAt: "desc" },
-    take: 20,
-    select: {
-      id: true,
-      status: true,
-      error: true,
-      output: true,
-      createdAt: true,
-      startedAt: true,
-      finishedAt: true,
-    },
-  });
+    await owner(projectId, userId);
+    return prisma.projectRun.findMany({
+        where: { projectId, operation: "SYNC" },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+        select: {
+            id: true,
+            status: true,
+            error: true,
+            output: true,
+            createdAt: true,
+            startedAt: true,
+            finishedAt: true,
+        },
+    });
 }
 async function dispatchRagIndexJob(runId, projectId, userId) {
-  const secret = process.env.CODEVIA_BACKGROUND_SECRET;
-  const baseUrl =
-    process.env.URL || process.env.DEPLOY_PRIME_URL || process.env.APP_URL;
-  if (!secret || !baseUrl) {
-    throw new Error("Background knowledge indexing is not configured.");
-  }
-  const response = await fetch(new URL(RAG_BACKGROUND_FUNCTION_PATH, baseUrl), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-devforge-background-secret": secret,
-    },
-    body: JSON.stringify({ runId, projectId, userId }),
-    signal: AbortSignal.timeout(15000),
-  });
-  if (response.status !== 202 && !response.ok) {
-    const detail = await response.text();
-    throw new Error(
-      `Background indexing rejected the job (${response.status})${detail ? `: ${detail.slice(0, 500)}` : ""}`,
-    );
-  }
+    const secret = process.env.CODEVIA_BACKGROUND_SECRET;
+    const baseUrl = process.env.URL || process.env.DEPLOY_PRIME_URL || process.env.APP_URL;
+    if (!secret || !baseUrl) {
+        throw new Error("Background knowledge indexing is not configured.");
+    }
+    const response = await fetch(new URL(RAG_BACKGROUND_FUNCTION_PATH, baseUrl), {
+        method: "POST",
+        headers: {
+            "content-type": "application/json",
+            "x-devforge-background-secret": secret,
+        },
+        body: JSON.stringify({ runId, projectId, userId }),
+        signal: AbortSignal.timeout(15000),
+    });
+    if (response.status !== 202 && !response.ok) {
+        const detail = await response.text();
+        throw new Error(`Background indexing rejected the job (${response.status})${detail ? `: ${detail.slice(0, 500)}` : ""}`);
+    }
 }
 export async function retryRagIndexJob(runId, projectId, userId) {
-  await owner(projectId, userId);
-  const update = await prisma.$transaction(async (tx) => {
-    const activeCount = await tx.projectRun.count({
-      where: {
-        projectId,
-        operation: "SYNC",
-        status: { in: ["QUEUED", "RUNNING"] },
-      },
+    await owner(projectId, userId);
+    const update = await prisma.$transaction(async (tx) => {
+        const activeCount = await tx.projectRun.count({
+            where: {
+                projectId,
+                operation: "SYNC",
+                status: { in: ["QUEUED", "RUNNING"] },
+            },
+        });
+        if (activeCount >= MAX_ACTIVE_RAG_JOBS) {
+            throw new RagInputError(`A project can have at most ${MAX_ACTIVE_RAG_JOBS} active indexing jobs.`);
+        }
+        return tx.projectRun.updateMany({
+            where: {
+                id: runId,
+                projectId,
+                operation: "SYNC",
+                status: "FAILED",
+            },
+            data: {
+                status: "QUEUED",
+                error: null,
+                output: Prisma.DbNull,
+                startedAt: null,
+                finishedAt: null,
+            },
+        });
     });
-    if (activeCount >= MAX_ACTIVE_RAG_JOBS) {
-      throw new RagInputError(
-        `A project can have at most ${MAX_ACTIVE_RAG_JOBS} active indexing jobs.`,
-      );
+    if (!update.count) {
+        throw new RagInputError("Only failed indexing jobs can be retried.");
     }
-    return tx.projectRun.updateMany({
-      where: {
-        id: runId,
-        projectId,
-        operation: "SYNC",
-        status: "FAILED",
-      },
-      data: {
-        status: "QUEUED",
-        error: null,
-        output: Prisma.DbNull,
-        startedAt: null,
-        finishedAt: null,
-      },
-    });
-  });
-  if (!update.count) {
-    throw new RagInputError("Only failed indexing jobs can be retried.");
-  }
-  try {
-    await dispatchRagIndexJob(runId, projectId, userId);
-  } catch (cause) {
-    const message =
-      cause instanceof Error ? cause.message : "Unable to retry indexing.";
-    await prisma.projectRun.updateMany({
-      where: { id: runId, projectId, status: "QUEUED" },
-      data: {
-        status: "FAILED",
-        error: message.slice(0, 2000),
-        finishedAt: new Date(),
-      },
-    });
-    throw cause;
-  }
-  return { id: runId, status: "QUEUED" };
+    try {
+        await dispatchRagIndexJob(runId, projectId, userId);
+    }
+    catch (cause) {
+        const message = cause instanceof Error ? cause.message : "Unable to retry indexing.";
+        await prisma.projectRun.updateMany({
+            where: { id: runId, projectId, status: "QUEUED" },
+            data: {
+                status: "FAILED",
+                error: message.slice(0, 2000),
+                finishedAt: new Date(),
+            },
+        });
+        throw cause;
+    }
+    return { id: runId, status: "QUEUED" };
 }
 export async function cancelQueuedRagIndexJob(runId, projectId, userId) {
-  await owner(projectId, userId);
-  const update = await prisma.projectRun.updateMany({
-    where: {
-      id: runId,
-      projectId,
-      operation: "SYNC",
-      status: "QUEUED",
-    },
-    data: { status: "CANCELLED", finishedAt: new Date() },
-  });
-  if (!update.count) {
-    throw new RagInputError(
-      "Only queued indexing jobs can be cancelled; a running job cannot be stopped safely.",
-    );
-  }
+    await owner(projectId, userId);
+    const update = await prisma.projectRun.updateMany({
+        where: {
+            id: runId,
+            projectId,
+            operation: "SYNC",
+            status: "QUEUED",
+        },
+        data: { status: "CANCELLED", finishedAt: new Date() },
+    });
+    if (!update.count) {
+        throw new RagInputError("Only queued indexing jobs can be cancelled; a running job cannot be stopped safely.");
+    }
 }
 export async function enqueueRagIndexJob(projectId, userId, rawInput) {
-  await owner(projectId, userId);
-  const input = validateRagIndexInput(rawInput);
-  await assertAIProviderConfigured(userId, input.provider);
-  const serializedInput = JSON.stringify(input);
-  if (Buffer.byteLength(serializedInput, "utf8") > MAX_SOURCE_BYTES + 4096) {
-    throw new RagInputError(
-      "Knowledge indexing request exceeds the upload limit.",
-    );
-  }
-  const run = await prisma.$transaction(async (tx) => {
-    const activeCount = await tx.projectRun.count({
-      where: {
-        projectId,
-        operation: "SYNC",
-        status: { in: ["QUEUED", "RUNNING"] },
-      },
-    });
-    if (activeCount >= MAX_ACTIVE_RAG_JOBS) {
-      throw new RagInputError(
-        `A project can have at most ${MAX_ACTIVE_RAG_JOBS} active indexing jobs.`,
-      );
+    await owner(projectId, userId);
+    const input = validateRagIndexInput(rawInput);
+    await assertAIProviderConfigured(userId, input.provider);
+    const serializedInput = JSON.stringify(input);
+    if (Buffer.byteLength(serializedInput, "utf8") > MAX_SOURCE_BYTES + 4096) {
+        throw new RagInputError("Knowledge indexing request exceeds the upload limit.");
     }
-    return tx.projectRun.create({
-      data: {
-        projectId,
-        operation: "SYNC",
-        status: "QUEUED",
-        input: input,
-      },
-      select: { id: true, status: true, operation: true, createdAt: true },
+    const run = await prisma.$transaction(async (tx) => {
+        const activeCount = await tx.projectRun.count({
+            where: {
+                projectId,
+                operation: "SYNC",
+                status: { in: ["QUEUED", "RUNNING"] },
+            },
+        });
+        if (activeCount >= MAX_ACTIVE_RAG_JOBS) {
+            throw new RagInputError(`A project can have at most ${MAX_ACTIVE_RAG_JOBS} active indexing jobs.`);
+        }
+        return tx.projectRun.create({
+            data: {
+                projectId,
+                operation: "SYNC",
+                status: "QUEUED",
+                input: input,
+            },
+            select: { id: true, status: true, operation: true, createdAt: true },
+        });
     });
-  });
-  try {
-    await dispatchRagIndexJob(run.id, projectId, userId);
-  } catch (cause) {
-    const message =
-      cause instanceof Error ? cause.message : "Unable to start indexing.";
-    await prisma.projectRun.updateMany({
-      where: { id: run.id, projectId, status: "QUEUED" },
-      data: {
-        status: "FAILED",
-        error: message.slice(0, 2000),
-        finishedAt: new Date(),
-      },
-    });
-    throw cause;
-  }
-  return { run };
+    try {
+        await dispatchRagIndexJob(run.id, projectId, userId);
+    }
+    catch (cause) {
+        const message = cause instanceof Error ? cause.message : "Unable to start indexing.";
+        await prisma.projectRun.updateMany({
+            where: { id: run.id, projectId, status: "QUEUED" },
+            data: {
+                status: "FAILED",
+                error: message.slice(0, 2000),
+                finishedAt: new Date(),
+            },
+        });
+        throw cause;
+    }
+    return { run };
 }
 export async function processRagIndexJob(runId, projectId, userId) {
-  const run = await prisma.projectRun.findFirst({
-    where: { id: runId, projectId, operation: "SYNC" },
-    select: { id: true, status: true, input: true },
-  });
-  if (!run) throw new Error("Knowledge indexing job was not found.");
-  const claimed = await prisma.projectRun.updateMany({
-    where: {
-      id: runId,
-      projectId,
-      operation: "SYNC",
-      status: "QUEUED",
-    },
-    data: { status: "RUNNING", startedAt: new Date() },
-  });
-  if (!claimed.count) return { status: run.status };
-  try {
-    const input = validateRagIndexInput(run.input);
-    let source;
-    switch (input.kind) {
-      case "DOCUMENT":
-        source = await addKnowledgeDocument(projectId, userId, input);
-        break;
-      case "URL":
-        source = await addKnowledgeUrl(projectId, userId, input);
-        break;
-      case "GITHUB":
-        source = await addKnowledgeGitHub(projectId, userId, input);
-        break;
-      case "PROJECT":
-        source = await indexProjectArtifacts(projectId, userId, input.provider);
-        break;
-    }
-    await prisma.projectRun.updateMany({
-      where: { id: runId, projectId, status: "RUNNING" },
-      data: {
-        status: "SUCCESS",
-        output: {
-          sourceId: source.id,
-          name: source.name,
-          chunkCount: source.chunkCount,
+    const run = await prisma.projectRun.findFirst({
+        where: { id: runId, projectId, operation: "SYNC" },
+        select: { id: true, status: true, input: true },
+    });
+    if (!run)
+        throw new Error("Knowledge indexing job was not found.");
+    const claimed = await prisma.projectRun.updateMany({
+        where: {
+            id: runId,
+            projectId,
+            operation: "SYNC",
+            status: "QUEUED",
         },
-        finishedAt: new Date(),
-      },
+        data: { status: "RUNNING", startedAt: new Date() },
     });
-    return { status: "SUCCESS" };
-  } catch (cause) {
-    const message =
-      cause instanceof Error ? cause.message : "Knowledge indexing failed.";
-    await prisma.projectRun.updateMany({
-      where: { id: runId, projectId, status: "RUNNING" },
-      data: {
-        status: "FAILED",
-        error: message.slice(0, 2000),
-        finishedAt: new Date(),
-      },
-    });
-    throw cause;
-  }
+    if (!claimed.count)
+        return { status: run.status };
+    try {
+        const input = validateRagIndexInput(run.input);
+        let source;
+        switch (input.kind) {
+            case "DOCUMENT":
+                source = await addKnowledgeDocument(projectId, userId, input);
+                break;
+            case "URL":
+                source = await addKnowledgeUrl(projectId, userId, input);
+                break;
+            case "GITHUB":
+                source = await addKnowledgeGitHub(projectId, userId, input);
+                break;
+            case "PROJECT":
+                source = await indexProjectArtifacts(projectId, userId, input.provider);
+                break;
+        }
+        await prisma.projectRun.updateMany({
+            where: { id: runId, projectId, status: "RUNNING" },
+            data: {
+                status: "SUCCESS",
+                output: {
+                    sourceId: source.id,
+                    name: source.name,
+                    chunkCount: source.chunkCount,
+                },
+                finishedAt: new Date(),
+            },
+        });
+        return { status: "SUCCESS" };
+    }
+    catch (cause) {
+        const message = cause instanceof Error ? cause.message : "Knowledge indexing failed.";
+        await prisma.projectRun.updateMany({
+            where: { id: runId, projectId, status: "RUNNING" },
+            data: {
+                status: "FAILED",
+                error: message.slice(0, 2000),
+                finishedAt: new Date(),
+            },
+        });
+        throw cause;
+    }
 }
 function assertTextSize(text, label) {
-  if (Buffer.byteLength(text, "utf8") > MAX_SOURCE_BYTES) {
-    throw new RagInputError(`${label} exceeds the 512 KB import limit.`);
-  }
+    if (Buffer.byteLength(text, "utf8") > MAX_SOURCE_BYTES) {
+        throw new RagInputError(`${label} exceeds the 512 KB import limit.`);
+    }
 }
 function normalizeFiles(files) {
-  const normalizedFiles = files.map((file) => ({
-    path: file.path
-      .replaceAll("\\", "/")
-      .replace(/[\u0000-\u001f]/g, " ")
-      .slice(0, 512),
-    content: file.content,
-  }));
-  const cleanFiles = normalizedFiles.filter(
-    (file) =>
-      file.path &&
-      !EXCLUDED_PROJECT_PATH.test(file.path) &&
-      typeof file.content === "string" &&
-      file.content.trim() &&
-      !file.content.includes("\0"),
-  );
-  if (cleanFiles.length > 100) {
-    throw new RagInputError("Knowledge source is limited to 100 text files.");
-  }
-  const seenPaths = new Set();
-  const uniqueFiles = cleanFiles.filter((file) => {
-    const path = file.path;
-    if (seenPaths.has(path)) return false;
-    seenPaths.add(path);
-    return true;
-  });
-  let totalBytes = 0;
-  for (const file of uniqueFiles) {
-    totalBytes += Buffer.byteLength(file.content, "utf8");
-    if (totalBytes > MAX_SOURCE_BYTES) {
-      throw new RagInputError(
-        "Knowledge source exceeds the 512 KB import limit.",
-      );
+    const normalizedFiles = files.map((file) => ({
+        path: file.path
+            .replaceAll("\\", "/")
+            .replace(/[\u0000-\u001f]/g, " ")
+            .slice(0, 512),
+        content: file.content,
+    }));
+    const cleanFiles = normalizedFiles.filter((file) => file.path &&
+        !EXCLUDED_PROJECT_PATH.test(file.path) &&
+        typeof file.content === "string" &&
+        file.content.trim() &&
+        !file.content.includes("\0"));
+    if (cleanFiles.length > 100) {
+        throw new RagInputError("Knowledge source is limited to 100 text files.");
     }
-  }
-  return uniqueFiles;
+    const seenPaths = new Set();
+    const uniqueFiles = cleanFiles.filter((file) => {
+        const path = file.path;
+        if (seenPaths.has(path))
+            return false;
+        seenPaths.add(path);
+        return true;
+    });
+    let totalBytes = 0;
+    for (const file of uniqueFiles) {
+        totalBytes += Buffer.byteLength(file.content, "utf8");
+        if (totalBytes > MAX_SOURCE_BYTES) {
+            throw new RagInputError("Knowledge source exceeds the 512 KB import limit.");
+        }
+    }
+    return uniqueFiles;
 }
 async function saveKnowledgeSource(input) {
-  const files = normalizeFiles(input.files);
-  if (!files.length) {
-    throw new RagInputError(
-      "Knowledge source contains no supported text files.",
-    );
-  }
-  const chunks = chunkFiles(files);
-  if (!chunks.length) {
-    throw new RagInputError("Knowledge source did not contain readable text.");
-  }
-  if (chunks.length > MAX_SOURCE_CHUNKS) {
-    throw new RagInputError(
-      `Knowledge source creates ${chunks.length} chunks; reduce it to ${MAX_SOURCE_CHUNKS} chunks or fewer.`,
-    );
-  }
-  const existingSource = await prisma.knowledgeSource.findUnique({
-    where: {
-      projectId_uri: { projectId: input.projectId, uri: input.uri },
-    },
-    select: { id: true },
-  });
-  const existingChunks = existingSource
-    ? await prisma.knowledgeChunk.count({
-        where: { sourceId: existingSource.id },
-      })
-    : 0;
-  const projectChunks = await prisma.knowledgeChunk.count({
-    where: { projectId: input.projectId },
-  });
-  if (projectChunks - existingChunks + chunks.length > MAX_PROJECT_CHUNKS) {
-    throw new RagInputError(
-      `Project knowledge is limited to ${MAX_PROJECT_CHUNKS} chunks. Remove a source before adding more.`,
-    );
-  }
-  const vectors = [];
-  const batches = [];
-  for (let index = 0; index < chunks.length; index += 32) {
-    batches.push(chunks.slice(index, index + 32).map((chunk) => chunk.content));
-  }
-  for (let index = 0; index < batches.length; index += 3) {
-    const embeddedBatches = await Promise.all(
-      batches
-        .slice(index, index + 3)
-        .map((batch) => embed(batch, input.provider, input.userId)),
-    );
-    for (const batch of embeddedBatches) vectors.push(...batch);
-  }
-  return prisma.$transaction(async (tx) => {
-    const currentProjectChunks = await tx.knowledgeChunk.count({
-      where: { projectId: input.projectId },
-    });
-    const currentSource = await tx.knowledgeSource.findUnique({
-      where: {
-        projectId_uri: { projectId: input.projectId, uri: input.uri },
-      },
-      select: { id: true },
-    });
-    const currentSourceChunks = currentSource
-      ? await tx.knowledgeChunk.count({
-          where: { sourceId: currentSource.id },
-        })
-      : 0;
-    if (
-      currentProjectChunks - currentSourceChunks + chunks.length >
-      MAX_PROJECT_CHUNKS
-    ) {
-      throw new RagInputError(
-        `Project knowledge is limited to ${MAX_PROJECT_CHUNKS} chunks. Remove a source before adding more.`,
-      );
+    const files = normalizeFiles(input.files);
+    if (!files.length) {
+        throw new RagInputError("Knowledge source contains no supported text files.");
     }
-    const source = await tx.knowledgeSource.upsert({
-      where: {
-        projectId_uri: { projectId: input.projectId, uri: input.uri },
-      },
-      create: {
-        projectId: input.projectId,
-        kind: input.kind,
-        embeddingProvider: input.provider,
-        embeddingModel: embeddingModel(input.provider),
-        name: input.name.slice(0, 200),
-        uri: input.uri,
-      },
-      update: {
-        kind: input.kind,
-        embeddingProvider: input.provider,
-        embeddingModel: embeddingModel(input.provider),
-        name: input.name.slice(0, 200),
-        lastIndexedAt: new Date(),
-      },
+    const chunks = chunkFiles(files);
+    if (!chunks.length) {
+        throw new RagInputError("Knowledge source did not contain readable text.");
+    }
+    if (chunks.length > MAX_SOURCE_CHUNKS) {
+        throw new RagInputError(`Knowledge source creates ${chunks.length} chunks; reduce it to ${MAX_SOURCE_CHUNKS} chunks or fewer.`);
+    }
+    const existingSource = await prisma.knowledgeSource.findUnique({
+        where: {
+            projectId_uri: { projectId: input.projectId, uri: input.uri },
+        },
+        select: { id: true },
     });
-    await tx.knowledgeChunk.deleteMany({ where: { sourceId: source.id } });
-    await tx.knowledgeChunk.createMany({
-      data: chunks.map((chunk, index) => ({
-        projectId: input.projectId,
-        sourceId: source.id,
-        content: chunk.content,
-        embedding: vectors[index],
-        metadata: chunk.metadata,
-      })),
+    const existingChunks = existingSource
+        ? await prisma.knowledgeChunk.count({
+            where: { sourceId: existingSource.id },
+        })
+        : 0;
+    const projectChunks = await prisma.knowledgeChunk.count({
+        where: { projectId: input.projectId },
     });
-    return {
-      id: source.id,
-      kind: source.kind,
-      embeddingProvider: source.embeddingProvider,
-      embeddingModel: source.embeddingModel,
-      name: source.name,
-      uri: source.uri,
-      createdAt: source.createdAt,
-      lastIndexedAt: source.lastIndexedAt,
-      chunkCount: chunks.length,
-    };
-  });
+    if (projectChunks - existingChunks + chunks.length > MAX_PROJECT_CHUNKS) {
+        throw new RagInputError(`Project knowledge is limited to ${MAX_PROJECT_CHUNKS} chunks. Remove a source before adding more.`);
+    }
+    const vectors = [];
+    const batches = [];
+    for (let index = 0; index < chunks.length; index += 32) {
+        batches.push(chunks.slice(index, index + 32).map((chunk) => chunk.content));
+    }
+    for (let index = 0; index < batches.length; index += 3) {
+        const embeddedBatches = await Promise.all(batches
+            .slice(index, index + 3)
+            .map((batch) => embed(batch, input.provider, input.userId)));
+        for (const batch of embeddedBatches)
+            vectors.push(...batch);
+    }
+    return prisma.$transaction(async (tx) => {
+        const currentProjectChunks = await tx.knowledgeChunk.count({
+            where: { projectId: input.projectId },
+        });
+        const currentSource = await tx.knowledgeSource.findUnique({
+            where: {
+                projectId_uri: { projectId: input.projectId, uri: input.uri },
+            },
+            select: { id: true },
+        });
+        const currentSourceChunks = currentSource
+            ? await tx.knowledgeChunk.count({
+                where: { sourceId: currentSource.id },
+            })
+            : 0;
+        if (currentProjectChunks - currentSourceChunks + chunks.length >
+            MAX_PROJECT_CHUNKS) {
+            throw new RagInputError(`Project knowledge is limited to ${MAX_PROJECT_CHUNKS} chunks. Remove a source before adding more.`);
+        }
+        const source = await tx.knowledgeSource.upsert({
+            where: {
+                projectId_uri: { projectId: input.projectId, uri: input.uri },
+            },
+            create: {
+                projectId: input.projectId,
+                kind: input.kind,
+                embeddingProvider: input.provider,
+                embeddingModel: embeddingModel(input.provider),
+                name: input.name.slice(0, 200),
+                uri: input.uri,
+            },
+            update: {
+                kind: input.kind,
+                embeddingProvider: input.provider,
+                embeddingModel: embeddingModel(input.provider),
+                name: input.name.slice(0, 200),
+                lastIndexedAt: new Date(),
+            },
+        });
+        await tx.knowledgeChunk.deleteMany({ where: { sourceId: source.id } });
+        await tx.knowledgeChunk.createMany({
+            data: chunks.map((chunk, index) => ({
+                projectId: input.projectId,
+                sourceId: source.id,
+                content: chunk.content,
+                embedding: vectors[index],
+                metadata: chunk.metadata,
+            })),
+        });
+        return {
+            id: source.id,
+            kind: source.kind,
+            embeddingProvider: source.embeddingProvider,
+            embeddingModel: source.embeddingModel,
+            name: source.name,
+            uri: source.uri,
+            createdAt: source.createdAt,
+            lastIndexedAt: source.lastIndexedAt,
+            chunkCount: chunks.length,
+        };
+    });
 }
 export async function listKnowledgeSources(projectId, userId) {
-  await owner(projectId, userId);
-  const sources = await prisma.knowledgeSource.findMany({
-    where: { projectId },
-    orderBy: { lastIndexedAt: "desc" },
-    select: {
-      id: true,
-      kind: true,
-      embeddingProvider: true,
-      embeddingModel: true,
-      name: true,
-      uri: true,
-      createdAt: true,
-      lastIndexedAt: true,
-      _count: { select: { chunks: true } },
-    },
-  });
-  return sources.map(({ _count, ...source }) => ({
-    ...source,
-    chunkCount: _count.chunks,
-  }));
+    await owner(projectId, userId);
+    const sources = await prisma.knowledgeSource.findMany({
+        where: { projectId },
+        orderBy: { lastIndexedAt: "desc" },
+        select: {
+            id: true,
+            kind: true,
+            embeddingProvider: true,
+            embeddingModel: true,
+            name: true,
+            uri: true,
+            createdAt: true,
+            lastIndexedAt: true,
+            _count: { select: { chunks: true } },
+        },
+    });
+    return sources.map(({ _count, ...source }) => ({
+        ...source,
+        chunkCount: _count.chunks,
+    }));
 }
 export async function addKnowledgeDocument(projectId, userId, input) {
-  await owner(projectId, userId);
-  if (typeof input.name !== "string") {
-    throw new RagInputError(
-      "Document name must be between 1 and 200 characters.",
-    );
-  }
-  const name = input.name.replace(/[\u0000-\u001f]/g, " ").trim();
-  if (!name || name.length > 200) {
-    throw new RagInputError(
-      "Document name must be between 1 and 200 characters.",
-    );
-  }
-  if (typeof input.content !== "string" || !input.content.trim()) {
-    throw new RagInputError("Document content is required.");
-  }
-  assertTextSize(input.content, "Document");
-  let path = name;
-  if (input.path !== undefined) {
-    if (typeof input.path !== "string" || input.path.length > 512) {
-      throw new RagInputError(
-        "Document path must be a relative path of 512 characters or fewer.",
-      );
+    await owner(projectId, userId);
+    if (typeof input.name !== "string") {
+        throw new RagInputError("Document name must be between 1 and 200 characters.");
     }
-    path = input.path.replaceAll("\\", "/").trim();
-    if (
-      !path ||
-      path.startsWith("/") ||
-      /^[a-z]:/i.test(path) ||
-      path.split("/").some((part) => part === "..")
-    ) {
-      throw new RagInputError("Document path must be a safe relative path.");
+    const name = input.name.replace(/[\u0000-\u001f]/g, " ").trim();
+    if (!name || name.length > 200) {
+        throw new RagInputError("Document name must be between 1 and 200 characters.");
     }
-  }
-  return saveKnowledgeSource({
-    projectId,
-    userId,
-    kind: "DOCUMENT",
-    name,
-    uri: `document:${name.toLowerCase()}`,
-    files: [{ path, content: input.content }],
-    provider: input.provider,
-  });
+    if (typeof input.content !== "string" || !input.content.trim()) {
+        throw new RagInputError("Document content is required.");
+    }
+    assertTextSize(input.content, "Document");
+    let path = name;
+    if (input.path !== undefined) {
+        if (typeof input.path !== "string" || input.path.length > 512) {
+            throw new RagInputError("Document path must be a relative path of 512 characters or fewer.");
+        }
+        path = input.path.replaceAll("\\", "/").trim();
+        if (!path ||
+            path.startsWith("/") ||
+            /^[a-z]:/i.test(path) ||
+            path.split("/").some((part) => part === "..")) {
+            throw new RagInputError("Document path must be a safe relative path.");
+        }
+    }
+    return saveKnowledgeSource({
+        projectId,
+        userId,
+        kind: "DOCUMENT",
+        name,
+        uri: `document:${name.toLowerCase()}`,
+        files: [{ path, content: input.content }],
+        provider: input.provider,
+    });
 }
 export async function addKnowledgeUrl(projectId, userId, input) {
-  await owner(projectId, userId);
-  if (typeof input.url !== "string" || input.url.length > 2048) {
-    throw new RagInputError(
-      "Enter a public HTTPS URL of 2,048 characters or fewer.",
-    );
-  }
-  const text = await fetchPublicText(input.url.trim());
-  const url = new URL(input.url.trim());
-  url.search = "";
-  url.hash = "";
-  return saveKnowledgeSource({
-    projectId,
-    userId,
-    kind: "URL",
-    name: `${url.hostname}${url.pathname === "/" ? "" : url.pathname}`.slice(
-      0,
-      200,
-    ),
-    uri: url.toString(),
-    files: [{ path: url.pathname || url.hostname, content: text }],
-    provider: input.provider,
-  });
+    await owner(projectId, userId);
+    if (typeof input.url !== "string" || input.url.length > 2048) {
+        throw new RagInputError("Enter a public HTTPS URL of 2,048 characters or fewer.");
+    }
+    const text = await fetchPublicText(input.url.trim());
+    const url = new URL(input.url.trim());
+    url.search = "";
+    url.hash = "";
+    return saveKnowledgeSource({
+        projectId,
+        userId,
+        kind: "URL",
+        name: `${url.hostname}${url.pathname === "/" ? "" : url.pathname}`.slice(0, 200),
+        uri: url.toString(),
+        files: [{ path: url.pathname || url.hostname, content: text }],
+        provider: input.provider,
+    });
 }
 function parseGitHubRepositoryUrl(value) {
-  if (typeof value !== "string" || value.length > 2048) {
-    throw new RagInputError("Enter a valid GitHub repository URL.");
-  }
-  let url;
-  try {
-    url = new URL(value.trim());
-  } catch {
-    throw new RagInputError("Enter a valid GitHub repository URL.");
-  }
-  if (
-    url.protocol !== "https:" ||
-    url.hostname.toLowerCase() !== "github.com" ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash
-  ) {
-    throw new RagInputError(
-      "GitHub source must be an HTTPS github.com repository URL.",
-    );
-  }
-  const parts = url.pathname.split("/").filter(Boolean);
-  if (
-    parts.length < 2 ||
-    !/^[A-Za-z0-9_.-]{1,100}$/.test(parts[0]) ||
-    !/^[A-Za-z0-9_.-]{1,100}$/.test(parts[1]) ||
-    parts[0] === "." ||
-    parts[0] === ".." ||
-    parts[1] === "." ||
-    parts[1] === ".."
-  ) {
-    throw new RagInputError(
-      "GitHub source URL must identify an owner and repository.",
-    );
-  }
-  let branch;
-  if (parts.length > 2) {
-    if (parts[2] !== "tree" || parts.length < 4) {
-      throw new RagInputError(
-        "Use a repository URL or a GitHub tree URL with a branch.",
-      );
+    if (typeof value !== "string" || value.length > 2048) {
+        throw new RagInputError("Enter a valid GitHub repository URL.");
     }
-    branch = parts.slice(3).join("/");
-  }
-  return {
-    owner: parts[0],
-    repository: parts[1].replace(/\.git$/i, ""),
-    branch,
-  };
+    let url;
+    try {
+        url = new URL(value.trim());
+    }
+    catch {
+        throw new RagInputError("Enter a valid GitHub repository URL.");
+    }
+    if (url.protocol !== "https:" ||
+        url.hostname.toLowerCase() !== "github.com" ||
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash) {
+        throw new RagInputError("GitHub source must be an HTTPS github.com repository URL.");
+    }
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length < 2 ||
+        !/^[A-Za-z0-9_.-]{1,100}$/.test(parts[0]) ||
+        !/^[A-Za-z0-9_.-]{1,100}$/.test(parts[1]) ||
+        parts[0] === "." ||
+        parts[0] === ".." ||
+        parts[1] === "." ||
+        parts[1] === "..") {
+        throw new RagInputError("GitHub source URL must identify an owner and repository.");
+    }
+    let branch;
+    if (parts.length > 2) {
+        if (parts[2] !== "tree" || parts.length < 4) {
+            throw new RagInputError("Use a repository URL or a GitHub tree URL with a branch.");
+        }
+        branch = parts.slice(3).join("/");
+    }
+    return {
+        owner: parts[0],
+        repository: parts[1].replace(/\.git$/i, ""),
+        branch,
+    };
 }
 export async function addKnowledgeGitHub(projectId, userId, input) {
-  await owner(projectId, userId);
-  const {
-    owner: repositoryOwner,
-    repository,
-    branch,
-  } = parseGitHubRepositoryUrl(input.url);
-  const snapshot = await fetchGitHubKnowledgeFiles(
-    userId,
-    repositoryOwner,
-    repository,
-    branch,
-  );
-  const branchPath = snapshot.branch
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  const uri = `https://github.com/${encodeURIComponent(repositoryOwner)}/${encodeURIComponent(repository)}/tree/${branchPath}`;
-  return saveKnowledgeSource({
-    projectId,
-    userId,
-    kind: "GITHUB",
-    name: `${repositoryOwner}/${repository} (${snapshot.branch})`,
-    uri,
-    files: snapshot.files,
-    provider: input.provider,
-  });
+    await owner(projectId, userId);
+    const { owner: repositoryOwner, repository, branch, } = parseGitHubRepositoryUrl(input.url);
+    const snapshot = await fetchGitHubKnowledgeFiles(userId, repositoryOwner, repository, branch);
+    const branchPath = snapshot.branch
+        .split("/")
+        .map((segment) => encodeURIComponent(segment))
+        .join("/");
+    const uri = `https://github.com/${encodeURIComponent(repositoryOwner)}/${encodeURIComponent(repository)}/tree/${branchPath}`;
+    return saveKnowledgeSource({
+        projectId,
+        userId,
+        kind: "GITHUB",
+        name: `${repositoryOwner}/${repository} (${snapshot.branch})`,
+        uri,
+        files: snapshot.files,
+        provider: input.provider,
+    });
 }
 export async function indexProjectArtifacts(projectId, userId, provider) {
-  await owner(projectId, userId);
-  const artifact = await prisma.artifact.findFirst({
-    where: { projectId, type: "CODE" },
-    orderBy: { createdAt: "desc" },
-    select: { content: true },
-  });
-  if (!Array.isArray(artifact?.content)) {
-    throw new RagInputError("This project has no saved code files to index.");
-  }
-  const files = artifact.content
-    .filter(
-      (file) =>
-        file !== null &&
+    await owner(projectId, userId);
+    const artifact = await prisma.artifact.findFirst({
+        where: { projectId, type: "CODE" },
+        orderBy: { createdAt: "desc" },
+        select: { content: true },
+    });
+    if (!Array.isArray(artifact?.content)) {
+        throw new RagInputError("This project has no saved code files to index.");
+    }
+    const files = artifact.content
+        .filter((file) => file !== null &&
         file !== undefined &&
         typeof file === "object" &&
         !Array.isArray(file) &&
         typeof file.path === "string" &&
-        typeof file.content === "string",
-    )
-    .map((file) => ({ path: file.path, content: file.content }));
-  return saveKnowledgeSource({
-    projectId,
-    userId,
-    kind: "PROJECT",
-    name: "Saved project files",
-    uri: "project:latest-code-artifact",
-    files,
-    provider,
-  });
+        typeof file.content === "string")
+        .map((file) => ({ path: file.path, content: file.content }));
+    return saveKnowledgeSource({
+        projectId,
+        userId,
+        kind: "PROJECT",
+        name: "Saved project files",
+        uri: "project:latest-code-artifact",
+        files,
+        provider,
+    });
 }
 export async function deleteKnowledgeSource(projectId, sourceId, userId) {
-  await owner(projectId, userId);
-  const source = await prisma.knowledgeSource.findFirst({
-    where: { id: sourceId, projectId },
-    select: { id: true },
-  });
-  if (!source) throw new RagInputError("Knowledge source was not found.");
-  await prisma.knowledgeSource.delete({ where: { id: source.id } });
+    await owner(projectId, userId);
+    const source = await prisma.knowledgeSource.findFirst({
+        where: { id: sourceId, projectId },
+        select: { id: true },
+    });
+    if (!source)
+        throw new RagInputError("Knowledge source was not found.");
+    await prisma.knowledgeSource.delete({ where: { id: source.id } });
 }
 function getChunkPath(metadata) {
-  if (
-    !metadata ||
-    typeof metadata !== "object" ||
-    Array.isArray(metadata) ||
-    !("path" in metadata) ||
-    typeof metadata.path !== "string"
-  ) {
-    return undefined;
-  }
-  return metadata.path;
+    if (!metadata ||
+        typeof metadata !== "object" ||
+        Array.isArray(metadata) ||
+        !("path" in metadata) ||
+        typeof metadata.path !== "string") {
+        return undefined;
+    }
+    return metadata.path;
 }
 function getChunkLineRange(metadata) {
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
-    return {};
-  }
-  const value = metadata;
-  const lineStart =
-    typeof value.lineStart === "number" && Number.isInteger(value.lineStart)
-      ? value.lineStart
-      : undefined;
-  const lineEnd =
-    typeof value.lineEnd === "number" && Number.isInteger(value.lineEnd)
-      ? value.lineEnd
-      : undefined;
-  return {
-    ...(lineStart !== undefined ? { lineStart } : {}),
-    ...(lineEnd !== undefined ? { lineEnd } : {}),
-  };
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+        return {};
+    }
+    const value = metadata;
+    const lineStart = typeof value.lineStart === "number" && Number.isInteger(value.lineStart)
+        ? value.lineStart
+        : undefined;
+    const lineEnd = typeof value.lineEnd === "number" && Number.isInteger(value.lineEnd)
+        ? value.lineEnd
+        : undefined;
+    return {
+        ...(lineStart !== undefined ? { lineStart } : {}),
+        ...(lineEnd !== undefined ? { lineEnd } : {}),
+    };
 }
 function getVector(value) {
-  if (
-    !Array.isArray(value) ||
-    !value.every((item) => typeof item === "number" && Number.isFinite(item))
-  ) {
-    return undefined;
-  }
-  return value;
+    if (!Array.isArray(value) ||
+        !value.every((item) => typeof item === "number" && Number.isFinite(item))) {
+        return undefined;
+    }
+    return value;
 }
-export async function searchKnowledge(projectId, userId, queryValue, provider) {
-  await owner(projectId, userId);
-  if (
-    typeof queryValue !== "string" ||
-    !queryValue.trim() ||
-    queryValue.length > 4000
-  ) {
-    throw new RagInputError(
-      "Search query must be between 1 and 4,000 characters.",
-    );
-  }
-  const query = queryValue.trim();
-  const sourceCount = await prisma.knowledgeSource.count({
-    where: { projectId },
-  });
-  if (!sourceCount) return { results: [] };
-  const compatibleChunks = await prisma.knowledgeChunk.count({
-    where: {
-      projectId,
-      source: {
-        embeddingProvider: provider,
-        embeddingModel: embeddingModel(provider),
-      },
-    },
-  });
-  const queryVector = compatibleChunks
-    ? (await embed([query], provider, userId))[0]
-    : undefined;
-  const lexical = await prisma.$queryRaw(Prisma.sql`
+export async function searchKnowledge(projectId, userId, queryValue, provider, settings) {
+    await owner(projectId, userId);
+    if (typeof queryValue !== "string" ||
+        !queryValue.trim() ||
+        queryValue.length > 4000) {
+        throw new RagInputError("Search query must be between 1 and 4,000 characters.");
+    }
+    const query = queryValue.trim();
+    const sourceCount = await prisma.knowledgeSource.count({
+        where: { projectId },
+    });
+    if (!sourceCount)
+        return { results: [] };
+    const compatibleChunks = await prisma.knowledgeChunk.count({
+        where: {
+            projectId,
+            source: {
+                embeddingProvider: provider,
+                embeddingModel: embeddingModel(provider),
+            },
+        },
+    });
+    const queryVector = compatibleChunks
+        ? (await embed([query], provider, userId))[0]
+        : undefined;
+    const lexical = await prisma.$queryRaw(Prisma.sql `
     SELECT
       chunk."id",
       chunk."content",
@@ -703,72 +632,80 @@ export async function searchKnowledge(projectId, userId, queryValue, provider) {
     ORDER BY "textRank" DESC
     LIMIT 40
   `);
-  const chunks = queryVector
-    ? await prisma.knowledgeChunk.findMany({
-        where: {
-          projectId,
-          source: {
-            embeddingProvider: provider,
-            embeddingModel: embeddingModel(provider),
-          },
-        },
-        orderBy: { createdAt: "desc" },
-        take: MAX_PROJECT_CHUNKS,
-        select: {
-          id: true,
-          content: true,
-          embedding: true,
-          metadata: true,
-          source: { select: { name: true, uri: true } },
-        },
-      })
-    : [];
-  const semantic = queryVector
-    ? chunks
-        .flatMap((chunk) => {
-          const vector = getVector(chunk.embedding);
-          if (!vector) return [];
-          return [
-            {
-              item: {
-                id: chunk.id,
-                content: chunk.content,
-                sourceName: chunk.source.name,
-                sourceUri: chunk.source.uri,
-                metadata: chunk.metadata,
-              },
-              score: cosineSimilarity(queryVector, vector),
+    const chunks = queryVector
+        ? await prisma.knowledgeChunk.findMany({
+            where: {
+                projectId,
+                source: {
+                    embeddingProvider: provider,
+                    embeddingModel: embeddingModel(provider),
+                },
             },
-          ];
+            orderBy: { createdAt: "desc" },
+            take: MAX_PROJECT_CHUNKS,
+            select: {
+                id: true,
+                content: true,
+                embedding: true,
+                metadata: true,
+                source: { select: { name: true, uri: true } },
+            },
         })
-        .sort((left, right) => right.score - left.score)
-        .slice(0, 40)
-    : [];
-  const lexicalRanked = lexical.map((item, index) => ({
-    item: {
-      id: item.id,
-      content: item.content,
-      sourceName: item.sourceName,
-      sourceUri: item.sourceUri,
-      metadata: item.metadata,
-    },
-    rank: index + 1,
-  }));
-  const semanticRanked = semantic.map((item, index) => ({
-    item: item.item,
-    rank: index + 1,
-  }));
-  const results = reciprocalRankFusion(lexicalRanked, semanticRanked, 5).map(
-    (chunk) => ({
-      id: chunk.id,
-      sourceName: chunk.sourceName,
-      uri: chunk.sourceUri,
-      excerpt: chunk.content.slice(0, 1200),
-      ...(getChunkPath(chunk.metadata)
-        ? { path: getChunkPath(chunk.metadata) }
-        : {}),
-      ...getChunkLineRange(chunk.metadata),
-    }),
-  );
-  return { results };
+        : [];
+    const semantic = queryVector
+        ? chunks
+            .flatMap((chunk) => {
+            const vector = getVector(chunk.embedding);
+            if (!vector)
+                return [];
+            return [
+                {
+                    item: {
+                        id: chunk.id,
+                        content: chunk.content,
+                        sourceName: chunk.source.name,
+                        sourceUri: chunk.source.uri,
+                        metadata: chunk.metadata,
+                    },
+                    score: cosineSimilarity(queryVector, vector),
+                },
+            ];
+        })
+            .sort((left, right) => right.score - left.score)
+            .slice(0, 40)
+        : [];
+    const lexicalRanked = lexical.map((item, index) => ({
+        item: {
+            id: item.id,
+            content: item.content,
+            sourceName: item.sourceName,
+            sourceUri: item.sourceUri,
+            metadata: item.metadata,
+        },
+        rank: index + 1,
+    }));
+    const semanticRanked = semantic.map((item, index) => ({ item: item.item, rank: index + 1 }));
+    const strategy = settings?.retrievalStrategy ?? "hybrid";
+    const topK = settings?.maxContextChunks ?? 5;
+    const minSimilarity = settings?.minSimilarity ?? 0;
+    const filteredSemantic = settings
+        ? semantic.filter((entry) => entry.score >= minSimilarity)
+        : semantic;
+    const results = (settings && !settings.enableRrf
+        ? (strategy === "keyword"
+            ? lexicalRanked
+            : strategy === "vector"
+                ? filteredSemantic
+                : reciprocalRankFusion(lexicalRanked, filteredSemantic, topK)).slice(0, topK)
+        : reciprocalRankFusion(strategy === "keyword" ? [] : lexicalRanked, strategy === "vector" ? [] : filteredSemantic, topK)).map((chunk) => ({
+        id: chunk.id,
+        sourceName: chunk.sourceName,
+        uri: chunk.sourceUri,
+        excerpt: chunk.content.slice(0, 1200),
+        ...(getChunkPath(chunk.metadata)
+            ? { path: getChunkPath(chunk.metadata) }
+            : {}),
+        ...getChunkLineRange(chunk.metadata),
+    }));
+    return { results };
 }

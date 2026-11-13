@@ -41,6 +41,11 @@ export type AIProviderInfo = {
   configured: boolean;
   hasUserKey: boolean;
   model: string;
+  fallbackProvider: AIProvider | "";
+  fallbackModel: string;
+  temperature: number | null;
+  maxTokens: number | null;
+  embeddingModel: string;
   baseUrl: string;
 };
 
@@ -50,6 +55,8 @@ export type RagCitation = {
   uri: string;
   excerpt: string;
   path?: string;
+  lineStart?: number;
+  lineEnd?: number;
 };
 
 export type RagSource = {
@@ -62,6 +69,16 @@ export type RagSource = {
   createdAt: string;
   lastIndexedAt: string;
   chunkCount: number;
+};
+
+export type RagJob = {
+  id: string;
+  status: "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED" | "CANCELLED";
+  error: string | null;
+  output: unknown;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
 };
 
 /** One turn in the short project-question conversation sent to the API. */
@@ -658,24 +675,47 @@ export const api = {
       id: string,
       input: { name: string; content: string; provider: AIProvider },
     ) =>
-      request<{ success: true; source: RagSource }>(
-        `/api/projects/${encodeURIComponent(id)}/rag/documents`,
-        { method: "POST", body: JSON.stringify(input) },
+      request<{ success: true; run: RagJob }>(
+        `/api/projects/${encodeURIComponent(id)}/rag/jobs`,
+        {
+          method: "POST",
+          body: JSON.stringify({ ...input, kind: "DOCUMENT" }),
+        },
       ),
     addUrl: (id: string, url: string, provider: AIProvider) =>
-      request<{ success: true; source: RagSource }>(
-        `/api/projects/${encodeURIComponent(id)}/rag/urls`,
-        { method: "POST", body: JSON.stringify({ url, provider }) },
+      request<{ success: true; run: RagJob }>(
+        `/api/projects/${encodeURIComponent(id)}/rag/jobs`,
+        { method: "POST", body: JSON.stringify({ kind: "URL", url, provider }) },
       ),
     addGitHub: (id: string, url: string, provider: AIProvider) =>
-      request<{ success: true; source: RagSource }>(
-        `/api/projects/${encodeURIComponent(id)}/rag/github`,
-        { method: "POST", body: JSON.stringify({ url, provider }) },
+      request<{ success: true; run: RagJob }>(
+        `/api/projects/${encodeURIComponent(id)}/rag/jobs`,
+        {
+          method: "POST",
+          body: JSON.stringify({ kind: "GITHUB", url, provider }),
+        },
       ),
     indexProject: (id: string, provider: AIProvider) =>
-      request<{ success: true; source: RagSource }>(
-        `/api/projects/${encodeURIComponent(id)}/rag/index`,
-        { method: "POST", body: JSON.stringify({ provider }) },
+      request<{ success: true; run: RagJob }>(
+        `/api/projects/${encodeURIComponent(id)}/rag/jobs`,
+        {
+          method: "POST",
+          body: JSON.stringify({ kind: "PROJECT", provider }),
+        },
+      ),
+    jobs: (id: string) =>
+      request<{ success: true; jobs: RagJob[] }>(
+        `/api/projects/${encodeURIComponent(id)}/rag/jobs`,
+      ),
+    retryJob: (id: string, jobId: string) =>
+      request<{ success: true; job: Pick<RagJob, "id" | "status"> }>(
+        `/api/projects/${encodeURIComponent(id)}/rag/jobs/${encodeURIComponent(jobId)}/retry`,
+        { method: "POST" },
+      ),
+    cancelJob: (id: string, jobId: string) =>
+      request<{ success: true }>(
+        `/api/projects/${encodeURIComponent(id)}/rag/jobs/${encodeURIComponent(jobId)}/cancel`,
+        { method: "POST" },
       ),
     deleteSource: (id: string, sourceId: string) =>
       request<{ success: true }>(
@@ -696,7 +736,15 @@ export const api = {
     ),
   saveAIProvider: (
     provider: AIProvider,
-    settings: { apiKey?: string; model?: string; baseUrl?: string },
+    settings: {
+      apiKey?: string;
+      model?: string;
+      baseUrl?: string;
+      fallbackProvider?: AIProvider | null;
+      fallbackModel?: string | null;
+      temperature?: number | null;
+      maxTokens?: number | null;
+    },
   ) =>
     request<{ success: true; provider: AIProviderInfo }>(
       `/api/ai/providers/${provider}`,

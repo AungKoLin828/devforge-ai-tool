@@ -31,10 +31,14 @@ import {
   addKnowledgeDocument,
   addKnowledgeGitHub,
   addKnowledgeUrl,
+  cancelQueuedRagIndexJob,
   deleteKnowledgeSource,
+  enqueueRagIndexJob,
   indexProjectArtifacts,
+  listRagIndexJobs,
   listKnowledgeSources,
   RagInputError,
+  retryRagIndexJob,
   searchKnowledge,
 } from "./rag.js";
 import {
@@ -321,7 +325,18 @@ export async function handleApi(req: Request) {
         apiKey?: unknown;
         model?: unknown;
         baseUrl?: unknown;
+        fallbackProvider?: unknown;
+        fallbackModel?: unknown;
+        temperature?: unknown;
+        maxTokens?: unknown;
       }>(req);
+      const fallbackProvider =
+        requestBody.fallbackProvider === null ||
+        requestBody.fallbackProvider === ""
+          ? null
+          : isAIProvider(requestBody.fallbackProvider)
+            ? requestBody.fallbackProvider
+            : undefined;
       if (
         (requestBody.apiKey !== undefined &&
           (typeof requestBody.apiKey !== "string" ||
@@ -331,7 +346,21 @@ export async function handleApi(req: Request) {
             requestBody.model.length > 200)) ||
         (requestBody.baseUrl !== undefined &&
           (typeof requestBody.baseUrl !== "string" ||
-            requestBody.baseUrl.length > 2048))
+            requestBody.baseUrl.length > 2048)) ||
+        (requestBody.fallbackProvider !== undefined &&
+          fallbackProvider === undefined) ||
+        (requestBody.fallbackModel !== undefined &&
+          requestBody.fallbackModel !== null &&
+          (typeof requestBody.fallbackModel !== "string" ||
+            requestBody.fallbackModel.length > 200)) ||
+        (requestBody.temperature !== undefined &&
+          requestBody.temperature !== null &&
+          (typeof requestBody.temperature !== "number" ||
+            !Number.isFinite(requestBody.temperature))) ||
+        (requestBody.maxTokens !== undefined &&
+          requestBody.maxTokens !== null &&
+          (typeof requestBody.maxTokens !== "number" ||
+            !Number.isInteger(requestBody.maxTokens)))
       ) {
         return error("AI provider settings contain invalid values", 400);
       }
@@ -339,6 +368,18 @@ export async function handleApi(req: Request) {
         apiKey: requestBody.apiKey as string | undefined,
         model: requestBody.model as string | undefined,
         baseUrl: requestBody.baseUrl as string | undefined,
+        ...(requestBody.fallbackProvider !== undefined
+          ? { fallbackProvider }
+          : {}),
+        ...(requestBody.fallbackModel !== undefined
+          ? { fallbackModel: requestBody.fallbackModel as string | null }
+          : {}),
+        ...(requestBody.temperature !== undefined
+          ? { temperature: requestBody.temperature as number | null }
+          : {}),
+        ...(requestBody.maxTokens !== undefined
+          ? { maxTokens: requestBody.maxTokens as number | null }
+          : {}),
       });
       const providerInfo = (await listAIProviders(user.id)).find(
         (item) => item.provider === provider,
@@ -483,6 +524,60 @@ export async function handleApi(req: Request) {
         });
       }
 
+      if (action === "rag/jobs" && req.method === "GET") {
+        return json({
+          success: true,
+          jobs: await listRagIndexJobs(projectId, user.id),
+        });
+      }
+
+      if (action === "rag/jobs" && req.method === "POST") {
+        const requestBody = await body<{
+          kind?: unknown;
+          name?: unknown;
+          content?: unknown;
+          path?: unknown;
+          url?: unknown;
+          provider?: unknown;
+        }>(req);
+        const provider = requestBody.provider || "OPENROUTER";
+        if (!isAIProvider(provider)) {
+          return error("Unsupported AI provider", 400);
+        }
+        return json(
+          {
+            success: true,
+            ...(await enqueueRagIndexJob(projectId, user.id, {
+              kind: requestBody.kind,
+              name: requestBody.name,
+              content: requestBody.content,
+              path: requestBody.path,
+              url: requestBody.url,
+              provider,
+            })),
+          },
+          202,
+        );
+      }
+
+      const ragJobAction = action?.match(
+        /^rag\/jobs\/([^/]+)\/(retry|cancel)$/,
+      );
+      if (ragJobAction && req.method === "POST") {
+        if (ragJobAction[2] === "retry") {
+          return json({
+            success: true,
+            job: await retryRagIndexJob(
+              ragJobAction[1],
+              projectId,
+              user.id,
+            ),
+          });
+        }
+        await cancelQueuedRagIndexJob(ragJobAction[1], projectId, user.id);
+        return json({ success: true });
+      }
+
       if (
         action === "rag/documents" ||
         action === "rag/urls" ||
@@ -494,6 +589,7 @@ export async function handleApi(req: Request) {
         const requestBody = await body<{
           name?: unknown;
           content?: unknown;
+          path?: unknown;
           url?: unknown;
           query?: unknown;
           provider?: unknown;
@@ -509,6 +605,7 @@ export async function handleApi(req: Request) {
             source: await addKnowledgeDocument(projectId, user.id, {
               name: requestBody.name,
               content: requestBody.content,
+              path: requestBody.path,
               provider,
             }),
           }, 201);
@@ -945,6 +1042,10 @@ export async function handleApi(req: Request) {
       message.includes("could not be resolved") ||
       message.includes("without credentials, query, or fragment") ||
       message.includes("Model name") ||
+      message.toLowerCase().includes("fallback") ||
+      message.includes("Temperature") ||
+      message.includes("Maximum output tokens") ||
+      message.includes("AI provider settings") ||
       message.includes("not configured") ||
       message.includes("disabled in your AI provider settings") ||
       message.includes("Unsupported AI provider") ||

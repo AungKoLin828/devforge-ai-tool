@@ -296,6 +296,10 @@ model AIProvider {
   label     String
   enabled   Boolean        @default(true)
   model     String?
+  fallbackProvider AIProviderType?
+  fallbackModel    String?
+  temperature      Float?
+  maxTokens        Int?
   apiKeyEnc String?
   baseUrl   String?
   createdAt DateTime       @default(now())

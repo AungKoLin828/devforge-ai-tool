@@ -2,7 +2,7 @@
   "name": "codevia-ai",
   "displayName": "Codevia AI",
   "description": "AI coding assistant connected to the Codevia AI service.",
-  "version": "1.0.9",
+  "version": "1.1.0",
   "publisher": "CodeviaAI",
   "license": "UNLICENSED",
   "engines": {
@@ -17,6 +17,9 @@
     "onStartupFinished",
     "onCommand:codevia.selectAiProvider",
     "onCommand:codevia.selectProject",
+    "onCommand:codevia.indexWorkspace",
+    "onCommand:codevia.searchProjectKnowledge",
+    "onCommand:codevia.askProject",
     "onCommand:codevia.signOut",
     "onCommand:codevia.selectBackend",
     "onCommand:codevia.signIn",
@@ -53,6 +56,21 @@
       {
         "command": "codevia.selectProject",
         "title": "Codevia AI: Select Project",
+        "category": "Codevia AI"
+      },
+      {
+        "command": "codevia.indexWorkspace",
+        "title": "Codevia AI: Index Current Workspace",
+        "category": "Codevia AI"
+      },
+      {
+        "command": "codevia.searchProjectKnowledge",
+        "title": "Codevia AI: Search Project Knowledge",
+        "category": "Codevia AI"
+      },
+      {
+        "command": "codevia.askProject",
+        "title": "Codevia AI: Ask Project (RAG)",
         "category": "Codevia AI"
       },
       {
@@ -124,58 +142,75 @@
     "configuration": {
       "title": "Codevia AI Developer Tools",
       "properties": {
-        "devforge.backendEnvironment": {
+        "codevia.backendEnvironment": {
           "type": "string",
           "enum": [
             "local",
             "netlify"
           ],
           "enumDescriptions": [
-            "Use the locally running DevForge web app and its local Netlify Functions.",
-            "Use the deployed DevForge Netlify site."
+            "Use the locally running Codevia AI web app and its local Netlify Functions.",
+            "Use the deployed Codevia AI Netlify site."
           ],
           "default": "netlify",
-          "description": "Choose whether Codevia AI uses your local development server or the hosted server. You can also use the Select Backend command."
+          "description": "Choose whether Codevia AI uses your local development server or the hosted server. Legacy devforge.* settings are honored until you set a Codevia AI value."
         },
-        "devforge.localBackendUrl": {
+        "codevia.localBackendUrl": {
           "type": "string",
           "default": "http://localhost:8888",
-          "description": "Local DevForge backend base URL. Start the web app with `npm run dev:netlify` so Netlify Functions are available, normally at http://localhost:8888."
+          "description": "Local Codevia AI backend base URL. Start the web app with `npm run dev:netlify` so Netlify Functions are available, normally at http://localhost:8888."
         },
-        "devforge.netlifyBackendUrl": {
+        "codevia.netlifyBackendUrl": {
           "type": "string",
           "default": "https://devforge-ai-tool.netlify.app",
-          "description": "Base URL of the deployed DevForge Netlify site."
+          "description": "Base URL of the deployed Codevia AI Netlify site."
         },
-        "devforge.maxWorkspaceFiles": {
+        "codevia.maxWorkspaceFiles": {
           "type": "number",
           "default": 40,
           "minimum": 1,
           "maximum": 100,
           "description": "Maximum number of source files included in one workspace review."
         },
-        "devforge.maxFileBytes": {
+        "codevia.maxFileBytes": {
           "type": "number",
           "default": 30000,
           "minimum": 1000,
           "maximum": 100000,
           "description": "Maximum size of each source file sent for review."
+        },
+        "codevia.maxWorkspaceIndexBytes": {
+          "type": "number",
+          "default": 512000,
+          "minimum": 16384,
+          "maximum": 524288,
+          "description": "Maximum total UTF-8 content uploaded when indexing a workspace."
+        },
+        "codevia.excludePatterns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Additional workspace indexing exclusions using VS Code glob patterns, for example **/generated/** or **/*.log."
         }
       }
     },
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "devforgeContainer",
+          "id": "codeviaContainer",
           "title": "Codevia AI",
           "icon": "media/CodeviaAI.png"
         }
       ]
     },
     "views": {
-      "devforgeContainer": [
+      "codeviaContainer": [
         {
-          "id": "devforgeCommandsView",
+          "id": "codeviaKnowledgeView",
+          "name": "Knowledge"
+        },
+        {
+          "id": "codeviaCommandsView",
           "name": "Commands",
           "when": "true"
         }

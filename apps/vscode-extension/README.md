@@ -16,6 +16,8 @@ The extension supports both environments without changing the Codevia AI web app
 - `Local Backend Url` defaults to `http://localhost:8888`.
 - `Netlify Backend Url` defaults to `https://devforge-ai-tool.netlify.app`.
 
+The current setting namespace is `codevia.*`. Existing `devforge.*` values are still read when no corresponding `codevia.*` value is set, so workspaces and user settings continue to work after upgrading. New or changed settings are saved under `codevia.*`.
+
 ### Local development
 
 1. Start the Codevia AI web app from its project root using `npm run dev:netlify`.
@@ -103,6 +105,9 @@ Open the Command Palette with `Ctrl+Shift+P` and search for `Codevia AI`.
 - **Explain Code / Selection** — explain the selected code or the active file.
 - **Generate Tests** — generate a test file and choose where to save it.
 - **Fix Errors in Current File** — provide error details and review the proposed change before applying.
+- **Index Current Workspace** — explicitly approve uploading eligible files to the selected Codevia project; repeat indexing updates changed files, skips unchanged files, and removes deleted workspace sources. VS Code ignore settings, sensitive-file exclusions, configured custom globs, and file/total size limits are applied.
+- **Search Project Knowledge** — run hybrid retrieval against the selected project's indexed sources and open cited workspace files at their source line ranges.
+- **Ask Project (RAG)** — ask questions through the shared project chat API, which retrieves authorized project knowledge and returns source citations.
 - **Clear Findings** — clear Codevia AI review diagnostics.
 - **Chat progress and local actions** — see the actual request, file-save, verification, and review stages; AI-proposed build/test/inspection and package-install commands show live output in chat. The extension asks before running any command and restricts execution to its documented allowlist. Private model reasoning is not exposed.
 - **Chat action requests** — answer destination, create-files, overwrite/skip/cancel, and review prompts directly in the chat. Choosing a local folder opens the native folder picker.

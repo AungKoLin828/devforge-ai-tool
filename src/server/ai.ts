@@ -1,6 +1,7 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import type { Prisma } from "../generated/prisma/client.js";
+import { isRetryableProviderStatus } from "../../packages/ai-engine/provider-routing.js";
 import { prisma } from "./db.js";
 import { decrypt, encrypt } from "./crypto.js";
 
@@ -15,13 +16,31 @@ export type ProviderSettingsInput = {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
+  fallbackProvider?: Provider | null;
+  fallbackModel?: string | null;
+  temperature?: number | null;
+  maxTokens?: number | null;
 };
 
 type ProviderConfig = {
   apiKey: string;
   model: string;
   baseUrl: string;
+  fallbackProvider?: Provider;
+  fallbackModel?: string;
+  temperature?: number;
+  maxTokens?: number;
 };
+
+class ProviderRequestError extends Error {
+  constructor(
+    message: string,
+    readonly canFallback: boolean,
+  ) {
+    super(message);
+    this.name = "ProviderRequestError";
+  }
+}
 
 // Bound provider calls so a stalled upstream cannot hold a background run indefinitely.
 const timeout = () => Number(process.env.OPENROUTER_TIMEOUT_MS || 45000);
@@ -136,6 +155,10 @@ export async function listAIProviders(userId: string) {
       provider: true,
       label: true,
       model: true,
+      fallbackProvider: true,
+      fallbackModel: true,
+      temperature: true,
+      maxTokens: true,
       baseUrl: true,
       apiKeyEnc: true,
     },
@@ -156,6 +179,16 @@ export async function listAIProviders(userId: string) {
       configured: Boolean(saved?.apiKeyEnc || environmentKey),
       hasUserKey: Boolean(saved?.apiKeyEnc),
       model: saved?.model || "",
+      fallbackProvider:
+        saved?.fallbackProvider === "OPENROUTER" ||
+        saved?.fallbackProvider === "OPENAI" ||
+        saved?.fallbackProvider === "CUSTOM"
+          ? saved.fallbackProvider
+          : "",
+      fallbackModel: saved?.fallbackModel || "",
+      temperature: saved?.temperature ?? null,
+      maxTokens: saved?.maxTokens ?? null,
+      embeddingModel: embeddingModel(provider),
       baseUrl: saved?.baseUrl || "",
     };
   });
@@ -176,8 +209,50 @@ export async function saveAIProvider(
     provider === "CUSTOM" && input.baseUrl
       ? await validateCustomBaseUrl(input.baseUrl.trim())
       : null;
+  const fallbackProvider =
+    input.fallbackProvider !== undefined
+      ? input.fallbackProvider || null
+      : existing?.fallbackProvider ?? null;
+  const fallbackModel =
+    input.fallbackModel !== undefined
+      ? input.fallbackModel?.trim() || null
+      : existing?.fallbackModel ?? null;
+  const temperature =
+    input.temperature !== undefined
+      ? input.temperature
+      : existing?.temperature ?? null;
+  const maxTokens =
+    input.maxTokens !== undefined ? input.maxTokens : existing?.maxTokens ?? null;
   if (model && model.length > 200) {
     throw new Error("Model name must be 200 characters or fewer.");
+  }
+  if (fallbackProvider && fallbackProvider === provider) {
+    if (!fallbackModel || fallbackModel === model) {
+      throw new Error(
+        "Choose a different fallback model when using the same provider.",
+      );
+    }
+  }
+  if (fallbackModel && !fallbackProvider) {
+    throw new Error("Select a fallback provider before setting a fallback model.");
+  }
+  if (fallbackModel && fallbackModel.length > 200) {
+    throw new Error("Fallback model must be 200 characters or fewer.");
+  }
+  if (
+    temperature !== null &&
+    (typeof temperature !== "number" ||
+      !Number.isFinite(temperature) ||
+      temperature < 0 ||
+      temperature > 2)
+  ) {
+    throw new Error("Temperature must be a number from 0 to 2.");
+  }
+  if (
+    maxTokens !== null &&
+    (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 32768)
+  ) {
+    throw new Error("Maximum output tokens must be an integer from 1 to 32768.");
   }
   if (provider === "CUSTOM" && !baseUrl) {
     throw new Error("A public HTTPS base URL is required for a custom provider.");
@@ -207,6 +282,10 @@ export async function saveAIProvider(
         label: providerLabel(provider),
         enabled: true,
         model,
+        fallbackProvider,
+        fallbackModel,
+        temperature,
+        maxTokens,
         baseUrl,
         apiKeyEnc: apiKey ? encrypt(apiKey) : null,
       },
@@ -214,6 +293,10 @@ export async function saveAIProvider(
         label: providerLabel(provider),
         enabled: true,
         model,
+        fallbackProvider,
+        fallbackModel,
+        temperature,
+        maxTokens,
         baseUrl,
         ...(apiKey ? { apiKeyEnc: encrypt(apiKey) } : {}),
       },
@@ -222,6 +305,10 @@ export async function saveAIProvider(
         label: true,
         enabled: true,
         model: true,
+        fallbackProvider: true,
+        fallbackModel: true,
+        temperature: true,
+        maxTokens: true,
         baseUrl: true,
         apiKeyEnc: true,
       },
@@ -245,8 +332,17 @@ async function resolveProviderConfig(
   const saved = userId
     ? await prisma.aIProvider.findUnique({
         where: { userId_provider: { userId, provider } },
-        select: { enabled: true, model: true, apiKeyEnc: true, baseUrl: true },
-      })
+      select: {
+        enabled: true,
+        model: true,
+        apiKeyEnc: true,
+        baseUrl: true,
+        fallbackProvider: true,
+        fallbackModel: true,
+        temperature: true,
+        maxTokens: true,
+      },
+    })
     : null;
   if (saved && !saved.enabled) {
     throw new Error(`${providerLabel(provider)} is disabled in your AI provider settings.`);
@@ -278,7 +374,21 @@ async function resolveProviderConfig(
         : saved?.baseUrl;
   if (!model) throw new Error("Enter a model name in AI provider settings.");
   if (!baseUrl) throw new Error("Custom provider endpoint is missing.");
-  return { apiKey, model, baseUrl: normalizeBaseUrl(baseUrl) };
+  const fallbackProvider =
+    saved?.fallbackProvider === "OPENROUTER" ||
+    saved?.fallbackProvider === "OPENAI" ||
+    saved?.fallbackProvider === "CUSTOM"
+      ? saved.fallbackProvider
+      : undefined;
+  return {
+    apiKey,
+    model,
+    baseUrl: normalizeBaseUrl(baseUrl),
+    fallbackProvider,
+    fallbackModel: saved?.fallbackModel || undefined,
+    temperature: saved?.temperature ?? undefined,
+    maxTokens: saved?.maxTokens ?? undefined,
+  };
 }
 
 /** Check a user's provider settings before accepting a long-running operation. */
@@ -306,21 +416,40 @@ async function openAICompatible(
     headers["HTTP-Referer"] = process.env.APP_URL || "http://localhost:8888";
     headers["X-Title"] = "Codevia AI";
   }
-  const response = await fetch(`${config.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers,
-    redirect: "error",
-    body: JSON.stringify({
-      model: config.model,
-      messages,
-      ...(provider === "OPENROUTER" ? { temperature: 0.15 } : {}),
-    }),
-    signal: AbortSignal.timeout(timeout()),
-  });
-  const raw = await response.text();
+  let response: Response;
+  try {
+    response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers,
+      redirect: "error",
+      body: JSON.stringify({
+        model: config.model,
+        messages,
+        temperature:
+          config.temperature ?? (provider === "OPENROUTER" ? 0.15 : undefined),
+        ...(config.maxTokens ? { max_tokens: config.maxTokens } : {}),
+      }),
+      signal: AbortSignal.timeout(timeout()),
+    });
+  } catch {
+    throw new ProviderRequestError(
+      `${providerLabel(provider)} request could not reach the configured endpoint.`,
+      true,
+    );
+  }
+  let raw: string;
+  try {
+    raw = await response.text();
+  } catch {
+    throw new ProviderRequestError(
+      `${providerLabel(provider)} response was interrupted before completion.`,
+      true,
+    );
+  }
   if (!response.ok) {
-    throw new Error(
+    throw new ProviderRequestError(
       `${providerLabel(provider)} request failed with HTTP ${response.status}. Check the API key, model name, and provider endpoint.`,
+      isRetryableProviderStatus(response.status),
     );
   }
   let data: unknown;
@@ -351,6 +480,8 @@ async function openAICompatible(
   return {
     text,
     usage: isRecord(data.usage) ? (data.usage as Prisma.InputJsonObject) : {},
+    provider,
+    model: config.model,
   };
 }
 
@@ -365,10 +496,53 @@ export async function generate(
     throw new Error("Unsupported AI provider");
   }
   const config = await resolveProviderConfig(provider, userId);
-  return openAICompatible(messages, provider, {
-    ...config,
-    model: model || config.model,
-  });
+  try {
+    return await openAICompatible(messages, provider, {
+      ...config,
+      model: model || config.model,
+    });
+  } catch (primaryFailure) {
+    const fallbackProvider = config.fallbackProvider;
+    if (
+      !(primaryFailure instanceof ProviderRequestError) ||
+      !primaryFailure.canFallback ||
+      !fallbackProvider ||
+      !userId
+    ) {
+      throw primaryFailure;
+    }
+
+    try {
+      const fallbackConfig = await resolveProviderConfig(
+        fallbackProvider,
+        userId,
+      );
+      const fallbackModel = config.fallbackModel || fallbackConfig.model;
+      const result = await openAICompatible(messages, fallbackProvider, {
+        ...fallbackConfig,
+        model: fallbackModel,
+      });
+      console.warn("AI provider fallback succeeded", {
+        primaryProvider: provider,
+        primaryModel: model || config.model,
+        fallbackProvider: result.provider,
+        fallbackModel: result.model,
+      });
+      return { ...result, fallbackUsed: true };
+    } catch (fallbackFailure) {
+      const primaryMessage =
+        primaryFailure instanceof Error
+          ? primaryFailure.message
+          : "Primary AI provider failed.";
+      const fallbackMessage =
+        fallbackFailure instanceof Error
+          ? fallbackFailure.message
+          : "Unknown fallback provider failure.";
+      throw new Error(
+        `${primaryMessage} Configured ${providerLabel(fallbackProvider)} fallback failed: ${fallbackMessage}`,
+      );
+    }
+  }
 }
 
 export function embeddingModel(provider: Provider) {

@@ -650,6 +650,13 @@ function App({ user }: { user: User }) {
   const [providerApiKeyDraft, setProviderApiKeyDraft] = useState("");
   const [providerModelDraft, setProviderModelDraft] = useState("");
   const [providerBaseUrlDraft, setProviderBaseUrlDraft] = useState("");
+  const [providerFallbackDraft, setProviderFallbackDraft] =
+    useState<AIProvider | "">("");
+  const [providerFallbackModelDraft, setProviderFallbackModelDraft] =
+    useState("");
+  const [providerTemperatureDraft, setProviderTemperatureDraft] =
+    useState("");
+  const [providerMaxTokensDraft, setProviderMaxTokensDraft] = useState("");
   const [providerSaving, setProviderSaving] = useState(false);
   const [renamingProject, setRenamingProject] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
@@ -759,6 +766,18 @@ function App({ user }: { user: User }) {
     );
     setProviderModelDraft(config?.model || "");
     setProviderBaseUrlDraft(config?.baseUrl || "");
+    setProviderFallbackDraft(config?.fallbackProvider || "");
+    setProviderFallbackModelDraft(config?.fallbackModel || "");
+    setProviderTemperatureDraft(
+      config?.temperature === null || config?.temperature === undefined
+        ? ""
+        : String(config.temperature),
+    );
+    setProviderMaxTokensDraft(
+      config?.maxTokens === null || config?.maxTokens === undefined
+        ? ""
+        : String(config.maxTokens),
+    );
     setProviderApiKeyDraft("");
   }, [aiProviderConfigs, providerSettingsProvider]);
 
@@ -890,6 +909,12 @@ function App({ user }: { user: User }) {
           ? { apiKey: providerApiKeyDraft.trim() }
           : {}),
         model: providerModelDraft.trim(),
+        fallbackProvider: providerFallbackDraft || null,
+        fallbackModel: providerFallbackModelDraft.trim() || null,
+        temperature: providerTemperatureDraft
+          ? Number(providerTemperatureDraft)
+          : null,
+        maxTokens: providerMaxTokensDraft ? Number(providerMaxTokensDraft) : null,
         ...(providerSettingsProvider === "CUSTOM"
           ? { baseUrl: providerBaseUrlDraft.trim() }
           : {}),
@@ -3237,6 +3262,82 @@ function App({ user }: { user: User }) {
                         />
                       </label>
                     </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="text-xs text-slate-400">
+                        Fallback provider
+                        <select
+                          value={providerFallbackDraft}
+                          onChange={(event) =>
+                            setProviderFallbackDraft(
+                              event.target.value as AIProvider | "",
+                            )
+                          }
+                          className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
+                        >
+                          <option value="">Disabled</option>
+                          <option value={providerSettingsProvider}>
+                            Same provider (alternate model)
+                          </option>
+                          {aiProviderConfigs
+                            .filter(
+                              (item) =>
+                                item.provider !== providerSettingsProvider &&
+                                item.configured,
+                            )
+                            .map((item) => (
+                              <option key={item.provider} value={item.provider}>
+                                {item.label}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      <label className="text-xs text-slate-400">
+                        Fallback model (optional)
+                        <input
+                          value={providerFallbackModelDraft}
+                          onChange={(event) =>
+                            setProviderFallbackModelDraft(event.target.value)
+                          }
+                          maxLength={200}
+                          disabled={!providerFallbackDraft}
+                          placeholder="Alternate model ID; blank uses fallback provider model"
+                          className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500 disabled:opacity-50"
+                        />
+                      </label>
+                      <label className="text-xs text-slate-400">
+                        Temperature (0–2; blank uses provider default)
+                        <input
+                          type="number"
+                          min={0}
+                          max={2}
+                          step={0.1}
+                          value={providerTemperatureDraft}
+                          onChange={(event) =>
+                            setProviderTemperatureDraft(event.target.value)
+                          }
+                          className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
+                        />
+                      </label>
+                      <label className="text-xs text-slate-400">
+                        Maximum output tokens (1–32768; blank uses provider default)
+                        <input
+                          type="number"
+                          min={1}
+                          max={32768}
+                          step={1}
+                          value={providerMaxTokensDraft}
+                          onChange={(event) =>
+                            setProviderMaxTokensDraft(event.target.value)
+                          }
+                          className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
+                        />
+                      </label>
+                    </div>
+                    <p className="text-[11px] leading-5 text-slate-500">
+                      Fallback is attempted only for connection failures and
+                      transient HTTP errors (408, 425, 429, and 5xx), not for
+                      invalid credentials or model names.
+                    </p>
                     {providerSettingsProvider === "CUSTOM" && (
                       <label className="block text-xs text-slate-400">
                         Public HTTPS API base URL

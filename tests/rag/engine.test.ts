@@ -5,6 +5,7 @@ import {
   cosineSimilarity,
   reciprocalRankFusion,
 } from "../../packages/rag-engine/retrieval.js";
+import { parseRagIndexInput } from "../../packages/rag-engine/job-input.js";
 import { fetchPublicText } from "../../src/server/knowledge-fetch.js";
 
 test("chunks long files with source paths and bounded overlapping sections", () => {
@@ -14,7 +15,22 @@ test("chunks long files with source paths and bounded overlapping sections", () 
   assert.ok(chunks.length > 1);
   assert.ok(chunks.every((chunk) => chunk.content.length <= 1800));
   assert.ok(chunks.every((chunk) => chunk.metadata.path === "docs/guide.md"));
+  assert.ok(chunks.every((chunk) => chunk.metadata.lineStart >= 1));
+  assert.ok(
+    chunks.every((chunk) => chunk.metadata.lineEnd >= chunk.metadata.lineStart),
+  );
   assert.ok(chunks[0].content.slice(-180).trim());
+});
+
+test("records source line ranges for each chunk", () => {
+  const chunks = chunkFiles([
+    { path: "src/example.ts", content: "first line\nsecond line\nthird line" },
+  ]);
+  assert.deepEqual(chunks[0].metadata, {
+    path: "src/example.ts",
+    lineStart: 1,
+    lineEnd: 3,
+  });
 });
 
 test("returns no chunks for whitespace-only files", () => {
@@ -40,6 +56,59 @@ test("combines lexical and semantic ranks without duplicating citations", () => 
   assert.deepEqual(
     reciprocalRankFusion(lexical, semantic, 3).map((item) => item.id),
     ["shared", "text", "vector"],
+  );
+});
+
+test("validates bounded and safe RAG indexing job inputs", () => {
+  assert.deepEqual(
+    parseRagIndexInput(
+      {
+        kind: "DOCUMENT",
+        provider: "OPENROUTER",
+        name: "Guide",
+        content: "docs",
+        path: "docs/guide.md",
+      },
+    ),
+    {
+      kind: "DOCUMENT",
+      provider: "OPENROUTER",
+      name: "Guide",
+      content: "docs",
+      path: "docs/guide.md",
+    },
+  );
+  assert.throws(
+    () =>
+      parseRagIndexInput(
+        {
+          kind: "DOCUMENT",
+          provider: "OPENROUTER",
+          name: "Guide",
+          content: "x".repeat(512 * 1024 + 1),
+        },
+      ),
+    /512 KB import limit/,
+  );
+  assert.throws(
+    () =>
+      parseRagIndexInput(
+        {
+          kind: "DOCUMENT",
+          provider: "OPENROUTER",
+          name: "Guide",
+          content: "content",
+          path: "docs/../private.md",
+        },
+      ),
+    /safe relative path/,
+  );
+  assert.throws(
+    () =>
+      parseRagIndexInput(
+        { kind: "URL", provider: "OPENROUTER", url: " " },
+      ),
+    /valid source URL/,
   );
 });
 

@@ -6,6 +6,12 @@ import {
   parseAssistantCommandPlan,
   type LocalCommandRequest,
 } from "./commands/assistantCommandPlan.js";
+import {
+  getWorkspaceKey,
+  hasCompatibleWorkspaceEmbedding,
+  hashWorkspaceContent,
+  isEligibleWorkspacePath,
+} from "./workspaceIndex.js";
 
 const DIAGNOSTIC_SOURCE = "Codevia AI";
 const SESSION_SECRET_KEY_PREFIX = "devforge.backendSessionCookie";
@@ -21,6 +27,7 @@ type ProviderInfo = {
   configured: boolean;
   hasUserKey: boolean;
   model: string;
+  embeddingModel: string;
   baseUrl: string;
 };
 const EXCLUDED_DIRS = new Set([
@@ -95,11 +102,18 @@ type Finding = {
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("Codevia AI");
   const diagnostics =
-    vscode.languages.createDiagnosticCollection("devforge-ai");
+    vscode.languages.createDiagnosticCollection("codevia-ai");
   context.subscriptions.push(
     output,
     diagnostics,
     startLocalAgentBridge(output),
+  );
+  const knowledgeTree = new CodeviaKnowledgeTree();
+  context.subscriptions.push(
+    vscode.window.createTreeView("codeviaKnowledgeView", {
+      treeDataProvider: knowledgeTree,
+      showCollapseAll: false,
+    }),
   );
   context.subscriptions.push(
     vscode.commands.registerCommand("codevia.signIn", () =>
@@ -120,11 +134,20 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand("codevia.showShortcuts", () =>
       vscode.commands.executeCommand(
-        "workbench.view.extension.devforgeContainer",
+        "workbench.view.extension.codeviaContainer",
       ),
     ),
     vscode.commands.registerCommand("codevia.selectProject", () =>
       selectProject(context),
+    ),
+    vscode.commands.registerCommand("codevia.indexWorkspace", () =>
+      indexWorkspace(context, output),
+    ),
+    vscode.commands.registerCommand("codevia.searchProjectKnowledge", () =>
+      searchProjectKnowledge(context, output),
+    ),
+    vscode.commands.registerCommand("codevia.askProject", () =>
+      askProject(context, output),
     ),
     vscode.commands.registerCommand("codevia.openChat", () =>
       openChat(context, output),
@@ -158,7 +181,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   // Sidebar shortcuts include sign-in for either backend.
   commandsTree = new CodeviaCommandsTree(context);
-  const treeView = vscode.window.createTreeView("devforgeCommandsView", {
+  const treeView = vscode.window.createTreeView("codeviaCommandsView", {
     treeDataProvider: commandsTree,
     showCollapseAll: false,
   });
@@ -191,7 +214,7 @@ async function showFirstRunWelcome(
     );
     if (action === "Open Codevia AI") {
       await vscode.commands.executeCommand(
-        "workbench.view.extension.devforgeContainer",
+        "workbench.view.extension.codeviaContainer",
       );
     }
   } catch {
@@ -299,6 +322,29 @@ let commandsTree: CodeviaCommandsTree | undefined;
 
 function refreshCommandsTree(): void {
   commandsTree?.refresh();
+}
+
+class CodeviaKnowledgeTree implements vscode.TreeDataProvider<vscode.TreeItem> {
+  getChildren(): vscode.TreeItem[] {
+    return [
+      ["codevia.selectProject", "Select Project", "folder"],
+      ["codevia.indexWorkspace", "Index Workspace (with consent)", "database"],
+      ["codevia.searchProjectKnowledge", "Search Project Knowledge", "search"],
+      ["codevia.askProject", "Ask Project (RAG)", "question"],
+    ].map(([command, label, icon]) => {
+      const item = new vscode.TreeItem(
+        label,
+        vscode.TreeItemCollapsibleState.None,
+      );
+      item.command = { command, title: label };
+      item.iconPath = new vscode.ThemeIcon(icon);
+      return item;
+    });
+  }
+
+  getTreeItem(item: vscode.TreeItem): vscode.TreeItem {
+    return item;
+  }
 }
 
 async function reviewCurrentFile(
@@ -561,7 +607,7 @@ function toDiagnostic(
     severity,
   );
   diagnostic.source = DIAGNOSTIC_SOURCE;
-  diagnostic.code = "devforge-review";
+  diagnostic.code = "codevia-review";
   if (finding.suggestion)
     diagnostic.relatedInformation = [
       new vscode.DiagnosticRelatedInformation(
@@ -603,10 +649,23 @@ function relativePath(uri: vscode.Uri): string {
 function normalizePath(value: string): string {
   return value.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
 }
+
+function getExtensionSetting<T>(key: string, fallback: T): T {
+  const current = vscode.workspace.getConfiguration("codevia");
+  const configured = current.inspect<T>(key);
+  if (
+    configured &&
+    (configured.globalValue !== undefined ||
+      configured.workspaceValue !== undefined ||
+      configured.workspaceFolderValue !== undefined)
+  ) {
+    return current.get<T>(key, fallback);
+  }
+  return vscode.workspace.getConfiguration("devforge").get<T>(key, fallback);
+}
+
 function getConfigNumber(key: string, fallback: number): number {
-  const value = Number(
-    vscode.workspace.getConfiguration("devforge").get(key, fallback),
-  );
+  const value = Number(getExtensionSetting(key, fallback));
   return Number.isFinite(value) ? value : fallback;
 }
 function isSensitiveOrUnsupported(filePath: string): boolean {
@@ -620,7 +679,7 @@ function isSensitiveOrUnsupported(filePath: string): boolean {
   return !LANGUAGE_EXTENSIONS.has(extension);
 }
 
-/** Existing DevForge web API integration. No provider key is stored in this extension. */
+/** Existing Codevia AI web API integration. No provider key is stored in this extension. */
 type BackendRequest = {
   action: string;
   systemPrompt?: string;
@@ -858,19 +917,16 @@ type ApiProject = {
 };
 
 function getBackendUrl(environment = getBackendEnvironment()): string {
-  const config = vscode.workspace.getConfiguration("devforge");
   const key = environment === "local" ? "localBackendUrl" : "netlifyBackendUrl";
   const fallback =
     environment === "local"
       ? "http://localhost:8888"
       : "https://devforge-ai-tool.netlify.app";
-  return String(config.get(key, fallback)).trim().replace(/\/+$/, "");
+  return String(getExtensionSetting(key, fallback)).trim().replace(/\/+$/, "");
 }
 
 function getBackendEnvironment(): BackendEnvironment {
-  return vscode.workspace
-    .getConfiguration("devforge")
-    .get<BackendEnvironment>("backendEnvironment", "netlify");
+  return getExtensionSetting<BackendEnvironment>("backendEnvironment", "netlify");
 }
 
 async function setBackendEnvironment(
@@ -880,7 +936,7 @@ async function setBackendEnvironment(
     ? vscode.ConfigurationTarget.Workspace
     : vscode.ConfigurationTarget.Global;
   await vscode.workspace
-    .getConfiguration("devforge")
+    .getConfiguration("codevia")
     .update("backendEnvironment", environment, target);
 }
 
@@ -1044,9 +1100,7 @@ async function selectBackend(): Promise<void> {
 }
 
 function getConfigString(key: string, fallback: string): string {
-  return String(
-    vscode.workspace.getConfiguration("devforge").get(key, fallback),
-  ).trim();
+  return String(getExtensionSetting(key, fallback)).trim();
 }
 
 async function chooseSignInBackend(
@@ -1421,6 +1475,539 @@ async function ensureProject(
   );
   refreshCommandsTree();
   return created.project;
+}
+
+type KnowledgeSource = {
+  id: string;
+  name: string;
+  uri: string;
+  chunkCount: number;
+  embeddingProvider?: string;
+  embeddingModel?: string;
+};
+
+type KnowledgeCitation = {
+  id: string;
+  sourceName: string;
+  uri: string;
+  excerpt: string;
+  path?: string;
+  lineStart?: number;
+  lineEnd?: number;
+};
+
+async function chooseKnowledgeProject(
+  context: vscode.ExtensionContext,
+): Promise<ApiProject | undefined> {
+  await requireSession(context);
+  const projects = await listProjects(context);
+  const selectedId = context.globalState.get<string>(getProjectStateKey());
+  const selected = projects.find((project) => project.id === selectedId);
+  if (selected) return selected;
+  if (projects.length === 1) {
+    await context.globalState.update(getProjectStateKey(), projects[0].id);
+    return projects[0];
+  }
+  if (projects.length > 1) {
+    const choice = await vscode.window.showQuickPick(
+      projects.map((project) => ({
+        label: project.name,
+        description: `${project.status ?? "Project"} · ${project.stack ?? "No stack specified"}`,
+        project,
+      })),
+      {
+        title: "Choose the project for workspace knowledge",
+        placeHolder: "Choose where this workspace's knowledge will be stored",
+      },
+    );
+    if (!choice) return undefined;
+    await context.globalState.update(getProjectStateKey(), choice.project.id);
+    return choice.project;
+  }
+  return ensureProject(context);
+}
+
+async function chooseKnowledgeWorkspace(): Promise<
+  vscode.WorkspaceFolder | undefined
+> {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (folders.length === 1) return folders[0];
+  if (!folders.length) {
+    vscode.window.showInformationMessage(
+      "Open a workspace folder before using project knowledge.",
+    );
+    return undefined;
+  }
+  const choice = await vscode.window.showQuickPick(
+    folders.map((folder) => ({
+      label: folder.name,
+      description: folder.uri.fsPath,
+      folder,
+    })),
+    {
+      title: "Choose the workspace folder to use",
+      placeHolder: "Select one folder to index or search",
+    },
+  );
+  return choice?.folder;
+}
+
+function getKnowledgeSourceName(
+  folder: vscode.WorkspaceFolder,
+  workspaceKey: string,
+  relativePath: string,
+): string {
+  return `VS Code Workspace ${folder.name} [${workspaceKey}] :: ${relativePath}`;
+}
+
+function getWorkspaceIndexStateKey(projectId: string, workspaceKey: string) {
+  return `devforge.workspaceIndex:${getBackendEnvironment()}:${projectId}:${workspaceKey}`;
+}
+
+async function indexWorkspace(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel,
+): Promise<void> {
+  try {
+    const folder = await chooseKnowledgeWorkspace();
+    if (!folder) return;
+    const project = await chooseKnowledgeProject(context);
+    if (!project) return;
+
+    const maxFiles = Math.max(
+      1,
+      Math.min(100, Math.floor(getConfigNumber("maxWorkspaceFiles", 40))),
+    );
+    const maxFileBytes = Math.max(
+      1000,
+      Math.min(100000, Math.floor(getConfigNumber("maxFileBytes", 30000))),
+    );
+    const maxTotalBytes = Math.max(
+      16 * 1024,
+      Math.min(
+        512 * 1024,
+        Math.floor(getConfigNumber("maxWorkspaceIndexBytes", 512000)),
+      ),
+    );
+    const configuredExcludes = getExtensionSetting<unknown>(
+      "excludePatterns",
+      [],
+    );
+    const excludes = Array.isArray(configuredExcludes)
+      ? configuredExcludes.filter(
+          (pattern): pattern is string =>
+            typeof pattern === "string" && pattern.length <= 256,
+        )
+      : [];
+    const candidateLimit = Math.max(100, maxFiles * 20);
+    const candidateUris = await vscode.workspace.findFiles(
+      new vscode.RelativePattern(folder, "**/*"),
+      "**/{.git,.next,.nuxt,.output,.turbo,.vercel,.vscode,bin,build,coverage,dist,node_modules,obj,out,target,vendor,.venv,venv,__pycache__}/**",
+      candidateLimit + 1,
+    );
+    const workspaceKey = getWorkspaceKey(folder.uri.toString());
+    const sourcePrefix = `VS Code Workspace ${folder.name} [${workspaceKey}] :: `;
+    const candidates = candidateUris
+      .map((uri) => ({
+        uri,
+        path: vscode.workspace
+          .asRelativePath(uri, false)
+          .replace(/\\/g, "/"),
+      }))
+      .filter(
+        (item) =>
+          isEligibleWorkspacePath(item.path, excludes) &&
+          getKnowledgeSourceName(folder, workspaceKey, item.path).length <=
+            200,
+      );
+    const truncated = candidateUris.length > candidateLimit;
+    const selected = candidates.slice(0, maxFiles);
+    if (!selected.length) {
+      if (truncated) {
+        vscode.window.showWarningMessage(
+          "The workspace scan reached its limit before finding eligible files. No indexed sources were removed; narrow the workspace or adjust exclusions, then retry.",
+        );
+        return;
+      }
+      const existing = await apiRequest<{ sources?: KnowledgeSource[] }>(
+        context,
+        `/api/projects/${encodeURIComponent(project.id)}/rag/sources`,
+      );
+      const previousSources = (existing.sources ?? []).filter(
+        (source) =>
+          source.name.startsWith(sourcePrefix) &&
+          source.uri.startsWith("document:"),
+      );
+      if (!previousSources.length) {
+        vscode.window.showInformationMessage(
+          "No eligible source or documentation files were found. Sensitive files, dependencies, generated outputs, and configured exclusions are skipped.",
+        );
+        return;
+      }
+      const remove = await vscode.window.showWarningMessage(
+        `No eligible workspace files remain. Remove ${previousSources.length} previously indexed source(s) from "${project.name}"?`,
+        {
+          modal: true,
+          detail:
+            "This removes the matching workspace knowledge sources and their indexed chunks from this Codevia project. Other knowledge sources will not be changed.",
+        },
+        "Remove Workspace Sources",
+        "Keep Sources",
+      );
+      if (remove !== "Remove Workspace Sources") return;
+      for (const source of previousSources) {
+        await apiRequest(
+          context,
+          `/api/projects/${encodeURIComponent(project.id)}/rag/sources/${encodeURIComponent(source.id)}`,
+          { method: "DELETE" },
+        );
+      }
+      await context.globalState.update(
+        getWorkspaceIndexStateKey(project.id, workspaceKey),
+        {},
+      );
+      vscode.window.showInformationMessage(
+        `Removed ${previousSources.length} indexed workspace source(s).`,
+      );
+      output.appendLine(
+        `Removed ${previousSources.length} workspace sources after explicit confirmation.`,
+      );
+      output.show(true);
+      return;
+    }
+
+    const filePreview = selected
+      .slice(0, 15)
+      .map((item) => item.path)
+      .join("\n");
+    const detail = [
+      `${selected.length} eligible file(s) from "${folder.name}" will be read and uploaded to project "${project.name}" on the ${getBackendEnvironment() === "local" ? "local" : "hosted"} Codevia backend for indexing and AI retrieval.`,
+      `Index limits: ${maxFiles} files, ${Math.round(maxTotalBytes / 1024)} KB total, ${Math.round(maxFileBytes / 1024)} KB per file.`,
+      "VS Code file search respects workspace ignore settings. Codevia AI additionally excludes credentials, environment files, private keys, dependencies, and build outputs.",
+      truncated || candidates.length > maxFiles
+        ? `Some files are omitted by the configured scan limit (${maxFiles} files per sync).`
+        : "",
+      filePreview ? `Files include:\n${filePreview}` : "",
+      selected.length > 15 ? `…and ${selected.length - 15} more.` : "",
+      "Continue only if you have permission to share this source code with the configured Codevia AI backend and embedding provider.",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const consent = await vscode.window.showWarningMessage(
+      `Upload and index ${selected.length} workspace file(s) for "${project.name}"?`,
+      { modal: true, detail },
+      "Upload & Index",
+      "Cancel",
+    );
+    if (consent !== "Upload & Index") return;
+
+    const existing = await apiRequest<{ sources?: KnowledgeSource[] }>(
+      context,
+      `/api/projects/${encodeURIComponent(project.id)}/rag/sources`,
+    );
+    const existingWorkspaceSources = (existing.sources ?? []).filter(
+      (source) =>
+        source.name.startsWith(sourcePrefix) &&
+        source.uri.startsWith("document:"),
+    );
+    const existingByName = new Map(
+      existingWorkspaceSources.map((source) => [source.name, source]),
+    );
+    const selectedProvider = await getSelectedProvider(context);
+    const providerInfo = (await listProviderInfos(context)).find(
+      (provider) => provider.provider === selectedProvider,
+    );
+    if (!providerInfo?.configured) {
+      throw new Error(
+        "Configure an AI provider before indexing workspace knowledge.",
+      );
+    }
+    const stateKey = getWorkspaceIndexStateKey(project.id, workspaceKey);
+    const storedHashes =
+      context.globalState.get<Record<string, string>>(stateKey) ?? {};
+    const nextHashes = { ...storedHashes };
+    const currentNames = new Set(
+      candidates.map((item) =>
+        getKnowledgeSourceName(folder, workspaceKey, item.path),
+      ),
+    );
+    let updated = 0;
+    let unchanged = 0;
+    let skipped = candidates.length - selected.length;
+    let failed = 0;
+    let bytesRead = 0;
+    let cancelled = false;
+    const safeToPrune = !truncated;
+
+    output.show(true);
+    output.appendLine(
+      `\n[${new Date().toISOString()}] Indexing ${folder.name} into project ${project.name} with explicit user consent.`,
+    );
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Codevia AI: Indexing workspace knowledge",
+        cancellable: true,
+      },
+      async (progress, token) => {
+        for (const [index, item] of selected.entries()) {
+          if (token.isCancellationRequested) {
+            cancelled = true;
+            break;
+          }
+          progress.report({
+            message: `${index + 1}/${selected.length}: ${item.path}`,
+          });
+          try {
+            const contentBytes = await vscode.workspace.fs.readFile(item.uri);
+            if (
+              contentBytes.byteLength > maxFileBytes ||
+              contentBytes.includes(0)
+            ) {
+              skipped += 1;
+              continue;
+            }
+            const content = new TextDecoder("utf-8", {
+              fatal: true,
+            }).decode(contentBytes);
+            const byteLength = Buffer.byteLength(content, "utf8");
+            if (bytesRead + byteLength > maxTotalBytes) {
+              skipped += selected.length - index;
+              break;
+            }
+            bytesRead += byteLength;
+            const hash = hashWorkspaceContent(content);
+            const sourceName = getKnowledgeSourceName(
+              folder,
+              workspaceKey,
+              item.path,
+            );
+            const source = existingByName.get(sourceName);
+            if (
+              source &&
+              storedHashes[sourceName] === hash &&
+              hasCompatibleWorkspaceEmbedding(
+                source,
+                selectedProvider,
+                providerInfo.embeddingModel,
+              )
+            ) {
+              unchanged += 1;
+              continue;
+            }
+            await apiRequest(
+              context,
+              `/api/projects/${encodeURIComponent(project.id)}/rag/documents`,
+              {
+                method: "POST",
+                body: JSON.stringify({
+                  name: sourceName,
+                  content,
+                  path: item.path,
+                  provider: selectedProvider,
+                }),
+              },
+            );
+            nextHashes[sourceName] = hash;
+            await context.globalState.update(stateKey, nextHashes);
+            updated += 1;
+          } catch (error) {
+            failed += 1;
+            output.appendLine(
+              `Failed to index ${item.path}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+      },
+    );
+
+    if (safeToPrune && !cancelled && failed === 0) {
+      for (const source of existingWorkspaceSources) {
+        if (currentNames.has(source.name)) continue;
+        await apiRequest(
+          context,
+          `/api/projects/${encodeURIComponent(project.id)}/rag/sources/${encodeURIComponent(source.id)}`,
+          { method: "DELETE" },
+        );
+        delete nextHashes[source.name];
+        output.appendLine(`Removed deleted workspace source: ${source.name}`);
+      }
+      await context.globalState.update(stateKey, nextHashes);
+    }
+
+    const summary =
+      `Workspace indexing ${cancelled ? "cancelled" : failed ? "partially completed" : "complete"}: ${updated} updated, ${unchanged} unchanged, ${skipped} skipped, ${failed} failed.`;
+    output.appendLine(summary);
+    if (failed) {
+      vscode.window.showWarningMessage(
+        `${summary} See the Codevia AI output channel for details.`,
+      );
+    } else {
+      vscode.window.showInformationMessage(
+        `${summary} See the Codevia AI output channel for details.`,
+      );
+    }
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Workspace indexing failed.";
+    output.appendLine(`Workspace indexing failed: ${message}`);
+    vscode.window.showErrorMessage(
+      `Codevia AI workspace indexing failed: ${message}`,
+    );
+  }
+}
+
+async function searchProjectKnowledge(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel,
+): Promise<void> {
+  try {
+    const query = await vscode.window.showInputBox({
+      title: "Codevia AI: Search Project Knowledge",
+      prompt: "Search indexed project and workspace knowledge",
+      placeHolder: "e.g. where is authentication configured?",
+      ignoreFocusOut: true,
+    });
+    if (!query?.trim()) return;
+    const project = await chooseKnowledgeProject(context);
+    if (!project) return;
+    const provider = await getSelectedProvider(context);
+    const result = await apiRequest<{ results: KnowledgeCitation[] }>(
+      context,
+      `/api/projects/${encodeURIComponent(project.id)}/rag/search`,
+      {
+        method: "POST",
+        body: JSON.stringify({ query: query.trim(), provider }),
+      },
+    );
+    await showKnowledgeResults(
+      output,
+      `Knowledge search: ${query.trim()}`,
+      result.results ?? [],
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Knowledge search failed.";
+    vscode.window.showErrorMessage(
+      `Codevia AI knowledge search failed: ${message}`,
+    );
+  }
+}
+
+async function askProject(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel,
+): Promise<void> {
+  try {
+    const question = await vscode.window.showInputBox({
+      title: "Codevia AI: Ask Project",
+      prompt: "Ask a question using this project's indexed knowledge",
+      placeHolder: "e.g. how does the app validate GitHub callbacks?",
+      ignoreFocusOut: true,
+    });
+    if (!question?.trim()) return;
+    const project = await chooseKnowledgeProject(context);
+    if (!project) return;
+    const provider = await getSelectedProvider(context);
+    const result = await apiRequest<{
+      answer: string;
+      citations?: KnowledgeCitation[];
+    }>(context, `/api/projects/${encodeURIComponent(project.id)}/chat`, {
+      method: "POST",
+      body: JSON.stringify({
+        provider,
+        messages: [{ role: "user", content: question.trim() }],
+      }),
+    });
+    output.show(true);
+    output.appendLine(`\n## Ask Project: ${question.trim()}\n\n${result.answer}`);
+    await showKnowledgeResults(
+      output,
+      "Ask Project sources",
+      result.citations ?? [],
+      false,
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Ask Project failed.";
+    vscode.window.showErrorMessage(
+      `Codevia AI Ask Project failed: ${message}`,
+    );
+  }
+}
+
+async function showKnowledgeResults(
+  output: vscode.OutputChannel,
+  heading: string,
+  citations: KnowledgeCitation[],
+  showEmptyMessage = true,
+): Promise<void> {
+  output.show(true);
+  output.appendLine(`\n## ${heading}`);
+  if (!citations.length) {
+    if (showEmptyMessage) {
+      output.appendLine("No matching indexed sources were found.");
+      vscode.window.showInformationMessage(
+        "No matching project knowledge found. Index the workspace or add knowledge sources first.",
+      );
+    }
+    return;
+  }
+  const choices = citations.map((citation) => {
+    const location = citation.path ? ` · ${citation.path}` : "";
+    output.appendLine(
+      `\n${citation.sourceName}${location}${citation.lineStart ? `:${citation.lineStart}${citation.lineEnd && citation.lineEnd !== citation.lineStart ? `-${citation.lineEnd}` : ""}` : ""}\n${citation.uri}\n${citation.excerpt}`,
+    );
+    return {
+      label: `${citation.path ?? citation.sourceName}${citation.lineStart ? `:${citation.lineStart}` : ""}`,
+      description: citation.sourceName,
+      detail: citation.excerpt.slice(0, 500),
+      citation,
+    };
+  });
+  const choice = await vscode.window.showQuickPick(choices, {
+    title: "Codevia AI: Open a knowledge source",
+    placeHolder:
+      "Select a file reference to open, or dismiss to keep reading output",
+  });
+  if (!choice?.citation.path) return;
+  const relative = choice.citation.path.replace(/\\/g, "/");
+  if (
+    relative.startsWith("/") ||
+    /^[a-z]:/i.test(relative) ||
+    relative.split("/").some((part) => part === "..")
+  ) {
+    output.appendLine("This reference is not a relative workspace file path.");
+    return;
+  }
+  const folder = await chooseKnowledgeWorkspace();
+  if (!folder) return;
+  const uri = vscode.Uri.joinPath(folder.uri, ...relative.split("/"));
+  try {
+    const document = await vscode.workspace.openTextDocument(uri);
+    const editor = await vscode.window.showTextDocument(document, {
+      preview: true,
+    });
+    if (choice.citation.lineStart && choice.citation.lineStart > 0) {
+      const line = Math.min(document.lineCount - 1, choice.citation.lineStart - 1);
+      const endLine = Math.min(
+        document.lineCount - 1,
+        Math.max(line, (choice.citation.lineEnd ?? line + 1) - 1),
+      );
+      const range = new vscode.Range(
+        line,
+        0,
+        endLine,
+        document.lineAt(endLine).text.length,
+      );
+      editor.selection = new vscode.Selection(range.start, range.end);
+      editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+    }
+  } catch (error) {
+    output.appendLine(
+      `Could not open source reference: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 /**

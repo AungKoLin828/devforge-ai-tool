@@ -14,6 +14,7 @@
     "db:check": "tsx scripts/check-database.mjs",
     "db:setup": "npm run prisma:generate && tsx scripts/setup-local-database.mjs && prisma migrate dev",
     "test:auth": "node --import tsx --test tests/auth/github-http.test.ts",
+    "test:ai": "node --import tsx --test tests/ai/provider-routing.test.ts",
     "test:rag": "node --import tsx --test tests/rag/engine.test.ts",
     "set-admin": "node scripts/set-admin.mjs",
     "lint": "tsc --noEmit",

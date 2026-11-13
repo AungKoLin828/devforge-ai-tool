@@ -4,7 +4,7 @@ import { githubOAuthConfig, githubLoginUrl, exchange, githubUser, upsertGithubUs
 import { randomToken, sha256 } from "./crypto.js";
 import { prisma } from "./db.js";
 import { deleteAIProvider, listAIProviders, saveAIProvider, } from "./ai.js";
-import { addKnowledgeDocument, addKnowledgeGitHub, addKnowledgeUrl, deleteKnowledgeSource, indexProjectArtifacts, listKnowledgeSources, RagInputError, searchKnowledge, } from "./rag.js";
+import { addKnowledgeDocument, addKnowledgeGitHub, addKnowledgeUrl, cancelQueuedRagIndexJob, deleteKnowledgeSource, enqueueRagIndexJob, indexProjectArtifacts, listRagIndexJobs, listKnowledgeSources, RagInputError, retryRagIndexJob, searchKnowledge, } from "./rag.js";
 import { create, chatWithAssistant, chatWithProject, detail, importProject, list, owner, rename, remove, removeImportedProject, startGenerateProject, startReviewProject, } from "./projects.js";
 import { ensureAgent, registerAgent, queueJob, claimJob, } from "./agent.js";
 import { adminStats, deleteUser as deleteManagedUser, listUsers, setBlocked, setRole, } from "./admin.js";
@@ -217,6 +217,12 @@ export async function handleApi(req) {
         if (aiProviderMatch && req.method === "PUT") {
             const provider = aiProviderMatch[1];
             const requestBody = await body(req);
+            const fallbackProvider = requestBody.fallbackProvider === null ||
+                requestBody.fallbackProvider === ""
+                ? null
+                : isAIProvider(requestBody.fallbackProvider)
+                    ? requestBody.fallbackProvider
+                    : undefined;
             if ((requestBody.apiKey !== undefined &&
                 (typeof requestBody.apiKey !== "string" ||
                     requestBody.apiKey.length > 4096)) ||
@@ -225,13 +231,39 @@ export async function handleApi(req) {
                         requestBody.model.length > 200)) ||
                 (requestBody.baseUrl !== undefined &&
                     (typeof requestBody.baseUrl !== "string" ||
-                        requestBody.baseUrl.length > 2048))) {
+                        requestBody.baseUrl.length > 2048)) ||
+                (requestBody.fallbackProvider !== undefined &&
+                    fallbackProvider === undefined) ||
+                (requestBody.fallbackModel !== undefined &&
+                    requestBody.fallbackModel !== null &&
+                    (typeof requestBody.fallbackModel !== "string" ||
+                        requestBody.fallbackModel.length > 200)) ||
+                (requestBody.temperature !== undefined &&
+                    requestBody.temperature !== null &&
+                    (typeof requestBody.temperature !== "number" ||
+                        !Number.isFinite(requestBody.temperature))) ||
+                (requestBody.maxTokens !== undefined &&
+                    requestBody.maxTokens !== null &&
+                    (typeof requestBody.maxTokens !== "number" ||
+                        !Number.isInteger(requestBody.maxTokens)))) {
                 return error("AI provider settings contain invalid values", 400);
             }
             await saveAIProvider(user.id, provider, {
                 apiKey: requestBody.apiKey,
                 model: requestBody.model,
                 baseUrl: requestBody.baseUrl,
+                ...(requestBody.fallbackProvider !== undefined
+                    ? { fallbackProvider }
+                    : {}),
+                ...(requestBody.fallbackModel !== undefined
+                    ? { fallbackModel: requestBody.fallbackModel }
+                    : {}),
+                ...(requestBody.temperature !== undefined
+                    ? { temperature: requestBody.temperature }
+                    : {}),
+                ...(requestBody.maxTokens !== undefined
+                    ? { maxTokens: requestBody.maxTokens }
+                    : {}),
             });
             const providerInfo = (await listAIProviders(user.id)).find((item) => item.provider === provider);
             if (!providerInfo)
@@ -334,6 +366,41 @@ export async function handleApi(req) {
                     sources: await listKnowledgeSources(projectId, user.id),
                 });
             }
+            if (action === "rag/jobs" && req.method === "GET") {
+                return json({
+                    success: true,
+                    jobs: await listRagIndexJobs(projectId, user.id),
+                });
+            }
+            if (action === "rag/jobs" && req.method === "POST") {
+                const requestBody = await body(req);
+                const provider = requestBody.provider || "OPENROUTER";
+                if (!isAIProvider(provider)) {
+                    return error("Unsupported AI provider", 400);
+                }
+                return json({
+                    success: true,
+                    ...(await enqueueRagIndexJob(projectId, user.id, {
+                        kind: requestBody.kind,
+                        name: requestBody.name,
+                        content: requestBody.content,
+                        path: requestBody.path,
+                        url: requestBody.url,
+                        provider,
+                    })),
+                }, 202);
+            }
+            const ragJobAction = action?.match(/^rag\/jobs\/([^/]+)\/(retry|cancel)$/);
+            if (ragJobAction && req.method === "POST") {
+                if (ragJobAction[2] === "retry") {
+                    return json({
+                        success: true,
+                        job: await retryRagIndexJob(ragJobAction[1], projectId, user.id),
+                    });
+                }
+                await cancelQueuedRagIndexJob(ragJobAction[1], projectId, user.id);
+                return json({ success: true });
+            }
             if (action === "rag/documents" ||
                 action === "rag/urls" ||
                 action === "rag/github" ||
@@ -352,6 +419,7 @@ export async function handleApi(req) {
                         source: await addKnowledgeDocument(projectId, user.id, {
                             name: requestBody.name,
                             content: requestBody.content,
+                            path: requestBody.path,
                             provider,
                         }),
                     }, 201);
@@ -672,6 +740,10 @@ export async function handleApi(req) {
             message.includes("could not be resolved") ||
             message.includes("without credentials, query, or fragment") ||
             message.includes("Model name") ||
+            message.toLowerCase().includes("fallback") ||
+            message.includes("Temperature") ||
+            message.includes("Maximum output tokens") ||
+            message.includes("AI provider settings") ||
             message.includes("not configured") ||
             message.includes("disabled in your AI provider settings") ||
             message.includes("Unsupported AI provider") ||

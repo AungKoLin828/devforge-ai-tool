@@ -1,5 +1,11 @@
-import { useEffect, useState } from "react";
-import { api, type AIProvider, type RagCitation, type RagSource } from "../../api";
+import { useEffect, useRef, useState } from "react";
+import {
+  api,
+  type AIProvider,
+  type RagCitation,
+  type RagJob,
+  type RagSource,
+} from "../../api";
 
 type Props = {
   projectId: string;
@@ -34,6 +40,8 @@ function SourceLink({ citation }: { citation: RagCitation }) {
 
 export function KnowledgeBasePanel({ projectId, provider, onClose }: Props) {
   const [sources, setSources] = useState<RagSource[]>([]);
+  const [jobs, setJobs] = useState<RagJob[]>([]);
+  const [embeddingModel, setEmbeddingModel] = useState("");
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
@@ -45,13 +53,21 @@ export function KnowledgeBasePanel({ projectId, provider, onClose }: Props) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<RagCitation[]>([]);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const previousJobStatuses = useRef(new Map<string, RagJob["status"]>());
 
   async function loadSources() {
     setLoading(true);
     setError("");
     try {
-      const response = await api.rag.sources(projectId);
+      const [response, providers] = await Promise.all([
+        api.rag.sources(projectId),
+        api.providers(),
+      ]);
       setSources(response.sources);
+      setEmbeddingModel(
+        providers.providers.find((item) => item.provider === provider)
+          ?.embeddingModel ?? "",
+      );
     } catch (cause) {
       setError(errorText(cause));
     } finally {
@@ -59,12 +75,44 @@ export function KnowledgeBasePanel({ projectId, provider, onClose }: Props) {
     }
   }
 
+  async function loadJobs() {
+    try {
+      const response = await api.rag.jobs(projectId);
+      setJobs(response.jobs);
+    } catch (cause) {
+      setError(errorText(cause));
+    }
+  }
+
   useEffect(() => {
     void loadSources();
-  }, [projectId]);
+    void loadJobs();
+  }, [projectId, provider]);
+
+  useEffect(() => {
+    if (!jobs.some((job) => job.status === "QUEUED" || job.status === "RUNNING")) {
+      return;
+    }
+    const timer = setInterval(() => {
+      void loadJobs();
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [jobs, projectId, provider]);
+
+  useEffect(() => {
+    let completedSuccessfully = false;
+    for (const job of jobs) {
+      const previous = previousJobStatuses.current.get(job.id);
+      if (job.status === "SUCCESS" && previous !== "SUCCESS") {
+        completedSuccessfully = true;
+      }
+      previousJobStatuses.current.set(job.id, job.status);
+    }
+    if (completedSuccessfully) void loadSources();
+  }, [jobs]);
 
   async function runSourceAction(
-    action: () => Promise<{ source: RagSource }>,
+    action: () => Promise<{ run: RagJob }>,
     message: string,
   ): Promise<boolean> {
     if (working) return false;
@@ -72,10 +120,13 @@ export function KnowledgeBasePanel({ projectId, provider, onClose }: Props) {
     setError("");
     setNotice("");
     try {
-      await action();
-      await loadSources();
+      const response = await action();
+      setJobs((current) => [
+        response.run,
+        ...current.filter((job) => job.id !== response.run.id),
+      ]);
       setResults([]);
-      setNotice(message);
+      setNotice(`${message} Job ${response.run.id.slice(0, 8)} is queued.`);
       return true;
     } catch (cause) {
       setError(errorText(cause));
@@ -94,7 +145,7 @@ export function KnowledgeBasePanel({ projectId, provider, onClose }: Props) {
           content: documentText,
           provider,
         }),
-      "Document indexed. Project chat can now use its passages.",
+      "Document indexing started.",
     );
     if (saved) {
       setDocumentName("");
@@ -106,7 +157,7 @@ export function KnowledgeBasePanel({ projectId, provider, onClose }: Props) {
     event.preventDefault();
     const saved = await runSourceAction(
       () => api.rag.addUrl(projectId, url.trim(), provider),
-      "Web page indexed. Project chat can now use its passages.",
+      "Web page indexing started.",
     );
     if (saved) setUrl("");
   }
@@ -115,7 +166,7 @@ export function KnowledgeBasePanel({ projectId, provider, onClose }: Props) {
     event.preventDefault();
     const saved = await runSourceAction(
       () => api.rag.addGitHub(projectId, githubUrl.trim(), provider),
-      "GitHub snapshot indexed. Add the same repository again to refresh it.",
+      "GitHub snapshot indexing started.",
     );
     if (saved) setGithubUrl("");
   }
@@ -123,7 +174,7 @@ export function KnowledgeBasePanel({ projectId, provider, onClose }: Props) {
   async function indexProject() {
     await runSourceAction(
       () => api.rag.indexProject(projectId, provider),
-      "Saved project files indexed. Re-index after generating or changing files.",
+      "Saved project file indexing started.",
     );
   }
 
@@ -157,6 +208,38 @@ export function KnowledgeBasePanel({ projectId, provider, onClose }: Props) {
       setResults([]);
       setConfirmDeleteId(null);
       setNotice("Knowledge source and its indexed chunks were removed.");
+    } catch (cause) {
+      setError(errorText(cause));
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function retryJob(jobId: string) {
+    if (working) return;
+    setWorking(true);
+    setError("");
+    setNotice("");
+    try {
+      await api.rag.retryJob(projectId, jobId);
+      await loadJobs();
+      setNotice("Indexing job queued for retry.");
+    } catch (cause) {
+      setError(errorText(cause));
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function cancelJob(jobId: string) {
+    if (working) return;
+    setWorking(true);
+    setError("");
+    setNotice("");
+    try {
+      await api.rag.cancelJob(projectId, jobId);
+      await loadJobs();
+      setNotice("Queued indexing job cancelled.");
     } catch (cause) {
       setError(errorText(cause));
     } finally {
@@ -245,7 +328,7 @@ export function KnowledgeBasePanel({ projectId, provider, onClose }: Props) {
               <div>
                 <h3 className="font-semibold text-slate-100">Project files</h3>
                 <p className="mt-1 text-xs text-slate-400">
-                  Index the latest saved CODE artifact. Re-index when the files change.
+                  Queue indexing for the latest saved CODE artifact. Re-index when the files change.
                 </p>
               </div>
               <button
@@ -254,9 +337,78 @@ export function KnowledgeBasePanel({ projectId, provider, onClose }: Props) {
                 disabled={working}
                 className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
               >
-                {working ? "Working..." : "Index project files"}
+                {working ? "Queuing..." : "Queue project indexing"}
               </button>
             </div>
+          </section>
+
+          <section className="space-y-3 rounded-xl border border-slate-800 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold text-slate-100">
+                  Indexing jobs ({jobs.length})
+                </h3>
+                <p className="mt-1 text-xs text-slate-400">
+                  Imports run in the background. Queued jobs can be cancelled;
+                  failed jobs can be retried.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadJobs()}
+                className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500"
+              >
+                Refresh jobs
+              </button>
+            </div>
+            {!jobs.length && (
+              <p className="text-sm text-slate-500">No indexing jobs yet.</p>
+            )}
+            {jobs.map((job) => (
+              <article
+                key={job.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-slate-900 p-3"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-200">
+                    {job.status} · job {job.id.slice(0, 8)}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Created {new Date(job.createdAt).toLocaleString()}
+                    {job.finishedAt
+                      ? ` · Finished ${new Date(job.finishedAt).toLocaleString()}`
+                      : ""}
+                  </p>
+                  {job.error && (
+                    <p className="mt-2 break-words text-xs text-red-300">
+                      {job.error}
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  {job.status === "FAILED" && (
+                    <button
+                      type="button"
+                      onClick={() => void retryJob(job.id)}
+                      disabled={working}
+                      className="rounded-md border border-indigo-500/50 px-2.5 py-1.5 text-xs text-indigo-200 disabled:opacity-50"
+                    >
+                      Retry
+                    </button>
+                  )}
+                  {job.status === "QUEUED" && (
+                    <button
+                      type="button"
+                      onClick={() => void cancelJob(job.id)}
+                      disabled={working}
+                      className="rounded-md border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))}
           </section>
 
           <div className="grid gap-4 lg:grid-cols-2">
@@ -373,12 +525,14 @@ export function KnowledgeBasePanel({ projectId, provider, onClose }: Props) {
               </button>
             </div>
             {sources.some(
-              (source) => source.embeddingProvider !== provider,
+              (source) =>
+                source.embeddingProvider !== provider ||
+                (embeddingModel && source.embeddingModel !== embeddingModel),
             ) && (
               <p className="text-xs leading-5 text-amber-200/80">
-                Some sources were embedded with another provider. Full-text
-                search still includes them; re-index with {provider} to enable
-                semantic search for those sources.
+                Some sources use a different embedding provider or model.
+                Full-text search still includes them; re-index with {provider}
+                to enable semantic search for those sources.
               </p>
             )}
             {!loading && !sources.length && (

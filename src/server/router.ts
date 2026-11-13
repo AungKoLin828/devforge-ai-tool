@@ -209,7 +209,15 @@ export async function handleApi(req: Request) {
         );
       }
 
-      const token = await exchange(code, oauthConfig);
+      let token: string;
+      try {
+        token = await exchange(code, oauthConfig);
+      } catch (cause) {
+        const message =
+          cause instanceof Error ? cause.message : "GitHub token exchange failed.";
+        console.warn("GitHub OAuth token exchange failed", message);
+        return error(message, message.startsWith("Could not connect") ? 502 : 400);
+      }
       const profile = await githubUser(token);
       const user = await upsertGithubUser(token, profile);
 
@@ -1002,6 +1010,12 @@ export async function handleApi(req: Request) {
     ) {
       message =
         "The local server timed out connecting to Supabase PostgreSQL. Verify that your network, VPN, and firewall allow outbound TCP to the Supabase database on the port in DATABASE_URL (usually 5432 for the session pooler or 6543 for the transaction pooler), then run `npm run db:check`.";
+    } else if (
+      message.startsWith("Could not connect to GitHub API") ||
+      message.startsWith("Could not connect to GitHub's OAuth service") ||
+      message.startsWith("Could not complete the GitHub API request")
+    ) {
+      return error(message, 502);
     } else if (!originalMessage) {
       message = `The database request failed${code ? ` (${code})` : ""}. Run \`npm run db:check\` to verify the local database connection and schema.`;
     }

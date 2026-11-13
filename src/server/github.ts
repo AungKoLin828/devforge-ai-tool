@@ -1,6 +1,9 @@
 import { prisma } from "./db.js";
 import { decrypt, encrypt } from "./crypto.js";
-import { fetchGitHubJson } from "./github-http.js";
+import {
+  exchangeGitHubOAuthCode,
+  fetchGitHubJson,
+} from "./github-http.js";
 
 // Require deployment variables at the point where the related flow is used.
 const required = (n: string) => {
@@ -75,18 +78,7 @@ export function githubLoginUrl(state: string, config: GithubOAuthConfig) {
 
 /** Exchange a one-time OAuth code for a GitHub access token. */
 export async function exchange(code: string, config: GithubOAuthConfig) {
-  const r = await fetch("https://github.com/login/oauth/access_token", {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
-      code,
-    }),
-  });
-  const d = (await r.json()) as any;
-  if (!r.ok || !d.access_token) throw new Error("GitHub token exchange failed");
-  return d.access_token as string;
+  return exchangeGitHubOAuthCode(code, config);
 }
 
 /** Fetch the authenticated GitHub profile and primary verified email. */
@@ -190,25 +182,13 @@ async function githubApi<T>(
   endpoint: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const response = await fetch(`https://api.github.com${endpoint}`, {
+  return fetchGitHubJson<T>(endpoint, {
     ...init,
-    redirect: "error",
     headers: {
-      Accept: "application/vnd.github+json",
       Authorization: `Bearer ${token}`,
-      "X-GitHub-Api-Version": "2022-11-28",
       ...(init.headers || {}),
     },
   });
-  const result = (await response.json().catch(() => ({}))) as {
-    message?: string;
-  };
-  if (!response.ok) {
-    const detail =
-      typeof result.message === "string" ? result.message : "Unknown GitHub error";
-    throw new Error(`GitHub API request failed (${response.status}): ${detail}`);
-  }
-  return result as T;
 }
 
 type GitHubTreeResponse = {

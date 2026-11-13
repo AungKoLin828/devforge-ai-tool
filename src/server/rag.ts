@@ -18,6 +18,7 @@ import {
 import { fetchGitHubKnowledgeFiles } from "./github.js";
 import { fetchPublicText } from "./knowledge-fetch.js";
 import { prisma } from "./db.js";
+import type { EffectiveRagSettings } from "./rag-config.js";
 import { owner } from "./project-access.js";
 
 const MAX_SOURCE_BYTES = 512 * 1024;
@@ -753,6 +754,7 @@ export async function searchKnowledge(
   userId: string,
   queryValue: unknown,
   provider: Provider,
+  settings?: EffectiveRagSettings,
 ) {
   await owner(projectId, userId);
   if (typeof queryValue !== "string" || !queryValue.trim() || queryValue.length > 4000) {
@@ -853,7 +855,26 @@ export async function searchKnowledge(
   const semanticRanked: RankedKnowledge<SearchChunk>[] = semantic.map(
     (item, index) => ({ item: item.item, rank: index + 1 }),
   );
-  const results = reciprocalRankFusion(lexicalRanked, semanticRanked, 5).map(
+  const strategy = settings?.retrievalStrategy ?? "hybrid";
+  const topK = settings?.maxContextChunks ?? 5;
+  const minSimilarity = settings?.minSimilarity ?? 0;
+  const filteredSemantic = settings
+    ? semantic.filter((entry) => entry.score >= minSimilarity)
+    : semantic;
+  const results = (
+    settings && !settings.enableRrf
+      ? (strategy === "keyword"
+          ? lexicalRanked
+          : strategy === "vector"
+            ? filteredSemantic
+            : reciprocalRankFusion(lexicalRanked, filteredSemantic, topK)
+        ).slice(0, topK)
+      : reciprocalRankFusion(
+          strategy === "keyword" ? [] : lexicalRanked,
+          strategy === "vector" ? [] : filteredSemantic,
+          topK,
+        )
+  ).map(
     (chunk) => ({
       id: chunk.id,
       sourceName: chunk.sourceName,

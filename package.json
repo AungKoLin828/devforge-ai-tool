@@ -16,6 +16,8 @@
     "test:auth": "node --import tsx --test tests/auth/github-http.test.ts",
     "test:ai": "node --import tsx --test tests/ai/provider-routing.test.ts",
     "test:rag": "node --import tsx --test tests/rag/engine.test.ts",
+    "test:rag-config": "node --import tsx --test tests/rag/config.test.ts",
+    "test:api": "node --import tsx --test tests/api/health.test.ts",
     "set-admin": "node scripts/set-admin.mjs",
     "lint": "tsc --noEmit",
     "agent:dev": "tsx agent/src/index.ts"

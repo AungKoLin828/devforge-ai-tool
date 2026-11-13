@@ -423,3 +423,55 @@ model Pairing {
 
   @@index([expiresAt])
 }
+
+/** Global admin-controlled RAG settings (one row, singleton). */
+model RagGlobalSettings {
+  id                        String   @id @default(cuid())
+  enabled                   Boolean  @default(true)
+  retrievalStrategy         String   @default("hybrid")
+  enableGlobalKnowledge     Boolean  @default(true)
+  enablePersonalKnowledge   Boolean  @default(true)
+  enableProjectKnowledge    Boolean  @default(true)
+  enableWorkspaceKnowledge  Boolean  @default(true)
+  enableCitations           Boolean  @default(true)
+  enableRagLogging          Boolean  @default(true)
+  fallbackWithoutRag        Boolean  @default(true)
+  enableRagEvaluation       Boolean  @default(true)
+  embeddingProvider         String   @default("OPENROUTER")
+  embeddingModel            String   @default("openai/text-embedding-3-small")
+  embeddingDimensions       Int      @default(1536)
+  embeddingBatchSize        Int      @default(32)
+  embeddingRequestTimeoutMs Int      @default(45000)
+  embeddingRetryCount       Int      @default(2)
+  retrievalStrategyTopK     Int      @default(20)
+  vectorSearchEnabled       Boolean  @default(true)
+  keywordSearchEnabled      Boolean  @default(true)
+  minSimilarity             Float    @default(0.65)
+  maxContextChunks          Int      @default(5)
+  maxContextTokens          Int      @default(8000)
+  enableMetadataFiltering   Boolean  @default(true)
+  enableRrf                 Boolean  @default(true)
+  rrfK                      Int      @default(60)
+  enableReranking           Boolean  @default(false)
+  contextDeduplication      Boolean  @default(true)
+  includeSourceMetadata     Boolean  @default(true)
+  includeFilePath           Boolean  @default(true)
+  includeLineNumbers        Boolean  @default(true)
+  noResultBehavior          String   @default("fallback")
+  updatedAt                 DateTime @updatedAt
+  updatedByUserId           String?
+}
+/** Task-specific RAG profile overrides (one row per AI task). */
+model RagTaskProfile {
+  id                 String   @id @default(cuid())
+  task               String   @unique
+  enabled            Boolean  @default(true)
+  retrievalStrategy  String   @default("hybrid")
+  topK               Int      @default(20)
+  maxContextChunks   Int      @default(5)
+  minSimilarity      Float    @default(0.65)
+  maxContextTokens   Int      @default(8000)
+  enableReranking    Boolean  @default(false)
+  enableCitations    Boolean  @default(true)
+  updatedAt          DateTime @updatedAt
+}

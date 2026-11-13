@@ -31,6 +31,7 @@ import {
 } from "./features/workspace/buildDiagnostics";
 import { ConnectExtension } from "./features/local-agent/ConnectExtension";
 import { KnowledgeBasePanel } from "./features/knowledge-base/KnowledgeBasePanel";
+import { AdminRagPanel } from "./features/admin/AdminRagPanel";
 
 // Shared Codevia AI wordmark used by the landing page, guide, and dashboard.
 function BrandWordmark() {
@@ -4078,6 +4079,7 @@ function AdminPage({ user }: { user: User }) {
   const [actingUserId, setActingUserId] = useState<string>("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [adminTab, setAdminTab] = useState<"users" | "rag">("users");
   const [search, setSearch] = useState("");
 
   async function load() {
@@ -4156,6 +4158,24 @@ function AdminPage({ user }: { user: User }) {
         </div>
       </header>
       <main className="max-w-6xl mx-auto px-6 py-6">
+        <div className="mb-4 flex gap-2">
+          <button
+            className={adminTab === "users" ? "rounded border border-slate-600 px-3 py-1.5 text-sm bg-slate-800" : "rounded border border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-800"}
+            onClick={() => setAdminTab("users")}
+          >
+            Users
+          </button>
+          <button
+            className={adminTab === "rag" ? "rounded border border-slate-600 px-3 py-1.5 text-sm bg-slate-800" : "rounded border border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-800"}
+            onClick={() => setAdminTab("rag")}
+          >
+            RAG Configuration
+          </button>
+        </div>
+        {adminTab === "rag" ? (
+          <AdminRagPanel />
+        ) : (
+        <>
         {errorText && (
           <div
             role="alert"
@@ -4300,6 +4320,8 @@ function AdminPage({ user }: { user: User }) {
             </tbody>
           </table>
         </div>
+              </>
+        )}
       </main>
     </div>
   );
@@ -4353,7 +4375,13 @@ function Root() {
   if (user) {
     // Non-admins visiting /admin are redirected to the workspace; the admin
     // API itself also rejects non-admin roles with 403.
-    if (isAdminPage)
+    if (window.location.pathname === "/admin/rag")
+    return (user as User).role === "ADMIN" ? (
+      <AdminRagPanel />
+    ) : (
+      <App user={user} />
+    );
+  if (isAdminPage)
       return (user as User).role === "ADMIN" ? (
         <AdminPage user={user} />
       ) : (

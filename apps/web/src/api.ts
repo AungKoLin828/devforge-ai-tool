@@ -33,6 +33,68 @@ export type AdminStats = {
   activeSessions: number;
 };
 
+/** Global admin-controlled RAG configuration. */
+export type RagAdminSettings = {
+  id: string;
+  enabled: boolean;
+  retrievalStrategy: string;
+  enableGlobalKnowledge: boolean;
+  enablePersonalKnowledge: boolean;
+  enableProjectKnowledge: boolean;
+  enableWorkspaceKnowledge: boolean;
+  enableCitations: boolean;
+  enableRagLogging: boolean;
+  fallbackWithoutRag: boolean;
+  enableRagEvaluation: boolean;
+  embeddingProvider: string;
+  embeddingModel: string;
+  embeddingDimensions: number;
+  embeddingBatchSize: number;
+  embeddingRequestTimeoutMs: number;
+  embeddingRetryCount: number;
+  retrievalStrategyTopK: number;
+  vectorSearchEnabled: boolean;
+  keywordSearchEnabled: boolean;
+  minSimilarity: number;
+  maxContextChunks: number;
+  maxContextTokens: number;
+  enableMetadataFiltering: boolean;
+  enableRrf: boolean;
+  rrfK: number;
+  enableReranking: boolean;
+  contextDeduplication: boolean;
+  includeSourceMetadata: boolean;
+  includeFilePath: boolean;
+  includeLineNumbers: boolean;
+  noResultBehavior: string;
+  updatedAt: string;
+};
+/** Task-specific RAG profile override. */
+export type RagTaskProfile = {
+  id: string;
+  task: string;
+  enabled: boolean;
+  retrievalStrategy: string;
+  topK: number;
+  maxContextChunks: number;
+  minSimilarity: number;
+  maxContextTokens: number;
+  enableReranking: boolean;
+  enableCitations: boolean;
+};
+/** Provider status shown by the monitoring / system health view. */
+export type HealthProvider = {
+  provider: "OPENROUTER" | "OPENAI" | "CUSTOM";
+  label: string;
+  envConfigured: boolean;
+};
+/** Response of GET /api/health used by the system health monitor. */
+export type SystemHealth = {
+  success: true;
+  status: "ok" | "degraded";
+  database: string;
+  providers: HealthProvider[];
+};
 export type AIProvider = "OPENROUTER" | "OPENAI" | "CUSTOM";
 
 export type AIProviderInfo = {
@@ -537,6 +599,8 @@ async function request<T>(url: string, init: RequestInit = {}) {
 
 // Browser-facing API surface grouped with the local-agent operations below.
 export const api = {
+  // Public system health check for monitoring (backend, database, providers).
+  health: () => request<SystemHealth>("/api/health"),
   // Session and GitHub OAuth-backed repository operations.
   me: () => request<{ success: true; user: User }>("/api/auth/me"),
   // Admin page: manage every user of the web app and VS Code extension.
@@ -555,6 +619,31 @@ export const api = {
       `/api/admin/users/${encodeURIComponent(id)}`,
       { method: "PATCH", body: JSON.stringify(patch) },
     ),
+  // Admin RAG configuration endpoints.
+  adminRagSettings: () =>
+    request<{ success: true; settings: RagAdminSettings }>("/api/admin/rag/settings"),
+  adminUpdateRagSettings: (patch: Partial<RagAdminSettings>) =>
+    request<{ success: true; settings: RagAdminSettings }>("/api/admin/rag/settings", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+  adminRagTaskProfiles: () =>
+    request<{ success: true; profiles: RagTaskProfile[] }>("/api/admin/rag/task-profiles"),
+  adminUpdateRagTaskProfile: (task: string, patch: Partial<RagTaskProfile>) =>
+    request<{ success: true; profile: RagTaskProfile }>(
+      `/api/admin/rag/task-profiles/${encodeURIComponent(task)}`,
+      { method: "PUT", body: JSON.stringify(patch) },
+    ),
+  adminRagTestQuery: (input: { projectId: string; query: string; provider?: string; task?: string }) =>
+    request<{
+      success: true;
+      config: unknown;
+      latencyMs: number;
+      results: RagCitation[];
+    }>("/api/admin/rag/test-query", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   adminDeleteUser: (id: string) =>
     request<{ success: true }>(
       `/api/admin/users/${encodeURIComponent(id)}`,

@@ -9,6 +9,7 @@ import {
 } from "./ai.js";
 import { searchKnowledge } from "./rag.js";
 import { owner } from "./project-access.js";
+import { getEffectiveRagSettings } from "./rag-config.js";
 export { owner } from "./project-access.js";
 
 const BACKGROUND_FUNCTION_PATH =
@@ -407,12 +408,16 @@ export async function chatWithProject(
     .filter(Boolean)
     .join("\n\n");
 
-  const { results: citations } = await searchKnowledge(
-    projectId,
-    userId,
-    messages[messages.length - 1].content,
-    provider,
-  );
+  const ragConfig = await getEffectiveRagSettings("chat");
+  const { results: citations } = ragConfig.enabled
+    ? await searchKnowledge(
+        projectId,
+        userId,
+        messages[messages.length - 1].content,
+        provider,
+        ragConfig,
+      )
+    : { results: [] };
   const knowledgeContext = citations
     .map(
       (citation, index) =>
